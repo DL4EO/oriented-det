@@ -55,3 +55,24 @@ git push origin v0.1.0
 ```
 
 The tag push starts `publish.yml` and uploads to PyPI.
+
+## `pages.yml`
+
+Builds the MkDocs site and deploys it to GitHub Pages.
+
+| Trigger | Action |
+|---------|--------|
+| Push to `main` touching docs/source/docs workflow files | Build `site/` and publish to Pages |
+| Manual **workflow_dispatch** | Build and publish on demand |
+
+### One-time setup
+
+In **Settings → Pages**, set:
+
+- **Source:** GitHub Actions
+
+The workflow publishes to:
+
+```text
+https://dl4eo.github.io/oriented-det/
+```

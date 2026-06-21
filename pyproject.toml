@@ -82,7 +82,7 @@ all = [
 
 [project.urls]
 Homepage = "https://github.com/DL4EO/oriented-det"
-Documentation = "https://github.com/DL4EO/oriented-det#readme"
+Documentation = "https://dl4eo.github.io/oriented-det/"
 Repository = "https://github.com/DL4EO/oriented-det"
 Issues = "https://github.com/DL4EO/oriented-det/issues"
 "Bug Tracker" = "https://github.com/DL4EO/oriented-det/issues"

@@ -25,13 +25,17 @@ Output is in `site/`.
 
 Then open http://127.0.0.1:8000 in your browser.
 
-## Deploy (e.g. GitHub Pages)
+## Deploy (GitHub Pages)
 
-```bash
-mkdocs gh-deploy
+The public site is deployed by `.github/workflows/pages.yml`.
+
+One-time repository setup: in **Settings → Pages**, set **Source** to **GitHub Actions**.
+
+After that, pushes to `main` that touch docs/source files publish to:
+
+```text
+https://dl4eo.github.io/oriented-det/
 ```
-
-This pushes the built site to the `gh-pages` branch.
 
 ## Structure
 

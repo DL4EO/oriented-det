@@ -1,7 +1,7 @@
 site_name: OrientedDet Documentation
 site_description: A lightweight, modern PyTorch library for rotated object detection
 site_author: Jeff Faudi, DL4EO
-site_url: https://github.com/DL4EO/oriented-det
+site_url: https://dl4eo.github.io/oriented-det/
 
 repo_name: DL4EO/oriented-det
 repo_url: https://github.com/DL4EO/oriented-det

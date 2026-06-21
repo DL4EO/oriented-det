@@ -54,7 +54,7 @@ Hands-on installation and a minimal walkthrough are in [Getting Started](getting
 
 ## Installation
 
-From PyPI (when published):
+From PyPI:
 
 ```bash
 pip install oriented-det

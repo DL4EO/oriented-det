@@ -56,7 +56,7 @@ uv pip install -r requirements.txt
 uv pip install -e .
 ```
 
-From PyPI (when published):
+From PyPI:
 
 ```bash
 pip install oriented-det

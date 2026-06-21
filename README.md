@@ -32,7 +32,7 @@ uv pip install -r requirements.txt
 uv pip install -e .
 ```
 
-- From PyPI (when published): `pip install oriented-det`
+- From PyPI: `pip install oriented-det`
 - For development and tests: `uv pip install -e ".[dev]"`
 - For **macOS Apple Silicon** or **CPU-only**, see [Installation](docs/getting-started/installation.md).
 - Verify: `pytest tests/test_geometry.py tests/test_iou.py tests/test_nms.py`
@@ -229,7 +229,7 @@ Create a [GitHub Release](https://github.com/DL4EO/oriented-det/releases) from t
 
 #### 6. After publish
 
-- Change install docs from “when published” to `pip install oriented-det`.
+- Verify `pip install oriented-det` in a clean environment.
 - Users still install **PyTorch** separately for their CUDA/CPU platform.
 
 ### Makefile targets
