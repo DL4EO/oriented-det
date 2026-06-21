@@ -1,0 +1,21 @@
+{
+  "dataset": {
+    "data_root": "/path/to/data/DOTA-v1.0-tiled",
+    "train_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/train",
+    "val_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/val",
+    "overlap": 200,
+    "difficult_strategy": "keep"
+  },
+  "preprocessing": {
+    "normalize_mean": [
+      0.307941,
+      0.311986,
+      0.297761
+    ],
+    "normalize_std": [
+      0.192315,
+      0.187769,
+      0.181551
+    ]
+  }
+}

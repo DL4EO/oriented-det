@@ -1,0 +1,45 @@
+# Documentation (MkDocs)
+
+This folder is the source for the **MkDocs** documentation site. It contains the full user guide, API reference (generated from docstrings), and examples.
+
+For project overview, installation, and quick start, see the [repository README](https://github.com/DL4EO/oriented-det/blob/main/README.md).
+
+## Build and serve
+
+From the repository root (installs MkDocs into the active environment if missing):
+
+```bash
+make docs          # build → site/
+make docs-serve    # live preview at http://127.0.0.1:8000
+```
+
+Or install dependencies once and run MkDocs directly:
+
+```bash
+make docs-deps     # uv pip install -e ".[docs]"
+python -m mkdocs build
+python -m mkdocs serve
+```
+
+Output is in `site/`.
+
+Then open http://127.0.0.1:8000 in your browser.
+
+## Deploy (e.g. GitHub Pages)
+
+```bash
+mkdocs gh-deploy
+```
+
+This pushes the built site to the `gh-pages` branch.
+
+## Structure
+
+- **docs/** — Source Markdown (this folder)
+- **user-guide/configuration.md** — Canonical JSON training config reference
+- **documentation-audit.md** — Doc alignment status log
+- **code-analysis-report.md** — Deep code/doc analysis (2026-06-15): inventory, validation, findings
+- **mkdocs.yml** — MkDocs configuration and nav
+- **site/** — Generated HTML (created by `mkdocs build`)
+
+API pages are generated from Python docstrings via `mkdocstrings`. See [documentation.md](documentation.md) for more on writing and building the docs.

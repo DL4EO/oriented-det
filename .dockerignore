@@ -1,0 +1,23 @@
+# Keep Docker build context small and avoid leaking local artifacts.
+.git
+.github
+.cursor
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+coverage.xml
+
+runs
+predictions
+temp
+deploy/logs/*.log
+
+# Large local datasets / notebooks (not needed for pip install -e .)
+*.ipynb
+.ipynb_checkpoints
+
+# Note: do NOT exclude deploy/app/weights/*.pth — publish copies the checkpoint there before `docker build`.

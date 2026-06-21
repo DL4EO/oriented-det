@@ -1,0 +1,33 @@
+{
+  "training": {
+    "num_epochs": 12,
+    "learning_rate": 0.02,
+    "momentum": 0.9,
+    "weight_decay": 0.0001,
+    "use_amp": false,
+    "gradient_accumulation_steps": 1,
+    "max_grad_norm": 5.0,
+    "lr_scheduler_step_epochs": 8,
+    "lr_scheduler_milestones": [8, 11],
+    "lr_scheduler_gamma": 0.1,
+    "lr_warmup_steps": 500,
+    "lr_scaling_with_accumulation": "linear",
+    "use_lr_param_groups": false
+    },
+  "evaluation": {
+    "score_threshold": 0.3,
+    "iou_threshold": 0.5,
+    "compute_map_final": true
+  },
+  "data_loader": {
+    "batch_size": 50,
+    "num_workers": 4,
+    "shuffle": true,
+    "pin_memory": true
+  },
+  "loss": {
+    "loss_type": "cross_entropy"
+  },
+  "enable_albumentation": false,
+  "enable_profiling": false
+}

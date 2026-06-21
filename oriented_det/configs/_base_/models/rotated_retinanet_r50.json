@@ -1,0 +1,30 @@
+{
+  "model_type": "rotated_retinanet",
+  "model": {
+    "backbone": "resnet50",
+    "pretrained_backbone": true,
+    "trainable_layers": 5,
+    "anchor_scales": [8],
+    "anchor_ratios": [0.5, 1.0, 2.0],
+    "target_means": [0.0, 0.0, 0.0, 0.0, 0.0],
+    "target_stds": [1.0, 1.0, 1.0, 1.0, 1.0],
+    "roi_loss_type": "focal",
+    "roi_focal_alpha": 0.25,
+    "roi_focal_gamma": 2.0,
+    "roi_norm_factor": null,
+    "roi_edge_swap": true,
+    "use_hbb_for_matching": false,
+    "rpn_min_size": 2,
+    "rpn_pre_nms_top_n": 6000,
+    "rpn_post_nms_top_n": 3000,
+    "max_detections_per_image": 3000
+  },
+  "tensorboard": {
+    "log_debug_anchors_proposals": true
+  },
+  "loss": {
+    "loss_type": "focal",
+    "focal_alpha": 0.25,
+    "focal_gamma": 2.0
+  }
+}

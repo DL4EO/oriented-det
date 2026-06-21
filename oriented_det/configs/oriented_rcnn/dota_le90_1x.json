@@ -1,0 +1,121 @@
+{
+  "_base_": [
+    "../_base_/datasets/dota_le90.json",
+    "../_base_/models/oriented_rcnn_r50.json",
+    "../_base_/schedules/1x.json",
+    "../_base_/preprocessing.json"
+  ],
+  "enable_albumentation": false,
+  "data_loader": {
+    "batch_size": 2,
+    "num_workers": 4,
+    "shuffle": true,
+    "pin_memory": true
+  },
+  "checkpoint": {
+    "load_from_checkpoint": null,
+    "load_from_experiment": null,
+    "discover_previous_run": false,
+    "resume_from_checkpoint_epoch": false,
+    "load_optimizer_state": false,
+    "load_scheduler_state": false,
+    "start_epoch": 0,
+    "best_metric": "mAP",
+    "higher_is_better": true
+  },
+  "training": {
+    "num_epochs": 12,
+    "learning_rate": 0.005,
+    "momentum": 0.9,
+    "weight_decay": 0.0001,
+    "use_amp": false,
+    "gradient_accumulation_steps": 1,
+    "max_grad_norm": 35.0,
+    "lr_scheduler_milestones": [8, 11],
+    "lr_scheduler_gamma": 0.1,
+    "lr_warmup_steps": 500,
+    "lr_scaling_with_accumulation": "linear",
+    "lr_scale_with_world_size": false,
+    "use_lr_param_groups": false
+  },
+  "loss": {
+    "loss_type": "cross_entropy",
+    "label_smoothing": 0.0
+  },
+  "dataset": {
+    "train_tiles_dirs": [
+      "/path/to/data/DOTA-v1.0-tiled/train",
+      "/path/to/data/DOTA-v1.0-tiled/val"
+    ],
+    "val_tiles_dirs": [
+      "/path/to/data/DOTA-v1.0-tiled/val"
+    ],
+    "filter_empty_gt": true,
+    "overlap": 200,
+    "difficult_strategy": "keep",
+    "ignore_labels": [
+      "container-crane",
+      "airport",
+      "helipad"
+    ]
+  },
+  "preprocessing": {
+    "enable_flip_diagonal": true
+  },
+  "evaluation": {
+    "score_threshold": 0.05,
+    "iou_threshold": 0.5,
+    "compute_map_final": false,
+    "compute_map_every_n_epochs": 4,
+    "extended_gt_metrics": true
+  },
+  "tensorboard": {
+    "log_debug_anchors_proposals": true,
+    "vis_score_threshold": 0.5
+  },
+  "model": {
+    "pretrained_backbone": true,
+    "frozen_stages": 1,
+    "inference_pre_nms_score_threshold": 0.05,
+    "rpn_pre_nms_top_n": 2000,
+    "rpn_post_nms_top_n": 2000,
+    "rpn_min_size": 0,
+    "rpn_nms_threshold": 0.8,
+    "final_nms_iou_threshold": 0.1,
+    "roi_box_reg_angle_weight": 1.0,
+    "roi_box_reg_iou_weight": 0.1,
+    "roi_box_reg_iou_loss_type": "probiou",
+    "roi_box_reg_probiou_mode": "l1",
+    "final_nms_use_cpu": true,
+    "nms_class_agnostic": false,
+    "max_detections_per_image": 100,
+    "rpn_positive_iou_threshold": 0.7,
+    "rpn_negative_iou_threshold": 0.3,
+    "rpn_min_pos_iou": 0.3,
+    "rpn_match_low_quality": true,
+    "roi_positive_iou_threshold": 0.5,
+    "roi_negative_iou_threshold": 0.5,
+    "roi_match_low_quality": false,
+    "roi_batch_size_per_image": 512,
+    "use_hbb_for_matching": true,
+    "add_gt_as_proposals": true,
+    "roi_proj_xy": true,
+    "roi_edge_swap": true,
+    "roi_norm_factor": null,
+    "roi_inference_top_class_only": true
+  },
+  "production": {
+    "score_threshold": 0.05,
+    "inference_pre_nms_score_threshold": 0.05,
+    "final_nms_iou_threshold": 0.5,
+    "rpn_pre_nms_top_n": 6000,
+    "rpn_post_nms_top_n": 6000,
+    "max_detections_per_image": 3000,
+    "roi_inference_top_class_only": true,
+    "overlap_pixels": 200,
+    "ignore_margin_pixels": 0,
+    "use_first_image_canvas": false,
+    "stick_to_model_canvas": true,
+    "final_nms_use_cpu": true
+  }
+}

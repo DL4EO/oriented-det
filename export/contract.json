@@ -1,0 +1,51 @@
+{
+  "version": 2,
+  "description": "Inference export contract for oriented-det (ONNX + TensorFlow/Keras detect bundle).",
+  "input": {
+    "name": "images",
+    "dtype": "float32",
+    "layout": "NCHW",
+    "value_range": "[0, 1] RGB matching training preprocess (see TrainingExperimentConfig.preprocessing)",
+    "spatial": "Fixed H×W at export time; batch size 1 for faster_rcnn_pre_nms."
+  },
+  "export_modes": {
+    "backbone": {
+      "models": ["rotated_retinanet", "oriented_rcnn", "rotated_faster_rcnn"],
+      "onnx_outputs": "Tuple of FPN feature maps in stable key order (see BackboneExportWrapper).",
+      "postprocess": "None in ONNX; heads and decoding remain PyTorch or separate TF code."
+    },
+    "retinanet_heads": {
+      "models": ["rotated_retinanet"],
+      "onnx_outputs": "Interleaved per level: level{i}_cls_logits, level{i}_bbox_pred (i from 0).",
+      "postprocess": "Anchor grid, decode_oriented_boxes, score filter, rotated NMS — not in this ONNX."
+    },
+    "faster_rcnn_pre_nms": {
+      "models": ["rotated_faster_rcnn"],
+      "onnx_outputs": {
+        "pre_nms_boxes": "[P, 5] oriented boxes (cx,cy,w,h,angle), P = max_pre_nms_candidates",
+        "pre_nms_scores": "[P]",
+        "pre_nms_labels": "[P] 1-based foreground ids",
+        "pre_nms_count": "scalar int64 valid count <= P"
+      },
+      "postprocess": "Exact CPU rotated NMS + production score_threshold in TF/Keras bundle (export/scripts/build_faster_rcnn_savedmodel.py)."
+    }
+  },
+  "detect_bundle": {
+    "files": ["keras_model.keras", "export_meta.json", "model.onnx (sibling of meta)"],
+    "outputs": {
+      "detections": "[max_detections, 7] as (cx,cy,w,h,angle,score,label)",
+      "num_detections": "scalar int32"
+    },
+    "load": "tf.keras.models.load_model(..., custom_objects={'FasterRCNNDetectLayer': ...})"
+  },
+  "nms": {
+    "in_onnx": false,
+    "in_keras_bundle": true,
+    "pytorch_reference": "oriented_det.ops.rotated_ops rotated_nms (force_cpu for deploy parity)"
+  },
+  "notes": [
+    "faster_rcnn_pre_nms pads RPN proposals to fixed P before ROI align for traceable ONNX.",
+    "onnx2tf SavedModel for this graph may fail on ScatterND; the detect bundle uses ONNX Runtime inside Keras.",
+    "TFLite full detect is not supported while NMS remains in Python."
+  ]
+}

@@ -1,0 +1,11 @@
+# Installed after: pip install torch torchvision (cu121), before: pip install -e .
+# Sanic API + heavy inference imports (tools/save_predictions, opencv)
+numpy<2
+loguru>=0.6.0
+websockets>=10.4,<11
+sanic==22.6.2
+sanic-openapi==21.12.0
+geojson>=2.5.0
+shapely>=2.0.0
+opencv-python-headless>=4.8.0
+tqdm>=4.65.0

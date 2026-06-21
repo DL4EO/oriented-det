@@ -1,0 +1,61 @@
+# Build and upload oriented-det to PyPI or TestPyPI.
+#
+# Preferred auth: PyPI Trusted Publishing (OIDC) — see .github/workflows/README.md.
+# Fallback: repository secrets PYPI_API_TOKEN / TESTPYPI_API_TOKEN.
+#
+# Triggers:
+#   - Push tag v*.*.*  → production PyPI (environment: pypi)
+#   - workflow_dispatch → choose testpypi (default) or pypi
+
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Upload destination
+        type: choice
+        options:
+          - testpypi
+          - pypi
+        default: testpypi
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ github.event_name == 'push' && 'pypi' || inputs.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Check vendored configs
+        run: make check-configs
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Validate distribution metadata
+        run: twine check dist/*
+
+      - name: Publish to TestPyPI
+        if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+      - name: Publish to PyPI
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+        uses: pypa/gh-action-pypi-publish@release/v1

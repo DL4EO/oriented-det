@@ -1,0 +1,21 @@
+{
+  "augmentation": {
+    "p_brightness_contrast": 0.5,
+    "brightness_limit": 0.2,
+    "contrast_limit": 0.2,
+    "p_gamma": 0.3,
+    "gamma_limit": [
+      80,
+      120
+    ],
+    "p_noise": 0.2,
+    "gauss_noise_var_limit": [
+      10.0,
+      50.0
+    ],
+    "p_blur": 0.2,
+    "blur_limit": 3,
+    "p_clahe": 0.3,
+    "clahe_clip_limit": 4.0
+  }
+}

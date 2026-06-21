@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oriented-det"
+version = "0.1.0"
+description = "A lightweight, modern PyTorch library for rotated object detection in aerial and satellite imagery"
+readme = "README.md"
+requires-python = ">=3.10"
+# SPDX expression (setuptools prefers this over a table; avoids upcoming deprecations)
+license = "Apache-2.0"
+authors = [
+    {name = "Jeff Faudi"},
+    {name = "DL4EO"},
+]
+maintainers = [
+    {name = "Jeff Faudi"},
+    {name = "DL4EO"},
+]
+keywords = [
+    "computer-vision",
+    "object-detection",
+    "rotated-detection",
+    "oriented-detection",
+    "pytorch",
+    "aerial-imagery",
+    "satellite-imagery",
+    "remote-sensing",
+    "dota",
+    "geospatial",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+]
+dependencies = [
+    "torch>=2.3.0",
+    "torchvision>=0.18.0",
+    "numpy<2",
+    "Pillow>=9.0",
+    "albumentations>=1.3.0",
+    "tqdm>=4.65.0",
+    "tensorboard>=2.10",
+    "matplotlib>=3.5.0",
+    "huggingface_hub>=0.20.0",
+    "shapely>=2.0.0",
+]
+
+[project.optional-dependencies]
+export = [
+    "onnx>=1.14.0",
+    "onnxruntime>=1.16.0",
+    "onnx2tf>=1.22.0",
+    "tensorflow>=2.14.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+    "build>=1.0",
+    "twine>=5.0",
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "mkdocstrings[python]>=0.23.0",
+    "pymdown-extensions>=10.0",
+]
+all = [
+    "oriented-det[dev]",
+]
+
+[project.urls]
+Homepage = "https://github.com/DL4EO/oriented-det"
+Documentation = "https://github.com/DL4EO/oriented-det#readme"
+Repository = "https://github.com/DL4EO/oriented-det"
+Issues = "https://github.com/DL4EO/oriented-det/issues"
+"Bug Tracker" = "https://github.com/DL4EO/oriented-det/issues"
+DL4EO = "https://dl4eo.com"
+
+[project.scripts]
+odet = "oriented_det.cli:main"
+
+[tool.setuptools]
+# Only ship the core library; export/ is in-repo tooling (not an installable top-level "export" package).
+[tool.setuptools.packages.find]
+include = ["oriented_det*", "tools*", "export*"]
+
+
+[tool.setuptools.package-data]
+# Include type stubs if present
+oriented_det = ["py.typed"]
+"oriented_det.pretrained" = ["manifest.json"]
+"oriented_det.configs" = ["**/*.json"]

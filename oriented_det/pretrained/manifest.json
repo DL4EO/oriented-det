@@ -1,0 +1,46 @@
+{
+  "repo_id": "dl4eo/oriented-det-pretrained",
+  "revision": "main",
+  "assets": {
+    "rotated_retinanet_dota_le90_1x": {
+      "filename": "rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.pth",
+      "sha256": "bb9a0bd262e1d1f567dc82d896b67ce74cf32bee149137d7734573545caaa63a",
+      "source_recipe": "configs/rotated_retinanet/dota_le90_1x.json",
+      "experiment_dir": "runs/rotated_retinanet/20260611-101135",
+      "eval_map50": 0.6414,
+      "eval_report": "predictions/20260615_030209/model_analysis_20260615_082152.md"
+    },
+    "rotated_retinanet_dota_le90_3x": {
+      "filename": "rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.pth",
+      "sha256": "8decc6f13b6611e403d4806d1f860ccb094132bde24f95d341b07e8e618cf566",
+      "source_recipe": "configs/rotated_retinanet/dota_le90_3x.json",
+      "experiment_dir": "runs/rotated_retinanet/20260612-121232",
+      "eval_map50": 0.7152,
+      "eval_report": "predictions/20260615_005855/model_analysis_20260615_023820.md"
+    },
+    "rotated_faster_rcnn_dota_le90_3x_ce": {
+      "filename": "rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.pth",
+      "sha256": "c077eeee68b761693d1444f15792a452997abbc561a3cc552316ac52c25a5eca",
+      "source_recipe": "configs/rotated_faster_rcnn/dota_le90_3x.json",
+      "experiment_dir": "runs/rotated_faster_rcnn/20260530-012517",
+      "eval_map50": 0.7558,
+      "eval_report": "predictions/20260615_042543/model_analysis_20260615_082325.md"
+    },
+    "rotated_faster_rcnn_dota_le90_3x": {
+      "filename": "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth",
+      "sha256": "6f8eb57c25b9705066e5d77cce45b9772c17247a8b7cfb7dd31314ae54cbf72e",
+      "source_recipe": "configs/rotated_faster_rcnn/dota_le90_3x.json",
+      "experiment_dir": "runs/rotated_faster_rcnn/20260604-083242",
+      "eval_map50": 0.7641,
+      "eval_report": "predictions/20260615_082332/model_analysis_20260615_100342.md"
+    },
+    "oriented_rcnn_dota_le90_1x": {
+      "filename": "oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.pth",
+      "sha256": "5b128e7294458076dd6884927e89e7ef5b6105485f78264c667862717117145f",
+      "source_recipe": "configs/oriented_rcnn/dota_le90_1x.json",
+      "experiment_dir": "runs/oriented_rcnn/20260616-030231",
+      "eval_map50": 0.7479,
+      "eval_report": "predictions/20260618_140030/model_analysis_20260618_175528.md"
+    }
+  }
+}

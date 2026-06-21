@@ -1,0 +1,5 @@
+{
+  "training": {
+    "use_amp": true
+  }
+}

@@ -1,0 +1,19 @@
+# Paths (relative to repo configs/) copied into oriented_det/configs/ for PyPI wheels.
+# Edit configs/ in the repo, then: make sync-configs
+# CI runs: make check-configs
+
+config.schema.json
+_base_/augmentation.json
+_base_/datasets/dota_le90.json
+_base_/models/rotated_faster_rcnn_r50.json
+_base_/models/oriented_rcnn_r50.json
+_base_/models/rotated_retinanet_r50.json
+_base_/schedules/1x.json
+_base_/fp16.json
+_base_/preprocessing.json
+rotated_faster_rcnn/dota_le90_1x.json
+rotated_faster_rcnn/dota_le90_3x.json
+oriented_rcnn/dota_le90_1x.json
+oriented_rcnn/dota_le90_3x.json
+rotated_retinanet/dota_le90_1x.json
+rotated_retinanet/dota_le90_3x.json

@@ -1,0 +1,99 @@
+site_name: OrientedDet Documentation
+site_description: A lightweight, modern PyTorch library for rotated object detection
+site_author: Jeff Faudi, DL4EO
+site_url: https://github.com/DL4EO/oriented-det
+
+repo_name: DL4EO/oriented-det
+repo_url: https://github.com/DL4EO/oriented-det
+edit_uri: edit/main/docs/
+
+# Internal maintainer notes (not part of the public site)
+exclude_docs: |
+  documentation-audit.md
+  code-analysis-report.md
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: dark
+      primary: blue
+      accent: blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.annotate
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Tools: getting-started/tools.md
+  - User Guide:
+    - Geometry: user-guide/geometry.md
+    - Operations: user-guide/operations.md
+    - Data Loading: user-guide/data.md
+    - Models: user-guide/models.md
+    - Configuration: user-guide/configuration.md
+    - Training: user-guide/training.md
+    - Utilities: user-guide/utils.md
+  - API Reference:
+    - Geometry API: api/geometry.md
+    - Operations API: api/ops.md
+    - Data API: api/data.md
+    - Models API: api/models.md
+    - Training API: api/train.md
+    - Utils API: api/utils.md
+  - Examples:
+    - Visualization: examples/visualization.md
+    - Training: examples/training.md
+    - Inference: examples/inference.md
+  - Contributing: contributing.md
+  - Documentation Guide: documentation.md
+  - Changelog: changelog.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [oriented_det]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_toc_entry: true
+
