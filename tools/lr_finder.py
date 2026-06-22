@@ -9,7 +9,7 @@ heuristics, the trace is truncated after the first divergence on **raw** loss
 that prefix plus the usual fastai trim. Single-GPU only.
 
 Usage:
-    python tools/lr_finder.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
+    python tools/lr_finder.py --config configs/oriented_rcnn/dota_le90_1x.json
     python tools/lr_finder.py --config configs/.../config.json --num-steps 150 --output lr_finder.png
     python tools/lr_finder.py --config configs/.../config.json --no-amp --restore
 

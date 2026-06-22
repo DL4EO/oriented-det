@@ -45,7 +45,7 @@ Run inference on image(s) using oriented-det **config + checkpoint**. Loads mode
 **Usage:**
 ```bash
 # Single image (output path optional)
-python tools/image_demo.py demo/demo.jpg configs/rotated_faster_rcnn/dota_le90_3x.json runs/.../checkpoints/best.pth --out-file result.jpg
+python tools/image_demo.py demo/demo.jpg configs/oriented_rcnn/dota_le90_1x.json runs/.../checkpoints/best.pth --out-file result.jpg
 
 # All images in a directory (writes to demo/out by default)
 python tools/image_demo.py demo configs/.../config.json runs/.../checkpoints/best.pth --out-dir demo/out
@@ -92,16 +92,16 @@ Complete training script for oriented object detection models. Uses JSON configu
 **Usage:**
 ```bash
 # Basic training with config file
-python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
+python tools/train.py --config configs/oriented_rcnn/dota_le90_1x.json
 
 # Override batch size
-python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json --batch-size 4
+python tools/train.py --config configs/oriented_rcnn/dota_le90_1x.json --batch-size 4
 
 # Enable mixed precision training
-python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json --use-amp
+python tools/train.py --config configs/oriented_rcnn/dota_le90_1x.json --use-amp
 
 # Disable mixed precision training
-python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json --no-amp
+python tools/train.py --config configs/oriented_rcnn/dota_le90_1x.json --no-amp
 ```
 
 For **checkpoints**, edit the JSON `checkpoint` section: `load_from_checkpoint`, `load_from_experiment`, `discover_previous_run`, `resume_from_checkpoint_epoch`, etc. See `configs/config.schema.json` and `oriented_det/train/README.md`.
@@ -139,9 +139,9 @@ Prepare a training checkpoint for Hub distribution: strip optimizer state, save 
 
 ```bash
 python tools/publish_checkpoint.py \\
-  runs/rotated_retinanet/20260611-101135/checkpoints/best_mAP_0.70.pth \\
-  pretrained/rotated_retinanet_r50_fpn_dota_le90_1x
-# -> pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-<hash8>.pth
+  runs/oriented_rcnn/20260616-030231/checkpoints/best_mAP_0.78.pth \\
+  pretrained/oriented_rcnn_r50_fpn_dota_le90_1x
+# -> pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-<hash8>.pth
 ```
 
 Update `oriented_det/pretrained/manifest.json` with the new `filename` and `sha256`, then upload to the Hub repo.
@@ -153,7 +153,7 @@ Learning rate finder: runs a short training sweep with exponentially increasing 
 **Usage:**
 ```bash
 # Basic run (uses config's batch size and AMP)
-python tools/lr_finder.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
+python tools/lr_finder.py --config configs/oriented_rcnn/dota_le90_1x.json
 
 # Custom sweep length and save plot
 python tools/lr_finder.py --config configs/.../config.json --num-steps 150 --output lr_finder.png
@@ -241,7 +241,7 @@ python -m oriented_det.runtime.inference image.jpg \
 # Specify model type and classes
 python -m oriented_det.runtime.inference image.jpg \
     --checkpoint checkpoints/best.pth \
-    --model-type rotated_retinanet \
+    --model-type oriented_rcnn \
     --num-classes 15 \
     --class-names plane ship vehicle ... \
     --output detections.png
@@ -365,10 +365,10 @@ Use this to sanity-check `augmentation.json` / recipe overrides, flip settings i
 **Usage:**
 ```bash
 # Recipe or resolved run config
-python tools/preview_augmentation.py --config configs/rotated_faster_rcnn/airbus_planes_dota081_ft.json
+python tools/preview_augmentation.py --config configs/oriented_rcnn/dota_le90_1x.json
 
 # More tiles and random variants per tile
-python tools/preview_augmentation.py --config runs/rotated_faster_rcnn/20260603-090228/config.json --num-images 4 --variants 6
+python tools/preview_augmentation.py --config runs/oriented_rcnn/20260616-030231/config.json --num-images 4 --variants 6
 
 # Fixed dataset indices; Albumentations column without flips
 python tools/preview_augmentation.py --config configs/.../config.json --indices 0,12,48 --include-albumentations-only

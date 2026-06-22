@@ -10,6 +10,35 @@ from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet
 from oriented_det.train.config import TrainingExperimentConfig, apply_inference_config_to_model
 
 
+def _strip_ddp_prefix(state_dict: dict) -> dict:
+    """Normalize DDP checkpoints so head-key inspection matches model keys."""
+    if state_dict and next(iter(state_dict.keys()), "").startswith("module."):
+        return {k.replace("module.", "", 1): v for k, v in state_dict.items()}
+    return state_dict
+
+
+def _infer_retinanet_num_classes_from_state_dict(state_dict: dict) -> int | None:
+    cls_weight_key = "head.conv_cls.weight"
+    bbox_weight_key = "head.conv_bbox.weight"
+    if cls_weight_key not in state_dict or bbox_weight_key not in state_dict:
+        return None
+
+    bbox_channels = state_dict[bbox_weight_key].shape[0]
+    if bbox_channels % 5 != 0:
+        raise ValueError(
+            f"Could not infer RetinaNet anchors: {bbox_weight_key} has {bbox_channels} output channels, not divisible by 5"
+        )
+
+    num_anchors = bbox_channels // 5
+    cls_channels = state_dict[cls_weight_key].shape[0]
+    if cls_channels % num_anchors != 0:
+        raise ValueError(
+            f"Could not infer RetinaNet classes: {cls_weight_key} has {cls_channels} output channels, "
+            f"not divisible by inferred anchors={num_anchors}"
+        )
+    return cls_channels // num_anchors
+
+
 def infer_num_classes_from_checkpoint(checkpoint_path: str, model_type: str) -> int:
     """
     Infer the number of classes from the checkpoint state_dict.
@@ -23,7 +52,7 @@ def infer_num_classes_from_checkpoint(checkpoint_path: str, model_type: str) -> 
     """
     device_obj = torch.device('cpu')  # Load on CPU first for inspection
     checkpoint = torch.load(checkpoint_path, map_location=device_obj)
-    state_dict = checkpoint.get("model_state_dict", checkpoint)
+    state_dict = _strip_ddp_prefix(checkpoint.get("model_state_dict", checkpoint))
     
     # Try to infer from ROI head classification head (for RCNN models)
     if 'oriented_rcnn' in model_type.lower() or 'rcnn' in model_type.lower():
@@ -41,14 +70,12 @@ def infer_num_classes_from_checkpoint(checkpoint_path: str, model_type: str) -> 
             total_classes = state_dict[cls_bias_key].shape[0]
             num_classes = total_classes - 1
             return num_classes
-    # For Rotated RetinaNet, try head.cls_head.weight
+    # For Rotated RetinaNet, cls logits are anchors * foreground classes;
+    # bbox logits are anchors * 5 oriented box deltas.
     elif 'retinanet' in model_type.lower():
-        cls_weight_key = 'head.cls_head.weight'
-        if cls_weight_key in state_dict:
-            # Rotated RetinaNet output shape is [num_anchors * num_classes, ...]
-            # We need to know num_anchors to compute num_classes
-            # For now, try a common pattern
-            pass  # TODO: implement Rotated RetinaNet inference if needed
+        num_classes = _infer_retinanet_num_classes_from_state_dict(state_dict)
+        if num_classes is not None:
+            return num_classes
     
     raise ValueError(f"Could not infer num_classes from checkpoint. Checkpoint keys: {list(state_dict.keys())[:10]}")
 
@@ -82,10 +109,7 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
     
     # Load checkpoint once for both num_classes inference and model loading
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
-    state_dict = checkpoint.get("model_state_dict", checkpoint)
-    # Strip DDP "module." prefix so keys match the unwrapped model
-    if state_dict and next(iter(state_dict.keys()), "").startswith("module."):
-        state_dict = {k.replace("module.", "", 1): v for k, v in state_dict.items()}
+    state_dict = _strip_ddp_prefix(checkpoint.get("model_state_dict", checkpoint))
 
     # num_classes = foreground only (config and model API; cls_head/fc_cls has num_classes + 1 for background)
     num_classes_config = config.num_classes
@@ -95,6 +119,8 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
     checkpoint_foreground = None
     if cls_weight_key in state_dict:
         checkpoint_foreground = state_dict[cls_weight_key].shape[0] - 1
+    elif 'retinanet' in model_type.lower():
+        checkpoint_foreground = _infer_retinanet_num_classes_from_state_dict(state_dict)
 
     if num_classes_config is None:
         if checkpoint_foreground is not None:

@@ -66,7 +66,7 @@ loader = build_dota_loader(
 From the repository root after `uv pip install -e .` (see [Installation](installation.md)):
 
 ```bash
-odet train --config configs/rotated_faster_rcnn/dota_le90_3x.json
+odet train --config configs/oriented_rcnn/dota_le90_1x.json
 ```
 
 Or use `make train` (same default config). Set paths in `configs/_base_/datasets/dota_le90.json` for your DOTA layout. See [Configuration](../user-guide/configuration.md) for every JSON field.

@@ -6,7 +6,7 @@ Config-based training for oriented object detection.
 
 ```bash
 uv pip install -e .
-odet train --config configs/rotated_faster_rcnn/dota_le90_3x.json --batch-size 4
+odet train --config configs/oriented_rcnn/dota_le90_1x.json --batch-size 4
 ```
 
 From the repo root you can also use `make train` (same default `CONFIG`).

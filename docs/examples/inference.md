@@ -6,7 +6,7 @@ Run inference on a validation split and save results for metrics or visualizatio
 
 ```bash
 # Checkpoint/config auto-resolve from experiment-dir when omitted
-odet preds --experiment-dir runs/rotated_faster_rcnn/<timestamp> --data-split val
+odet preds --experiment-dir runs/oriented_rcnn/<timestamp> --data-split val
 ```
 
 Or from the repo root after training:
@@ -19,7 +19,7 @@ make metrics
 Inference-only (skip mAP / analysis):
 
 ```bash
-odet preds --experiment-dir runs/rotated_faster_rcnn/<timestamp> --data-split val --no-diagnostics
+odet preds --experiment-dir runs/oriented_rcnn/<timestamp> --data-split val --no-diagnostics
 ```
 
 ## Behavior

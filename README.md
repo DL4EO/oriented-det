@@ -43,13 +43,13 @@ After [installation](#installation):
 
 ```bash
 # Train on DOTA tiles (edit dataset paths in the config first)
-odet train --config configs/rotated_faster_rcnn/dota_le90_3x.json
+odet train --config configs/oriented_rcnn/dota_le90_1x.json
 
 # Or use the Makefile wrapper (same default config)
 make train
 ```
 
-Default 3× recipe: `configs/rotated_faster_rcnn/dota_le90_3x.json` (see [configs/rotated_faster_rcnn/README.md](configs/rotated_faster_rcnn/README.md)). 1× baseline: `dota_le90_1x.json`.
+Default starter recipe: `configs/oriented_rcnn/dota_le90_1x.json` (see [configs/oriented_rcnn/README.md](configs/oriented_rcnn/README.md)). Use `configs/oriented_rcnn/dota_le90_3x.json` when you want the longer Oriented R-CNN schedule.
 
 Programmatic APIs and a longer walkthrough: [Getting Started](docs/getting-started/installation.md). Config fields: [Configuration](docs/user-guide/configuration.md).
 
@@ -113,10 +113,10 @@ Install once: `uv pip install -e .`. Then:
 
 | Task | Command |
 |------|---------|
-| Train | `odet train --config configs/rotated_faster_rcnn/dota_le90_3x.json` or `make train` |
+| Train | `odet train --config configs/oriented_rcnn/dota_le90_1x.json` or `make train` |
 | Multi-GPU | `make train-multi-gpu` (`torchrun` + cuDNN on `LD_LIBRARY_PATH`) |
 | Tile DOTA | `odet tile-dota /path/to/dota/train` |
-| Val predictions | `odet preds --experiment-dir runs/rotated_faster_rcnn/<timestamp>` or `make preds` |
+| Val predictions | `odet preds --experiment-dir runs/oriented_rcnn/<timestamp>` or `make preds` |
 | Offline mAP | `make eval-val` or `make preds` then `make metrics` |
 
 DOTA configs: per-model `dota_le90_1x.json` / `dota_le90_3x.json` under [configs/](configs/). Run `odet --help` for all subcommands. Makefile shortcuts and script-level options: [tools/README.md](tools/README.md). Config reference: [docs/user-guide/configuration.md](docs/user-guide/configuration.md), [configs/config.schema.json](configs/config.schema.json), [configs/README.md](configs/README.md).

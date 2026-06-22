@@ -7,7 +7,7 @@ tools/train_multi_gpu.py or torchrun; the script detects RANK/WORLD_SIZE/LOCAL_R
 
 Usage:
     # Single-GPU
-    python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json [--batch-size 4] [--use-amp]
+    python tools/train.py --config configs/oriented_rcnn/dota_le90_1x.json [--batch-size 4] [--use-amp]
 
     # Multi-GPU (via launcher)
     python tools/train_multi_gpu.py --config configs/.../config.json [--nproc-per-node 4]
@@ -950,7 +950,7 @@ def main():
         raise FileNotFoundError(
             f"Config file not found: {raw}. "
             "Tip: pass a path to a JSON config, or use a built-in path like "
-            "'configs/rotated_faster_rcnn/dota_le90_3x.json'."
+            "'configs/oriented_rcnn/dota_le90_1x.json'."
         )
     
     config = TrainingExperimentConfig.load(config_path)

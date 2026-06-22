@@ -9,10 +9,10 @@ Usage:
 
 Examples:
     # Use all available GPUs with default config
-    python train_multi_gpu.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
+    python train_multi_gpu.py --config configs/oriented_rcnn/dota_le90_1x.json
 
     # Use 4 GPUs
-    python train_multi_gpu.py --nproc-per-node 4 --config configs/rotated_faster_rcnn/dota_le90_3x.json
+    python train_multi_gpu.py --nproc-per-node 4 --config configs/oriented_rcnn/dota_le90_1x.json
 
     # Use 2 GPUs with custom arguments
     python train_multi_gpu.py --nproc-per-node 2 --config configs/.../config.json --use-amp
@@ -87,7 +87,7 @@ def main():
         epilog="""
 Examples:
   # Use all available GPUs (pass --config and any train.py options)
-  python train_multi_gpu.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
+  python train_multi_gpu.py --config configs/oriented_rcnn/dota_le90_1x.json
 
   # Use 4 GPUs
   python train_multi_gpu.py --nproc-per-node 4 --config configs/.../config.json

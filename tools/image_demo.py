@@ -14,7 +14,7 @@ Inference path (matches ``oriented_det.runtime.inference`` semantics):
 
 Example:
   # Single image
-  python tools/image_demo.py demo/demo.jpg configs/rotated_faster_rcnn/dota_le90_3x.json runs/.../checkpoints/best.pth --out-file result.jpg
+  python tools/image_demo.py demo/demo.jpg configs/oriented_rcnn/dota_le90_1x.json runs/.../checkpoints/best.pth --out-file result.jpg
 
   # All images in demo/
   python tools/image_demo.py demo configs/.../config.json runs/.../checkpoints/best.pth --out-dir demo/out

@@ -5,7 +5,7 @@ Shared logic used by `odet` CLIs, deploy, and export — not tied to a top-level
 | Module | Role |
 |--------|------|
 | `inference.py` | Sliding-window inference, NMS, `run_inference_auto` |
-| `checkpoint.py` | `load_model_from_checkpoint`, `infer_num_classes_from_checkpoint` — Rotated RetinaNet construction mirrors `tools/train.py:create_model_from_config` (FPN layers, octave anchors, stacked head convs) so weights load without shape mismatches. |
+| `checkpoint.py` | `load_model_from_checkpoint`, `infer_num_classes_from_checkpoint` — infers foreground class counts from R-CNN heads or RetinaNet `head.conv_bbox`/`head.conv_cls` shapes; Rotated RetinaNet construction mirrors `tools/train.py:create_model_from_config` (FPN layers, octave anchors, stacked head convs) so weights load without shape mismatches. |
 | `collate.py` | Dataset collate and normalization constants |
 
 Import as `from oriented_det.runtime.inference import run_inference_auto`, etc.

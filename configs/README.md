@@ -16,12 +16,12 @@ OrientedDet publishes **DOTA le90 pretrain** checkpoints on Hugging Face Hub. Se
 
 | Model | Config | Hub slug | eval-val mAP50 |
 |-------|--------|----------|----------------|
+| Oriented R-CNN 1× | [oriented_rcnn/dota_le90_1x.json](oriented_rcnn/dota_le90_1x.json) | `oriented_rcnn_dota_le90_1x` | 74.79% |
+| Oriented R-CNN 3× | [oriented_rcnn/dota_le90_3x.json](oriented_rcnn/dota_le90_3x.json) | — | TBD |
 | Rotated RetinaNet 1× | [rotated_retinanet/dota_le90_1x.json](rotated_retinanet/dota_le90_1x.json) | `rotated_retinanet_dota_le90_1x` | 64.14% |
 | Rotated RetinaNet 3× | [rotated_retinanet/dota_le90_3x.json](rotated_retinanet/dota_le90_3x.json) | `rotated_retinanet_dota_le90_3x` | 71.52% |
 | Rotated Faster R-CNN 1× | [rotated_faster_rcnn/dota_le90_1x.json](rotated_faster_rcnn/dota_le90_1x.json) | — | TBD |
 | Rotated Faster R-CNN 3× | [rotated_faster_rcnn/dota_le90_3x.json](rotated_faster_rcnn/dota_le90_3x.json) | `rotated_faster_rcnn_dota_le90_3x` | 76.41% |
-| Oriented R-CNN 1× | [oriented_rcnn/dota_le90_1x.json](oriented_rcnn/dota_le90_1x.json) | `oriented_rcnn_dota_le90_1x` | 74.79% |
-| Oriented R-CNN 3× | [oriented_rcnn/dota_le90_3x.json](oriented_rcnn/dota_le90_3x.json) | — | TBD |
 
 Download: `odet pretrained download <slug>` or `"load_from_checkpoint": "hf://<slug>"`.
 
@@ -35,8 +35,8 @@ Example in an external project that keeps local dataset fragments:
 {
   "_base_": [
     "my_dataset.json",
-    "@odet:configs/_base_/models/rotated_faster_rcnn_r50.json",
-    "@odet:configs/_base_/schedules/3x.json"
+    "@odet:configs/_base_/models/oriented_rcnn_r50.json",
+    "@odet:configs/_base_/schedules/1x.json"
   ]
 }
 ```
@@ -50,7 +50,7 @@ Example in an external project that keeps local dataset fragments:
 
 - **[_base_/](_base_)** — Dataset, model, schedule, FP16, preprocessing, augmentation fragments (do not run directly; included via `_base_`).
 - **[oriented_rcnn/](oriented_rcnn/)** — Oriented R-CNN (horizontal RPN + midpoint-offset + oriented ROI). See [oriented_rcnn/README.md](oriented_rcnn/README.md).
-- **[rotated_faster_rcnn/](rotated_faster_rcnn/)** — Rotated Faster R-CNN. 1× baseline: `dota_le90_1x.json`; default `make train`: `dota_le90_3x.json`. See [rotated_faster_rcnn/README.md](rotated_faster_rcnn/README.md).
+- **[rotated_faster_rcnn/](rotated_faster_rcnn/)** — Rotated Faster R-CNN. 1× baseline: `dota_le90_1x.json`; 3× recipe: `dota_le90_3x.json`. See [rotated_faster_rcnn/README.md](rotated_faster_rcnn/README.md).
 - **[rotated_retinanet/](rotated_retinanet/)** — Rotated RetinaNet (one-stage). See [rotated_retinanet/README.md](rotated_retinanet/README.md).
 
 ## Muted keys
@@ -103,7 +103,7 @@ make check-configs   # verify before commit (also runs in CI)
 From the repo root:
 
 ```bash
-python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
+python tools/train.py --config configs/oriented_rcnn/dota_le90_1x.json
 ```
 
 Override batch size or AMP: `--batch-size`, `--use-amp`, `--no-amp`. See [tools/README.md](../tools/README.md) and the [main README](../README.md).

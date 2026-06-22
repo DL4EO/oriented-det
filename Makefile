@@ -17,7 +17,7 @@ PYTHONPATH ?= $(shell pwd)
 # =============================================================================
 
 # Training / wizard / stats / lr-finder
-CONFIG ?= configs/rotated_faster_rcnn/dota_le90_3x.json
+CONFIG ?= configs/oriented_rcnn/dota_le90_1x.json
 
 # Sliding-window micro-batch for large-image inference (env consumed by save_predictions / oriented_det.runtime.inference).
 ORIENTED_DET_WINDOW_BATCH_SIZE ?= 64
@@ -183,7 +183,7 @@ check-install:
 # --- Training & data prep ---
 # Train using CONFIG (checkpoint behavior from JSON checkpoint.* only)
 # Usage: make train
-#        make train CONFIG=configs/rotated_faster_rcnn/dota_le90.json
+#        make train CONFIG=configs/oriented_rcnn/dota_le90_1x.json
 #        make train DEBUG=1   # extra debug logs (loss breakdown, per-class mAP, RPN/ROI stats)
 train: check-install
 	@echo "Starting training with config: $(CONFIG)"
@@ -242,15 +242,15 @@ train-help:
 	@echo "Config-Based Training Usage:"
 	@echo ""
 	@echo "Basic training:"
-	@echo "  odet train --config configs/rotated_faster_rcnn/dota_le90_3x.json"
+	@echo "  odet train --config configs/oriented_rcnn/dota_le90_1x.json"
 	@echo ""
 	@echo "With overrides:"
-	@echo "  odet train --config configs/rotated_faster_rcnn/dota_le90.json \\"
+	@echo "  odet train --config configs/oriented_rcnn/dota_le90_1x.json \\"
 	@echo "      --batch-size 4 --use-amp"
 	@echo ""
 	@echo "Fine-tuning example (simpler script):"
 	@echo "  python tools/train_example.py /path/to/dota/dataset \\"
-	@echo "      --model-type rotated_faster_rcnn \\"
+	@echo "      --model-type oriented_rcnn \\"
 	@echo "      --num-classes 15 \\"
 	@echo "      --batch-size 4"
 	@echo ""
@@ -272,7 +272,7 @@ tensorboard:
 # --- Tiled val: preds / metrics / train-preds ---
 # Run inference on val (no mAP). Same checkpoint discovery as before; then run make metrics on the output dir.
 # Optionally pin an experiment directory:
-#   make preds EXPERIMENT=runs/rotated_faster_rcnn/20260428-150458
+#   make preds EXPERIMENT=runs/oriented_rcnn/20260616-030231
 preds: check-install
 	@echo "Finding latest experiment and checkpoint..."; \
 	if [ ! -d "runs" ]; then \
@@ -328,7 +328,7 @@ metrics: check-install
 # Train split: run save_predictions with --data-split train and write tile_metrics.csv (for dataset.tile_metrics_csv / hard-tile oversampling).
 # Default output: SAVE_TRAIN_PRED_OUT or <latest_exp>/train_tile_eval (predictions.json, analysis_*.json, tile_metrics.csv).
 # Optionally pin an experiment directory:
-#   make train-preds EXPERIMENT=runs/rotated_faster_rcnn/20260430-133317
+#   make train-preds EXPERIMENT=runs/oriented_rcnn/20260616-030231
 # Usage: make train-preds
 #        make train-preds DOTA_DATA_ROOT=/path/to/dota
 #        make train-preds SAVE_TRAIN_PRED_OUT=/path/to/out

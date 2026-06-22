@@ -41,9 +41,9 @@ def _print_help() -> None:
     print("  export-onnx     (alias above) ONNX export via export/scripts/export_onnx.py")
     print("")
     print("Examples:")
-    print("  odet train --config configs/rotated_faster_rcnn/dota_le90_3x.json")
-    print("  odet train-multi-gpu --config configs/rotated_faster_rcnn/dota_le90_3x.json")
-    print("  odet preds --experiment-dir runs/rotated_faster_rcnn/<id>")
+    print("  odet train --config configs/oriented_rcnn/dota_le90_1x.json")
+    print("  odet train-multi-gpu --config configs/oriented_rcnn/dota_le90_1x.json")
+    print("  odet preds --experiment-dir runs/oriented_rcnn/<id>")
     print("  odet playground-csv --data-root /path/to/export")
 
 

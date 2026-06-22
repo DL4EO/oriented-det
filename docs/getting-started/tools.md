@@ -48,7 +48,7 @@ This script shows:
 **`tools/train.py`** - Complete config-based training pipeline:
 
 ```bash
-odet train --config configs/rotated_faster_rcnn/dota_le90_3x.json --batch-size 4
+odet train --config configs/oriented_rcnn/dota_le90_1x.json --batch-size 4
 ```
 
 Features:
@@ -194,9 +194,9 @@ The app expects predictions in JSON format:
 ```json
 {
   "metadata": {
-    "experiment_dir": "runs/rotated_faster_rcnn/20260602_051553",
+    "experiment_dir": "runs/oriented_rcnn/20260616-030231",
     "checkpoint": "checkpoints/best.pth",
-    "model_type": "rotated_faster_rcnn"
+    "model_type": "oriented_rcnn"
   },
   "predictions": {
     "image_001.png": {
@@ -225,7 +225,7 @@ Run validation inference and write `predictions/<timestamp>/predictions.json` at
 make preds
 make metrics
 
-odet preds --experiment-dir runs/rotated_faster_rcnn/<timestamp> --data-split val --no-diagnostics
+odet preds --experiment-dir runs/oriented_rcnn/<timestamp> --data-split val --no-diagnostics
 odet preds --metrics-from-json predictions/<timestamp>
 ```
 

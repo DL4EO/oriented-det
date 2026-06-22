@@ -7,8 +7,8 @@ augmentation.json / recipe overrides before a long run.
 
 Usage (from odet-planes/, with oriented-det venv active):
 
-    python tools/preview_augmentation.py --config configs/rotated_faster_rcnn/airbus_planes_dota081_ft.json
-    python tools/preview_augmentation.py --config runs/rotated_faster_rcnn/20260603-090228/config.json --num-images 4 --variants 6
+    python tools/preview_augmentation.py --config configs/oriented_rcnn/dota_le90_1x.json
+    python tools/preview_augmentation.py --config runs/oriented_rcnn/20260616-030231/config.json --num-images 4 --variants 6
 """
 
 from __future__ import annotations

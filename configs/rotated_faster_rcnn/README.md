@@ -172,7 +172,7 @@ Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **b
 | File | Purpose |
 |------|---------|
 | [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** — 12 epochs, lr 0.005, MultiStep @ 8/11, train+val tiles, H+V+diagonal flips, ProbIoU ROI aux. |
-| [`dota_le90_3x.json`](./dota_le90_3x.json) | **Default `make train`** — inherits 1×; 36 epochs, milestones [24, 33]. Hub: `rotated_faster_rcnn_dota_le90_3x`. |
+| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Hub: `rotated_faster_rcnn_dota_le90_3x`. |
 
 ### First run (1× baseline)
 

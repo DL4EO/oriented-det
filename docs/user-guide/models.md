@@ -16,7 +16,7 @@ All three detectors:
 - Preserve angle information through training and inference
 - Use oriented IoU for matching and oriented NMS for post-processing
 
-Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Published DOTA slugs: `rotated_retinanet_dota_le90_1x`, `rotated_retinanet_dota_le90_3x`, `rotated_faster_rcnn_dota_le90_3x`, `oriented_rcnn_dota_le90_1x`. See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
+Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Start with `oriented_rcnn_dota_le90_1x`; other published DOTA slugs are `rotated_retinanet_dota_le90_1x`, `rotated_retinanet_dota_le90_3x`, and `rotated_faster_rcnn_dota_le90_3x`. See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
 
 ## Training vs inference paths (two-stage models)
 
@@ -323,7 +323,7 @@ model.set_class_weights(class_map)
 **RotatedFasterRCNN** (`RotatedFasterRCNN` in code) is the MMRotate-style two-stage detector:
 
 - Oriented RPN proposals and oriented ROI align/head
-- Default DOTA recipe: `configs/rotated_faster_rcnn/dota_le90_3x.json` (`model_type: rotated_faster_rcnn`)
+- DOTA recipes: `configs/rotated_faster_rcnn/dota_le90_1x.json` and `configs/rotated_faster_rcnn/dota_le90_3x.json` (`model_type: rotated_faster_rcnn`)
 - Key `model.*` knobs: `rpn_min_size`, standard RPN/ROI IoU thresholds, `add_gt_as_proposals`
 
 ```python

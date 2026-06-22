@@ -127,10 +127,10 @@ def test_load_model_from_checkpoint_retinanet_passes_fpn_and_anchor_config():
     cfg.class_names = ["a", "b"]
 
     fake_state = {
-        "head.conv_cls.weight": torch.zeros(18, 256, 1, 1),
-        "head.conv_cls.bias": torch.zeros(18),
-        "head.conv_bbox.weight": torch.zeros(6, 256, 1, 1),
-        "head.conv_bbox.bias": torch.zeros(6),
+        "head.conv_cls.weight": torch.zeros(4, 256, 1, 1),
+        "head.conv_cls.bias": torch.zeros(4),
+        "head.conv_bbox.weight": torch.zeros(10, 256, 1, 1),
+        "head.conv_bbox.bias": torch.zeros(10),
     }
 
     with patch.object(ckpt_mod, "TrainingExperimentConfig") as mock_cfg_cls, patch.object(
@@ -151,6 +151,55 @@ def test_load_model_from_checkpoint_retinanet_passes_fpn_and_anchor_config():
     assert call_kw["scales_per_octave"] == 3
     assert call_kw["stacked_convs"] == 4
     assert call_kw["norm_factor"] == pytest.approx(3.0)
+
+
+def test_infer_num_classes_from_checkpoint_retinanet_uses_head_shapes(tmp_path):
+    from oriented_det.runtime.checkpoint import infer_num_classes_from_checkpoint
+
+    checkpoint_path = tmp_path / "retinanet.pth"
+    torch.save(
+        {
+            "model_state_dict": {
+                "head.conv_bbox.weight": torch.zeros(45, 256, 3, 3),
+                "head.conv_cls.weight": torch.zeros(135, 256, 3, 3),
+            }
+        },
+        checkpoint_path,
+    )
+
+    assert infer_num_classes_from_checkpoint(str(checkpoint_path), "rotated_retinanet") == 15
+
+
+def test_load_model_from_checkpoint_retinanet_infers_missing_num_classes():
+    from oriented_det.runtime import checkpoint as ckpt_mod
+
+    mock_cls = MagicMock()
+    inst = MagicMock()
+    inst.load_state_dict = MagicMock()
+    inst.to = MagicMock(return_value=inst)
+    inst.eval = MagicMock()
+    mock_cls.return_value = inst
+
+    cfg = _minimal_config("rotated_retinanet")
+    cfg.num_classes = None
+
+    fake_state = {
+        "head.conv_cls.weight": torch.zeros(135, 256, 1, 1),
+        "head.conv_cls.bias": torch.zeros(135),
+        "head.conv_bbox.weight": torch.zeros(45, 256, 1, 1),
+        "head.conv_bbox.bias": torch.zeros(45),
+    }
+
+    with patch.object(ckpt_mod, "TrainingExperimentConfig") as mock_cfg_cls, patch.object(
+        ckpt_mod, "RotatedRetinaNet", mock_cls
+    ), patch("oriented_det.pretrained.ensure_checkpoint", side_effect=lambda p: p), patch.object(
+        ckpt_mod.torch, "load", return_value={"model_state_dict": fake_state}
+    ), patch.object(ckpt_mod, "apply_inference_config_to_model"):
+        mock_cfg_cls.load.return_value = cfg
+        model, _, _ = ckpt_mod.load_model_from_checkpoint("/tmp/fake.pth", "/tmp/config.json", "cpu")
+
+    assert model is inst
+    assert mock_cls.call_args.kwargs["num_classes"] == 15
 
 
 def test_create_model_rcnn_passes_inference_pre_nms_score_from_config():

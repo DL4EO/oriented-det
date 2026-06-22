@@ -10,10 +10,10 @@ Manifest-driven downloads from [Hugging Face Hub](https://huggingface.co/docs/hu
 
 Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 
+- `oriented_rcnn_dota_le90_1x`
+- `rotated_faster_rcnn_dota_le90_3x`
 - `rotated_retinanet_dota_le90_1x`
 - `rotated_retinanet_dota_le90_3x`
-- `rotated_faster_rcnn_dota_le90_3x`
-- `oriented_rcnn_dota_le90_1x`
 
 On-disk / Hub filenames include a **SHA-256[:8]** suffix (see `tools/publish_checkpoint.py`).
 
@@ -22,11 +22,10 @@ On-disk / Hub filenames include a **SHA-256[:8]** suffix (see `tools/publish_che
 ```python
 from oriented_det.pretrained import ensure_checkpoint
 
-path = ensure_checkpoint("hf://rotated_faster_rcnn_dota_le90_3x")
+path = ensure_checkpoint("hf://oriented_rcnn_dota_le90_1x")
 ```
 
 ```bash
-odet pretrained download rotated_retinanet_dota_le90_3x
 odet pretrained download oriented_rcnn_dota_le90_1x
 odet pretrained list
 ```

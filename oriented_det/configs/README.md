@@ -1,6 +1,6 @@
 # Built-in configs (PyPI)
 
-This directory is a **vendored copy** of selected files from the repository [`configs/`](../../configs/) tree. It is included in the `oriented-det` wheel so `pip install oriented-det` can resolve paths like `configs/rotated_faster_rcnn/dota_le90_3x.json` without a git checkout.
+This directory is a **vendored copy** of selected files from the repository [`configs/`](../../configs/) tree. It is included in the `oriented-det` wheel so `pip install oriented-det` can resolve paths like `configs/oriented_rcnn/dota_le90_1x.json` without a git checkout.
 
 ## Source of truth
 

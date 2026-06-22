@@ -17,7 +17,7 @@ Child configs list one or more base paths (relative to the child file):
 ```json
 {
   "_base_": [
-    "../_base_/models/rotated_faster_rcnn_r50.json",
+    "../_base_/models/oriented_rcnn_r50.json",
     "../_base_/schedules/1x.json"
   ],
   "training": { "learning_rate": 0.002 }
@@ -158,11 +158,11 @@ Top-level configs (inherit bases under `configs/_base_/`):
 
 | Config | Model | Use |
 |--------|-------|-----|
-| `configs/oriented_rcnn/dota_le90_1x.json` | Oriented R-CNN | **1× DOTA pretrain** (full recipe) |
+| `configs/oriented_rcnn/dota_le90_1x.json` | Oriented R-CNN | **Default** `make train`; 1× DOTA pretrain (full recipe) |
 | `configs/oriented_rcnn/dota_le90_1x_class_weighted.json` | Oriented R-CNN | 1× with focal + class weights |
 | `configs/oriented_rcnn/dota_le90_3x.json` | Oriented R-CNN | 3× pretrain (inherits 1×) |
 | `configs/rotated_faster_rcnn/dota_le90_1x.json` | Rotated Faster R-CNN | **1× DOTA pretrain** (full recipe) |
-| `configs/rotated_faster_rcnn/dota_le90_3x.json` | Rotated Faster R-CNN | **Default** `make train` (3×, inherits 1×) |
+| `configs/rotated_faster_rcnn/dota_le90_3x.json` | Rotated Faster R-CNN | 3× pretrain (inherits 1×) |
 | `configs/rotated_retinanet/dota_le90_1x.json` | RetinaNet | **1× DOTA pretrain** (full recipe) |
 | `configs/rotated_retinanet/dota_le90_3x.json` | RetinaNet | 3× DOTA pretrain (inherits 1×) |
 
@@ -176,7 +176,7 @@ Layout and muted-key examples: see repo `configs/README.md`.
 from pathlib import Path
 from oriented_det.train.config import TrainingExperimentConfig
 
-config = TrainingExperimentConfig.load(Path("configs/rotated_faster_rcnn/dota_le90_3x.json"))
+config = TrainingExperimentConfig.load(Path("configs/oriented_rcnn/dota_le90_1x.json"))
 config.print_summary()
 config.save(Path("my_experiment.json"))
 ```

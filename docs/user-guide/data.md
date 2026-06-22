@@ -196,7 +196,7 @@ train_dataset = DOTADataset(
 
 - **Missing annotation files**: Dataset skips images without corresponding annotation files
 - **Malformed annotations**: Lines that can't be parsed are skipped with a warning
-- **Empty tiles**: By default, tiles with no ground-truth objects are included (empty target list). Set **`dataset.filter_empty_gt: true`** in the training config to drop them at dataset init (after `difficult_strategy`, `allowed_classes`, and `ignore_labels`), matching MMRotate `DOTADataset` (`filter_empty_gt=True`). The DOTA pretrain recipes [`dota_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_faster_rcnn/dota_le90_3x.json) and [`dota_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_retinanet/dota_le90_1x.json) enable this.
+- **Empty tiles**: By default, tiles with no ground-truth objects are included (empty target list). Set **`dataset.filter_empty_gt: true`** in the training config to drop them at dataset init (after `difficult_strategy`, `allowed_classes`, and `ignore_labels`), matching MMRotate `DOTADataset` (`filter_empty_gt=True`). The DOTA pretrain recipes [`dota_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/dota_le90_1x.json) and [`dota_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/dota_le90_3x.json) enable this.
 - **Difficult objects**: Use `dataset.difficult_strategy`:
   - `drop`: remove difficult objects at read-time (never reach training/eval targets)
   - `ignore`: keep difficult objects but treat them as “don’t care” (MMRotate/MMDet style)

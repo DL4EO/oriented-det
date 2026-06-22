@@ -480,7 +480,7 @@ from pathlib import Path
 from oriented_det.train.config import TrainingExperimentConfig
 
 config = TrainingExperimentConfig.load(
-    Path("configs/rotated_faster_rcnn/dota_le90_3x.json")
+    Path("configs/oriented_rcnn/dota_le90_1x.json")
 )
 config.print_summary()
 ```

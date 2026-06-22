@@ -6,8 +6,8 @@ From the framework repo root, after `odet train` on a DOTA config:
 
 ```bash
 # Copy experiment config + best checkpoint into deploy/example/app/
-cp runs/rotated_faster_rcnn/<run_id>/config.json deploy/example/app/config.json
-cp runs/rotated_faster_rcnn/<run_id>/checkpoints/best_*.pth deploy/example/app/weights/model.pth
+cp runs/oriented_rcnn/<run_id>/config.json deploy/example/app/config.json
+cp runs/oriented_rcnn/<run_id>/checkpoints/best_*.pth deploy/example/app/weights/model.pth
 
 docker build -f deploy/example/Dockerfile -t odet-example:latest .
 docker run --rm -p 8080:8080 --gpus all odet-example:latest
