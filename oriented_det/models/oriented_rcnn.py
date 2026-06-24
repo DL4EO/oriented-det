@@ -182,6 +182,7 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         target_stds: Optional[Tuple[float, float, float, float, float]] = None,
         roi_norm_factor: float = 2.0,
         roi_edge_swap: bool = True,
+        roi_proj_xy: bool = False,
         roi_box_reg_angle_weight: float = 1.0,
         roi_box_reg_angle_schedule_epochs: Optional[List[int]] = None,
         roi_box_reg_angle_schedule_values: Optional[List[float]] = None,
@@ -248,6 +249,8 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                         Can be set to empirical stds computed from dataset for better normalization.
             roi_norm_factor: Angle scaling for ROI encode/decode (MMRotate uses 2.0).
             roi_edge_swap: Whether to use edge_swap for ROI (MMRotate uses True).
+            roi_proj_xy: If True, encode/decode ROI dx/dy in proposal local frame. For
+                horizontal xyxy RoIs (angle 0) this is equivalent to global offsets.
             roi_box_reg_angle_weight: Weight for the angle (5th) component in ROI box regression loss.
                 Use > 1.0 (e.g. 2.0) to improve orientation alignment when predictions stick to anchor angles.
             roi_box_reg_iou_weight: Weight for auxiliary decoded-box loss on ROI positives (``riou`` / ``kfiou``).
@@ -273,6 +276,7 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         self.target_stds = target_stds if target_stds is not None else (0.1, 0.1, 0.2, 0.2, 0.1)
         self.roi_norm_factor = roi_norm_factor
         self.roi_edge_swap = roi_edge_swap
+        self.roi_proj_xy = roi_proj_xy
         self.roi_box_reg_iou_loss_type = roi_box_reg_iou_loss_type
         self.roi_box_reg_kfiou_fun = roi_box_reg_kfiou_fun
         self.roi_box_reg_probiou_mode = roi_box_reg_probiou_mode
@@ -671,6 +675,7 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                                 stds=self.target_stds,
                                 norm_factor=self.roi_norm_factor,
                                 edge_swap=self.roi_edge_swap,
+                                proj_xy=self.roi_proj_xy,
                                 label_smoothing=self.roi_label_smoothing,
                                 match_low_quality=self.roi_match_low_quality,
                                 roi_min_pos_iou=self.roi_min_pos_iou,

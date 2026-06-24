@@ -14,6 +14,8 @@ from oriented_det.pretrained.hub import (
     ensure_checkpoint,
     get_pretrained_dir,
     list_assets,
+    resolve_checkpoint_sidecar_config,
+    resolve_checkpoint_source_recipe,
     resolve_pretrained_path,
 )
 
@@ -59,6 +61,39 @@ def test_resolve_pretrained_relative_slug_maps_to_hashed_filename(tmp_path, monk
     (cache / hashed).write_bytes(b"x")
     path = resolve_pretrained_path("pretrained/rotated_faster_rcnn_dota_le90_3x")
     assert path == (cache / hashed).resolve()
+
+
+def test_resolve_checkpoint_sidecar_config_uses_weight_stem(tmp_path, monkeypatch):
+    cache = tmp_path / "pretrained-cache"
+    cache.mkdir()
+    monkeypatch.setenv("ORIENTED_DET_PRETRAINED_DIR", str(cache))
+    hashed = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth"
+    sidecar = cache / "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.json"
+    (cache / hashed).write_bytes(b"x")
+    sidecar.write_text("{}", encoding="utf-8")
+
+    path = resolve_checkpoint_sidecar_config("hf://rotated_faster_rcnn_dota_le90_3x")
+    assert path == sidecar.resolve()
+
+
+def test_resolve_checkpoint_source_recipe_from_weight_filename():
+    recipe = resolve_checkpoint_source_recipe("rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth")
+    assert recipe == "configs/rotated_faster_rcnn/dota_le90_3x.json"
+
+
+def test_resolve_checkpoint_sidecar_config_ignores_run_checkpoints(tmp_path, monkeypatch):
+    product = tmp_path / "product"
+    cache = tmp_path / "pretrained-cache"
+    run_dir = product / "runs" / "rotated_faster_rcnn" / "exp" / "checkpoints"
+    run_dir.mkdir(parents=True)
+    cache.mkdir()
+    monkeypatch.setenv("ORIENTED_DET_PROJECT_ROOT", str(product))
+    monkeypatch.setenv("ORIENTED_DET_PRETRAINED_DIR", str(cache))
+    ckpt = run_dir / "best.pth"
+    ckpt.write_bytes(b"x")
+    (run_dir / "best.json").write_text("{}", encoding="utf-8")
+
+    assert resolve_checkpoint_sidecar_config("runs/rotated_faster_rcnn/exp/checkpoints/best.pth") is None
 
 
 def test_resolve_runs_relative_uses_project_root(tmp_path, monkeypatch):

@@ -43,6 +43,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Image Recognition",
 ]
 dependencies = [
+    "setuptools>=65.0,<82",  # pkg_resources (removed in 82) required by tensorboard
     "torch>=2.3.0",
     "torchvision>=0.18.0",
     "numpy<2",
@@ -56,6 +57,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+viewer = [
+    "gradio==6.8.0",
+]
 export = [
     "onnx>=1.14.0",
     "onnxruntime>=1.16.0",

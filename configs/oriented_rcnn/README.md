@@ -240,9 +240,9 @@ The method achieves state-of-the-art accuracy while maintaining competitive effi
 
 `dota_le90_1x.json` trained on DOTA train+val tiles and evaluated on the full val tile split (`filter_empty_gt=false`) reaches **74.79% mAP50**. Hub slug: `oriented_rcnn_dota_le90_1x`; eval report: `predictions/20260618_140030/model_analysis_20260618_175528.md`.
 
-| Config | Schedule | Training run | Checkpoint | eval-val mAP50 | Hub slug |
-|--------|----------|--------------|------------|----------------|----------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | 1× (12 ep) | `runs/oriented_rcnn/20260616-030231` | `best_mAP_0.78.pth` | 74.79% | `oriented_rcnn_dota_le90_1x` |
+| Config | Final config | Final log | Schedule | Training run | Checkpoint | eval-val mAP50 | Hub slug |
+|--------|--------------|-----------|----------|--------------|------------|----------------|----------|
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log) | 1× (12 ep) | `runs/oriented_rcnn/20260616-030231` | `best_mAP_0.78.pth` | 74.79% | `oriented_rcnn_dota_le90_1x` |
 
 ### MMRotate reference
 

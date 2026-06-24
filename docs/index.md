@@ -77,7 +77,7 @@ See [Installation](getting-started/installation.md) for CUDA, macOS, and CPU set
 - **[Getting Started](getting-started/installation.md)** - Installation and quick start guides
 - **[User Guide](user-guide/geometry.md)** - Detailed usage for each module
 - **[API Reference](api/geometry.md)** - Complete API documentation
-- **[Tools](examples/visualization.md)** - Ready-to-use scripts and practical examples
+- **[Examples](examples/inference.md)** - Ready-to-use inference and training examples
 
 ## Important Notes
 

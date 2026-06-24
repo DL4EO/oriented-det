@@ -30,8 +30,13 @@ def encode_delta_xywh_th(
     stds: Tuple[float, float, float, float, float] = (1.0, 1.0, 1.0, 1.0, 1.0),
     norm_factor: Optional[float] = 2.0,
     edge_swap: bool = True,
+    proj_xy: bool = False,
 ) -> torch.Tensor:
-    """Encode rotated GT w.r.t. horizontal RoIs [N,4] xyxy -> deltas [N,5]."""
+    """Encode rotated GT w.r.t. horizontal RoIs [N,4] xyxy -> deltas [N,5].
+
+    When ``proj_xy`` is True, dx/dy are expressed in the RoI local frame (angle 0 for
+  horizontal xyxy RoIs, so results match global dx/dy).
+    """
     if torch is None:
         raise RuntimeError("torch required")
     rois = rois_xyxy.float()
@@ -57,8 +62,12 @@ def encode_delta_xywh_th(
         gt_enc = _norm_angle_le90(gt)
         dw = torch.log(torch.clamp(gw, min=1e-6) / pw)
         dh = torch.log(torch.clamp(gh, min=1e-6) / ph)
-    dx = (gx - px) / pw
-    dy = (gy - py) / ph
+    dcx = gx - px
+    dcy = gy - py
+    # proj_xy: local-frame dx/dy; horizontal xyxy RoIs have angle 0 so this matches global offsets.
+    _ = proj_xy
+    dx = dcx / pw
+    dy = dcy / ph
     if norm_factor is not None:
         dt = gt_enc / (norm_factor * math.pi)
     else:
@@ -77,6 +86,7 @@ def decode_delta_xywh_th(
     norm_factor: Optional[float] = 2.0,
     edge_swap: bool = True,
     wh_ratio_clip: float = 16.0 / 1000.0,
+    proj_xy: bool = False,
 ) -> torch.Tensor:
     """Decode [N,5] deltas to rotated boxes [N,5] (cx,cy,w,h,a) le90."""
     if torch is None:
@@ -99,6 +109,8 @@ def decode_delta_xywh_th(
     dh = dh.clamp(min=-max_ratio, max=max_ratio)
     gw = pw * torch.exp(dw)
     gh = ph * torch.exp(dh)
+    # proj_xy: local-frame dx/dy; horizontal xyxy RoIs have angle 0 so this matches global offsets.
+    _ = proj_xy
     gx = px + pw * dx
     gy = py + ph * dy
     gt = _norm_angle_le90(dt)
@@ -121,11 +133,13 @@ class DeltaXYWHTHBBoxCoder:
         target_stds: Tuple[float, float, float, float, float] = (0.1, 0.1, 0.2, 0.2, 0.1),
         norm_factor: Optional[float] = 2.0,
         edge_swap: bool = True,
+        proj_xy: bool = False,
     ):
         self.target_means = target_means
         self.target_stds = target_stds
         self.norm_factor = norm_factor
         self.edge_swap = edge_swap
+        self.proj_xy = proj_xy
 
     def encode(self, rois_xyxy: torch.Tensor, gt_rboxes: torch.Tensor) -> torch.Tensor:
         return encode_delta_xywh_th(
@@ -135,6 +149,7 @@ class DeltaXYWHTHBBoxCoder:
             stds=self.target_stds,
             norm_factor=self.norm_factor,
             edge_swap=self.edge_swap,
+            proj_xy=self.proj_xy,
         )
 
     def decode(self, rois_xyxy: torch.Tensor, deltas: torch.Tensor) -> torch.Tensor:
@@ -145,6 +160,7 @@ class DeltaXYWHTHBBoxCoder:
             stds=self.target_stds,
             norm_factor=self.norm_factor,
             edge_swap=self.edge_swap,
+            proj_xy=self.proj_xy,
         )
 
 

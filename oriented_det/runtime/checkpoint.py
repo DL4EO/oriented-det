@@ -10,6 +10,52 @@ from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet
 from oriented_det.train.config import TrainingExperimentConfig, apply_inference_config_to_model
 
 
+def _config_matches_source_recipe(config_path: str | Path, source_recipe: str) -> bool:
+    """True when ``config_path`` is the manifest source recipe for a checkpoint."""
+    from oriented_det.utils.config import _framework_config_roots
+
+    raw = Path(config_path).expanduser()
+    raw_ref = str(raw).replace("\\", "/").lstrip("/")
+    source_ref = source_recipe.replace("\\", "/").lstrip("/")
+    source_rel = source_ref[len("configs/") :] if source_ref.startswith("configs/") else source_ref
+    raw_rel = raw_ref[len("configs/") :] if raw_ref.startswith("configs/") else raw_ref
+    if raw_ref == source_ref or raw_rel == source_rel:
+        return True
+
+    roots = [root.resolve() for root in _framework_config_roots()]
+    if not roots:
+        return False
+
+    candidates: list[Path] = []
+    if raw.is_absolute():
+        candidates.append(raw.resolve())
+    else:
+        candidates.append((Path.cwd() / raw).resolve())
+        for root in roots:
+            candidates.append((root / raw_rel).resolve())
+
+    for candidate in candidates:
+        for root in roots:
+            if candidate == (root / source_rel).resolve():
+                return True
+    return False
+
+
+def resolve_inference_config_path(checkpoint_path: str | Path, config_path: str | Path) -> Path:
+    """Prefer a pretrained sidecar only when ``config_path`` is the source recipe."""
+    from oriented_det.pretrained import resolve_checkpoint_sidecar_config, resolve_checkpoint_source_recipe
+
+    sidecar_config = resolve_checkpoint_sidecar_config(checkpoint_path)
+    source_recipe = resolve_checkpoint_source_recipe(checkpoint_path)
+    if (
+        sidecar_config is not None
+        and source_recipe is not None
+        and _config_matches_source_recipe(config_path, source_recipe)
+    ):
+        return sidecar_config
+    return Path(config_path)
+
+
 def _strip_ddp_prefix(state_dict: dict) -> dict:
     """Normalize DDP checkpoints so head-key inspection matches model keys."""
     if state_dict and next(iter(state_dict.keys()), "").startswith("module."):
@@ -100,9 +146,12 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
     from oriented_det.pretrained import ensure_checkpoint
 
     checkpoint_path = str(ensure_checkpoint(checkpoint_path))
+    config_load_path = resolve_inference_config_path(checkpoint_path, config_path)
+    if config_load_path != Path(config_path):
+        print(f"Using pretrained sidecar config: {config_load_path}")
 
     # Load config using the proper load method to convert nested dicts to dataclasses
-    config = TrainingExperimentConfig.load(Path(config_path))
+    config = TrainingExperimentConfig.load(config_load_path)
     
     # Determine model type
     model_type = config.model_type or 'oriented_rcnn'
@@ -200,6 +249,7 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             'target_stds': target_stds,
             'roi_norm_factor': config.model.roi_norm_factor,
             'roi_edge_swap': config.model.roi_edge_swap,
+            'roi_proj_xy': getattr(config.model, 'roi_proj_xy', False),
             'roi_box_reg_angle_weight': getattr(config.model, 'roi_box_reg_angle_weight', 1.0),
             'roi_box_reg_iou_weight': getattr(config.model, 'roi_box_reg_iou_weight', 0.0),
             'roi_box_reg_iou_schedule_epochs': getattr(

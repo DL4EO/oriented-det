@@ -107,7 +107,7 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 
 | Key | Oriented R-CNN | Rotated Faster R-CNN | RetinaNet |
 |-----|----------------|----------------------|-----------|
-| `roi_proj_xy` | Yes (MMRotate parity) | — | — |
+| `roi_proj_xy` | Yes (MMRotate parity) | Yes (no-op for horizontal RoIs) | — |
 | `rpn_min_size` | — | Yes | Reuses `rpn_*` for **anchor assign** thresholds (pos/neg IoU, batch size); not an RPN head |
 | `add_gt_as_proposals` | Yes | Yes | N/A |
 | RPN IoU thresholds | Midpoint-offset RPN defaults | Standard oriented RPN | See `rpn_positive_iou_threshold`, `rpn_negative_iou_threshold`, … |

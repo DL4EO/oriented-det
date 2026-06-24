@@ -154,6 +154,7 @@ def decode_roi_refinements(
         stds=model.target_stds,
         norm_factor=model.roi_norm_factor,
         edge_swap=model.roi_edge_swap,
+        proj_xy=getattr(model, "roi_proj_xy", False),
     )
     return PreNmsDetections(boxes=refined_boxes, scores=filtered_scores, labels=filtered_labels)
 

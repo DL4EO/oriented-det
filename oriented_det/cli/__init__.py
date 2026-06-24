@@ -23,7 +23,6 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "export-onnx": ("export.scripts.export_onnx", "odet-export-onnx"),
     "labels-to-comma": ("tools.dota_labels_to_comma", "odet-labels-to-comma"),
     "free-gpu": ("tools.free_gpu", "odet-free-gpu"),
-    "visualize-boxes": ("tools.visualize_boxes", "odet-visualize-boxes"),
     "pretrained": ("tools.pretrained_download", "odet-pretrained"),
 }
 

@@ -1385,6 +1385,7 @@ def compute_horizontal_roi_loss_mmrotate(
     stds: Tuple[float, float, float, float, float] = (0.1, 0.1, 0.2, 0.2, 0.1),
     norm_factor: Optional[float] = 2.0,
     edge_swap: bool = True,
+    proj_xy: bool = False,
     label_smoothing: float = 0.0,
     grouped_alpha: float = 0.0,
     group_index_lists: Optional[Sequence[Sequence[int]]] = None,
@@ -1487,6 +1488,7 @@ def compute_horizontal_roi_loss_mmrotate(
             stds=stds,
             norm_factor=norm_factor,
             edge_swap=edge_swap,
+            proj_xy=proj_xy,
         )
         regression_targets = torch.where(
             torch.isfinite(regression_targets),
@@ -1515,6 +1517,7 @@ def compute_horizontal_roi_loss_mmrotate(
                 stds=stds,
                 norm_factor=norm_factor,
                 edge_swap=edge_swap,
+                proj_xy=proj_xy,
             )
             loss_iou = mean_auxiliary_box_reg_loss(
                 decoded_boxes,

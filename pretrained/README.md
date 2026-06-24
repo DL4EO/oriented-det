@@ -59,21 +59,22 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 
 ### Oriented R-CNN R50-FPN
 
-| Slug | Recipe | eval-val mAP50 | Config |
-|------|--------|----------------|--------|
-| `oriented_rcnn_dota_le90_1x` | 1× (12 ep) | 74.79% | [`dota_le90_1x.json`](../configs/oriented_rcnn/dota_le90_1x.json) |
+| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
+|------|--------|----------------|--------|--------------|-----------|
+| `oriented_rcnn_dota_le90_1x` | 1× (12 ep) | 74.79% | [`dota_le90_1x.json`](../configs/oriented_rcnn/dota_le90_1x.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json`](./oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log`](./oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log) |
 
 ### Rotated Faster R-CNN R50-FPN
 
-| Slug | Recipe | eval-val mAP50 | Config |
-|------|--------|----------------|--------|
-| `rotated_faster_rcnn_dota_le90_3x` | 3× ProbIoU aux | 76.41% | [`dota_le90_3x.json`](../configs/rotated_faster_rcnn/dota_le90_3x.json) |
+| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
+|------|--------|----------------|--------|--------------|-----------|
+| `rotated_faster_rcnn_dota_le90_3x` | 3× ProbIoU aux | 76.41% | [`dota_le90_3x.json`](../configs/rotated_faster_rcnn/dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.log) |
+| `rotated_faster_rcnn_dota_le90_3x_ce` | 3× CE baseline | 75.58% | [`dota_le90_3x.json`](../configs/rotated_faster_rcnn/dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log) |
 
 ### Rotated RetinaNet R50-FPN
 
-| Slug | Recipe | eval-val mAP50 | Config |
-|------|--------|----------------|--------|
-| `rotated_retinanet_dota_le90_1x` | 1× (12 ep) | 64.14% | [`dota_le90_1x.json`](../configs/rotated_retinanet/dota_le90_1x.json) |
-| `rotated_retinanet_dota_le90_3x` | 3× (36 ep) | 71.52% | [`dota_le90_3x.json`](../configs/rotated_retinanet/dota_le90_3x.json) |
+| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
+|------|--------|----------------|--------|--------------|-----------|
+| `rotated_retinanet_dota_le90_1x` | 1× (12 ep) | 64.14% | [`dota_le90_1x.json`](../configs/rotated_retinanet/dota_le90_1x.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json`](./rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log`](./rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log) |
+| `rotated_retinanet_dota_le90_3x` | 3× (36 ep) | 71.52% | [`dota_le90_3x.json`](../configs/rotated_retinanet/dota_le90_3x.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json`](./rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log`](./rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log) |
 
 Per-class AP and eval reports: `predictions/20260615_*` and `predictions/20260618_140030` directories linked from [configs/rotated_retinanet/README.md](../configs/rotated_retinanet/README.md), [configs/rotated_faster_rcnn/README.md](../configs/rotated_faster_rcnn/README.md), and [configs/oriented_rcnn/README.md](../configs/oriented_rcnn/README.md).

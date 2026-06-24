@@ -8,6 +8,8 @@ from .hub import (
     get_project_root,
     list_assets,
     load_manifest,
+    resolve_checkpoint_sidecar_config,
+    resolve_checkpoint_source_recipe,
     resolve_pretrained_path,
 )
 
@@ -19,5 +21,7 @@ __all__ = [
     "get_project_root",
     "list_assets",
     "load_manifest",
+    "resolve_checkpoint_sidecar_config",
+    "resolve_checkpoint_source_recipe",
     "resolve_pretrained_path",
 ]

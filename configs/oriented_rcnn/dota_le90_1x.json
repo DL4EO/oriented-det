@@ -107,7 +107,7 @@
   "production": {
     "score_threshold": 0.05,
     "inference_pre_nms_score_threshold": 0.05,
-    "final_nms_iou_threshold": 0.5,
+    "final_nms_iou_threshold": 0.3,
     "rpn_pre_nms_top_n": 6000,
     "rpn_post_nms_top_n": 6000,
     "max_detections_per_image": 3000,

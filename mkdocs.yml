@@ -78,7 +78,6 @@ nav:
     - Training API: api/train.md
     - Utils API: api/utils.md
   - Examples:
-    - Visualization: examples/visualization.md
     - Training: examples/training.md
     - Inference: examples/inference.md
   - Contributing: contributing.md

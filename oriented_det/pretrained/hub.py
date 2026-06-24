@@ -159,6 +159,45 @@ def resolve_pretrained_path(
     return (get_project_root() / path).resolve()
 
 
+def resolve_checkpoint_sidecar_config(
+    checkpoint: PathLike,
+    *,
+    pretrained_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Return the ``.json`` sidecar next to a local pretrained checkpoint, when present.
+
+    This is intentionally scoped to files under the configured pretrained directory so
+    regular run checkpoints keep using their experiment ``config.json``.
+    """
+    path = resolve_pretrained_path(checkpoint, pretrained_dir=pretrained_dir)
+    base = (pretrained_dir or _default_pretrained_dir()).resolve()
+    try:
+        path.parent.resolve().relative_to(base)
+    except ValueError:
+        return None
+
+    sidecar = path.with_suffix(".json")
+    return sidecar.resolve() if sidecar.is_file() else None
+
+
+def resolve_checkpoint_source_recipe(checkpoint: PathLike) -> Optional[str]:
+    """Return the manifest ``source_recipe`` for a registered checkpoint reference."""
+    manifest = load_manifest()
+    raw = str(checkpoint).strip()
+    lookup = raw
+    hf_ref = _parse_hf_uri(raw)
+    if hf_ref is not None:
+        lookup = hf_ref
+    else:
+        lookup = Path(raw).name
+
+    found = _asset_entry_for_name(lookup, manifest)
+    if found is None:
+        return None
+    source_recipe = found[1].get("source_recipe")
+    return str(source_recipe) if source_recipe else None
+
+
 def download_asset(
     asset_name: str,
     *,

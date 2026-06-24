@@ -33,6 +33,7 @@
     "roi_focal_gamma": 2,
     "roi_norm_factor": 2,
     "roi_edge_swap": true,
+    "roi_proj_xy": true,
     "roi_box_reg_angle_weight": 1.0,
     "use_hbb_for_matching": true,
     "inference_pre_nms_score_threshold": 0.1,

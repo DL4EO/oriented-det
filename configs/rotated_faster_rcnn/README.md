@@ -102,7 +102,7 @@ Rotated Faster R-CNN differs from Oriented R-CNN in the proposal generation stra
 | **RPN Anchors** | Horizontal anchors (angle 0) | Horizontal anchors (angle 0) |
 | **RPN Regression** | 4 params (dx, dy, dw, dh) | 6 params midpoint offsets (dx, dy, dw, dh, da, db) |
 | **RoIAlign** | Horizontal | Rotated |
-| **RoI coder** | `DeltaXYWHTHBBoxCoder` | `DeltaXYWHTRBBoxCoder`-style (`proj_xy` option) |
+| **RoI coder** | `DeltaXYWHTHBBoxCoder` (`roi_proj_xy` supported; no-op for horizontal RoIs) | `DeltaXYWHTRBBoxCoder`-style (`proj_xy` option) |
 
 ## Box Encoding Schemes
 
@@ -148,6 +148,7 @@ The ROI head uses a 5-parameter horizontal-to-rotated encoding:
 **Key Parameters**:
 - `norm_factor=2.0`: Scales angle delta to [-0.5, 0.5] range for le90 convention
 - `edge_swap=True`: Optimizes angle representation by swapping width/height when beneficial
+- `roi_proj_xy=true`: Explicit in base config for parity with Oriented R-CNN. Horizontal `xyxy` RoIs have implicit angle 0, so local-frame `dx`/`dy` match global offsets (no behavioral change vs `false`).
 
 ## Implementation Details
 
@@ -190,8 +191,9 @@ python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
 
 DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 val tiles). Hub manifest **`eval_map50`** uses the same `odet preds` protocol — not training **`compute_map_final`** mAP (see [pretrained/README.md](../../pretrained/README.md)).
 
-| Backbone | mAP (eval-val) | Angle | lr schd | Aug | BS | Config | Download |
-| :----------------------: | :---: | :---: | :-----: | :-: | :--: | :----: | :----: |
-| ResNet50 (1024,1024,200) | 76.41 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | `hf://rotated_faster_rcnn_dota_le90_3x` |
+| Backbone | mAP (eval-val) | Angle | lr schd | Aug | BS | Config | Final config | Final log | Download |
+| :----------------------: | :---: | :---: | :-----: | :-: | :--: | :----: | :----------: | :-------: | :----: |
+| ResNet50 (1024,1024,200) | 76.41 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.log) | `hf://rotated_faster_rcnn_dota_le90_3x` |
+| ResNet50 (1024,1024,200) | 75.58 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log) | `hf://rotated_faster_rcnn_dota_le90_3x_ce` |
 
 Eval report: [`predictions/20260615_082332/`](../../predictions/20260615_082332/).

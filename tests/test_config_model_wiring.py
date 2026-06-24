@@ -33,6 +33,7 @@ def _minimal_config(model_type: str) -> TrainingExperimentConfig:
             anchor_ratios=[0.5, 2.0],
             roi_norm_factor=3.0,
             roi_edge_swap=False,
+            roi_proj_xy=True,
             roi_box_reg_angle_weight=1.7,
             roi_box_reg_iou_weight=0.2,
             roi_min_pos_iou=0.37,
@@ -153,6 +154,86 @@ def test_load_model_from_checkpoint_retinanet_passes_fpn_and_anchor_config():
     assert call_kw["norm_factor"] == pytest.approx(3.0)
 
 
+def test_load_model_from_checkpoint_prefers_pretrained_sidecar_for_canonical_config(tmp_path):
+    from oriented_det.runtime import checkpoint as ckpt_mod
+
+    mock_cls = MagicMock()
+    inst = MagicMock()
+    inst.load_state_dict = MagicMock()
+    inst.to = MagicMock(return_value=inst)
+    inst.eval = MagicMock()
+    mock_cls.return_value = inst
+
+    cfg = _minimal_config("rotated_retinanet")
+    cfg.num_classes = 2
+    fake_state = {
+        "head.conv_cls.weight": torch.zeros(4, 256, 1, 1),
+        "head.conv_bbox.weight": torch.zeros(10, 256, 1, 1),
+    }
+    canonical = tmp_path / "configs" / "rotated_retinanet" / "dota_le90_1x.json"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text("{}", encoding="utf-8")
+    sidecar = tmp_path / "pretrained" / "rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json"
+    sidecar.parent.mkdir()
+    sidecar.write_text("{}", encoding="utf-8")
+    ckpt = sidecar.with_suffix(".pth")
+    ckpt.write_bytes(b"x")
+
+    with patch.object(ckpt_mod, "TrainingExperimentConfig") as mock_cfg_cls, patch.object(
+        ckpt_mod, "RotatedRetinaNet", mock_cls
+    ), patch("oriented_det.pretrained.ensure_checkpoint", return_value=ckpt), patch(
+        "oriented_det.pretrained.resolve_checkpoint_sidecar_config", return_value=sidecar
+    ), patch("oriented_det.pretrained.resolve_checkpoint_source_recipe", return_value=str(canonical)), patch.object(
+        ckpt_mod, "_config_matches_source_recipe", return_value=True
+    ), patch.object(
+        ckpt_mod.torch, "load", return_value={"model_state_dict": fake_state}
+    ), patch.object(ckpt_mod, "apply_inference_config_to_model"):
+        mock_cfg_cls.load.return_value = cfg
+        ckpt_mod.load_model_from_checkpoint(str(ckpt), str(canonical), "cpu")
+
+    mock_cfg_cls.load.assert_called_once_with(sidecar)
+
+
+def test_load_model_from_checkpoint_keeps_different_explicit_config(tmp_path):
+    from oriented_det.runtime import checkpoint as ckpt_mod
+
+    mock_cls = MagicMock()
+    inst = MagicMock()
+    inst.load_state_dict = MagicMock()
+    inst.to = MagicMock(return_value=inst)
+    inst.eval = MagicMock()
+    mock_cls.return_value = inst
+
+    cfg = _minimal_config("rotated_retinanet")
+    cfg.num_classes = 2
+    fake_state = {
+        "head.conv_cls.weight": torch.zeros(4, 256, 1, 1),
+        "head.conv_bbox.weight": torch.zeros(10, 256, 1, 1),
+    }
+    explicit_config = tmp_path / "configs" / "rotated_retinanet" / "custom.json"
+    explicit_config.parent.mkdir(parents=True)
+    explicit_config.write_text("{}", encoding="utf-8")
+    sidecar = tmp_path / "pretrained" / "rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json"
+    sidecar.parent.mkdir()
+    sidecar.write_text("{}", encoding="utf-8")
+    ckpt = sidecar.with_suffix(".pth")
+    ckpt.write_bytes(b"x")
+
+    with patch.object(ckpt_mod, "TrainingExperimentConfig") as mock_cfg_cls, patch.object(
+        ckpt_mod, "RotatedRetinaNet", mock_cls
+    ), patch("oriented_det.pretrained.ensure_checkpoint", return_value=ckpt), patch(
+        "oriented_det.pretrained.resolve_checkpoint_sidecar_config", return_value=sidecar
+    ), patch("oriented_det.pretrained.resolve_checkpoint_source_recipe", return_value="configs/rotated_retinanet/dota_le90_1x.json"), patch.object(
+        ckpt_mod, "_config_matches_source_recipe", return_value=False
+    ), patch.object(
+        ckpt_mod.torch, "load", return_value={"model_state_dict": fake_state}
+    ), patch.object(ckpt_mod, "apply_inference_config_to_model"):
+        mock_cfg_cls.load.return_value = cfg
+        ckpt_mod.load_model_from_checkpoint(str(ckpt), str(explicit_config), "cpu")
+
+    mock_cfg_cls.load.assert_called_once_with(explicit_config)
+
+
 def test_infer_num_classes_from_checkpoint_retinanet_uses_head_shapes(tmp_path):
     from oriented_det.runtime.checkpoint import infer_num_classes_from_checkpoint
 
@@ -225,6 +306,7 @@ def test_create_model_rcnn_passes_inference_pre_nms_score_from_config():
     assert call_kw["anchor_ratios"] == [0.5, 2.0]
     assert call_kw["roi_norm_factor"] == pytest.approx(3.0)
     assert call_kw["roi_edge_swap"] is False
+    assert call_kw["roi_proj_xy"] is True
     assert call_kw["roi_box_reg_angle_weight"] == pytest.approx(1.7)
     assert call_kw["roi_box_reg_iou_weight"] == pytest.approx(0.2)
     assert call_kw["roi_box_reg_iou_loss_type"] == "kfiou"
@@ -242,3 +324,33 @@ def test_create_model_rcnn_passes_inference_pre_nms_score_from_config():
     assert call_kw["roi_box_reg_iou_schedule_epochs"] == [10, 20]
     assert call_kw["roi_box_reg_iou_schedule_values"] == [0.2, 0.1, 0.0]
     assert call_kw["roi_inference_top_class_only"] is True
+
+
+def test_load_model_from_checkpoint_rotated_faster_rcnn_passes_roi_proj_xy():
+    from oriented_det.runtime import checkpoint as ckpt_mod
+
+    mock_cls = MagicMock()
+    inst = MagicMock()
+    inst.load_state_dict = MagicMock()
+    inst.to = MagicMock(return_value=inst)
+    inst.eval = MagicMock()
+    mock_cls.return_value = inst
+
+    cfg = _minimal_config("rotated_faster_rcnn")
+    cfg.num_classes = 2
+    cfg.model.roi_proj_xy = True
+    fake_state = {
+        "roi_head.fc_cls.weight": torch.zeros(4, 1024),
+        "roi_head.fc_cls.bias": torch.zeros(4),
+    }
+
+    with patch.object(ckpt_mod, "TrainingExperimentConfig") as mock_cfg_cls, patch.object(
+        ckpt_mod, "RotatedFasterRCNN", mock_cls
+    ), patch("oriented_det.pretrained.ensure_checkpoint", side_effect=lambda p: p), patch.object(
+        ckpt_mod.torch, "load", return_value={"model_state_dict": fake_state}
+    ), patch.object(ckpt_mod, "apply_inference_config_to_model"):
+        mock_cfg_cls.load.return_value = cfg
+        model, _, _ = ckpt_mod.load_model_from_checkpoint("/tmp/fake.pth", "/tmp/config.json", "cpu")
+
+    assert model is inst
+    assert mock_cls.call_args.kwargs["roi_proj_xy"] is True

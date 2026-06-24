@@ -55,6 +55,32 @@ import cv2
 import numpy as np
 from PIL import Image
 
+
+def _patch_gradio_slider_none_payloads() -> None:
+    """Treat cleared/null Gradio slider payloads as their configured default."""
+    try:
+        from gradio.components.slider import Slider
+    except Exception:
+        return
+
+    if getattr(Slider.preprocess, "_odet_none_payload_patch", False):
+        return
+
+    original_preprocess = Slider.preprocess
+
+    def patched_preprocess(self, payload):
+        if payload is None:
+            payload = getattr(self, "value", None)
+            if callable(payload) or payload is None:
+                payload = self.minimum if self.minimum is not None else 0
+        return original_preprocess(self, payload)
+
+    patched_preprocess._odet_none_payload_patch = True
+    Slider.preprocess = patched_preprocess
+
+
+_patch_gradio_slider_none_payloads()
+
 # Add project root to path
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -785,6 +811,8 @@ def create_app(
         use_per_class_val: bool = False,
         per_class_thresholds: Optional[Dict[str, float]] = None,
     ) -> None:
+        sort_mode = str(sort_mode or "no order")
+        threshold_val = _to_float(threshold_val, viewer.conf_threshold)
         needs_resort = viewer.current_sort != sort_mode
         if viewer.has_predictions and sort_mode in ["dets asc", "dets desc"]:
             threshold_signature = (
@@ -811,6 +839,11 @@ def create_app(
         use_per_class_val: bool,
         *per_class_vals: Any,
     ):
+        threshold_val = _to_float(threshold_val, viewer.conf_threshold)
+        zoom_str = str(zoom_str or "2x")
+        sort_mode = str(sort_mode or "no order")
+        show_labels_val = bool(show_labels_val)
+        use_per_class_val = bool(use_per_class_val)
         per_class_thresholds = _build_per_class_thresholds(per_class_vals)
         _maybe_sort(sort_mode, threshold_val, use_per_class_val, per_class_thresholds)
         zoom = float(zoom_str.replace("x", ""))
@@ -866,6 +899,7 @@ def create_app(
         *per_class_vals: Any,
     ):
         """Same as ``refresh_prediction_tabs`` but order matches Gradio: 4 images, slider, then markdown."""
+        slider_idx = _slider_index(slider_idx, 0)
         img_pg, img_p, img_g, img_i, stats_md, image_label = refresh_prediction_tabs(
             idx,
             threshold_val,
@@ -879,6 +913,9 @@ def create_app(
         return img_pg, img_p, img_g, img_i, idx, idx, stats_md, image_label
 
     def refresh_dataset_tabs(idx: int, zoom_str: str, sort_mode: str):
+        idx = _slider_index(idx, 0)
+        zoom_str = str(zoom_str or "2x")
+        sort_mode = str(sort_mode or "no order")
         _maybe_sort(sort_mode, threshold_for_api)
         zoom = float(zoom_str.replace("x", ""))
         i = int(idx)
@@ -897,6 +934,12 @@ def create_app(
         active_view_mode: str,
         *per_class_vals: Any,
     ) -> str:
+        idx = _slider_index(idx, 0)
+        threshold_val = _to_float(threshold_val, viewer.conf_threshold)
+        zoom_str = str(zoom_str or "2x")
+        sort_mode = str(sort_mode or "no order")
+        show_labels_val = bool(show_labels_val)
+        use_per_class_val = bool(use_per_class_val)
         per_class_thresholds = _build_per_class_thresholds(per_class_vals)
         _maybe_sort(sort_mode, threshold_val, use_per_class_val, per_class_thresholds)
         zoom = float(zoom_str.replace("x", ""))
@@ -924,6 +967,9 @@ def create_app(
         sort_mode: str,
         active_view_mode: str,
     ) -> str:
+        idx = _slider_index(idx, 0)
+        zoom_str = str(zoom_str or "2x")
+        sort_mode = str(sort_mode or "no order")
         _maybe_sort(sort_mode, threshold_for_api)
         zoom = float(zoom_str.replace("x", ""))
         i = int(idx)
@@ -1083,57 +1129,68 @@ def create_app(
                 fn=nav_first_p,
                 inputs=prediction_inputs_no_idx,
                 outputs=tab_outputs_p_nav,
+                preprocess=False,
             )
             prev_btn.click(
                 fn=nav_prev_p,
                 inputs=prediction_inputs,
                 outputs=tab_outputs_p_nav,
+                preprocess=False,
             )
             next_btn.click(
                 fn=nav_next_p,
                 inputs=prediction_inputs,
                 outputs=tab_outputs_p_nav,
+                preprocess=False,
             )
             last_btn.click(
                 fn=nav_last_p,
                 inputs=prediction_inputs_no_idx,
                 outputs=tab_outputs_p_nav,
+                preprocess=False,
             )
             image_idx.change(
                 fn=on_image_idx_change,
                 inputs=[image_idx] + prediction_inputs_no_idx,
                 outputs=tab_outputs_p + [image_idx_state],
+                preprocess=False,
             )
             conf_threshold.change(
                 fn=refresh_prediction_tabs,
                 inputs=prediction_inputs,
                 outputs=tab_outputs_p,
+                preprocess=False,
             )
             zoom_scale.change(
                 fn=refresh_prediction_tabs,
                 inputs=prediction_inputs,
                 outputs=tab_outputs_p,
+                preprocess=False,
             )
             show_labels.change(
                 fn=refresh_prediction_tabs,
                 inputs=prediction_inputs,
                 outputs=tab_outputs_p,
+                preprocess=False,
             )
             use_per_class_thresholds.change(
                 fn=refresh_prediction_tabs,
                 inputs=prediction_inputs,
                 outputs=tab_outputs_p,
+                preprocess=False,
             )
             sort_mode.change(
                 fn=update_sorting_predictions,
                 inputs=prediction_inputs_no_idx,
                 outputs=tab_outputs_p_nav,
+                preprocess=False,
             )
             for pc_slider in per_class_sliders:
                 pc_slider.change(
                     fn=refresh_prediction_tabs,
                     inputs=prediction_inputs,
                     outputs=tab_outputs_p,
+                    preprocess=False,
                 )
             tab_preds_gt.select(fn=lambda: "preds_gt", outputs=active_view_mode)
             tab_preds.select(fn=lambda: "preds", outputs=active_view_mode)
@@ -1143,6 +1200,7 @@ def create_app(
                 fn=build_download_image_predictions,
                 inputs=[image_idx_state, conf_threshold, zoom_scale, sort_mode, show_labels, use_per_class_thresholds, active_view_mode] + per_class_sliders,
                 outputs=download_file,
+                preprocess=False,
             )
         else:
             tab_outputs_d = [tab_gt, tab_image, image_label_display]
@@ -1175,7 +1233,7 @@ def create_app(
             def on_image_idx_change_d(slider_val, z, s):
                 idx = _slider_index(slider_val, 0)
                 img_g, img_i, image_label = refresh_dataset_tabs(idx, z, s)
-                return img_g, img_i, idx, image_label
+                return img_g, img_i, image_label, idx
 
             first_btn.click(
                 fn=nav_first_d,
@@ -1201,6 +1259,7 @@ def create_app(
                 fn=on_image_idx_change_d,
                 inputs=[image_idx, zoom_scale, sort_mode],
                 outputs=tab_outputs_d + [image_idx_state],
+                preprocess=False,
             )
             zoom_scale.change(
                 fn=refresh_dataset_tabs,

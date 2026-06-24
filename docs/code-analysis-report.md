@@ -22,7 +22,6 @@
 | [`docs/user-guide/utils.md`](user-guide/utils.md) | [`oriented_det/utils/`](../oriented_det/utils/) | OK | Points to configuration guide |
 | [`docs/examples/training.md`](examples/training.md) | `odet train`, configs | OK | |
 | [`docs/examples/inference.md`](examples/inference.md) | [`tools/save_predictions.py`](../tools/save_predictions.py) | Partial | Analysis artifact names not listed (see §3) |
-| [`docs/examples/visualization.md`](examples/visualization.md) | `oriented_det.utils.viz`, `visualize_boxes.py` | OK | |
 | [`docs/api/*.md`](api/) | Package `__init__.py` modules | OK | Six mkdocstrings pages; griffe warnings on a few annotations |
 | [`configs/README.md`](../configs/README.md) | `configs/`, schema | OK | |
 | [`configs/rotated_retinanet/README.md`](../configs/rotated_retinanet/README.md) | `rotated_retinanet.py`, recipes | OK | Richest architecture doc; matches 3× run behavior |
@@ -61,7 +60,7 @@
 
 **Registered in `oriented_det/cli/__init__.py`:**
 
-`train`, `train-multi-gpu`, `preds`, `metrics`, `lr-finder`, `stats`, `tile-dota`, `image-demo`, `viewer`, `playground-csv`, `playground-to-dota`, `export-onnx`, `labels-to-comma`, `free-gpu`, `visualize-boxes`, `pretrained`, plus `export-tf` (Makefile wrapper).
+`train`, `train-multi-gpu`, `preds`, `metrics`, `lr-finder`, `stats`, `tile-dota`, `image-demo`, `viewer`, `playground-csv`, `playground-to-dota`, `export-onnx`, `labels-to-comma`, `free-gpu`, `pretrained`, plus `export-tf` (Makefile wrapper).
 
 | Command | `cli/README.md` | `getting-started/tools.md` | `tools/README.md` |
 |---------|-----------------|---------------------------|-------------------|
@@ -73,7 +72,7 @@
 | playground-* | Yes | No | Yes |
 | export-onnx, export-tf | Yes | No | Via export README |
 | pretrained | No | No | Yes |
-| labels-to-comma, free-gpu, visualize-boxes | No | visualize via script path only | Yes |
+| labels-to-comma, free-gpu | No | No | Yes |
 
 ---
 

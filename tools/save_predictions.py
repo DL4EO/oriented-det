@@ -66,6 +66,7 @@ from oriented_det.runtime.inference import (
 from oriented_det.runtime.checkpoint import (
     infer_num_classes_from_checkpoint,
     load_model_from_checkpoint,
+    resolve_inference_config_path,
 )
 from oriented_det.data.dota_classes import DOTA_V1_CLASSES
 from oriented_det.data.dota import dota_label_path_for_image
@@ -1344,6 +1345,10 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
     # Load model
     print(f"[{_ts()}] Loading model...", flush=True)
     t_load0 = time.perf_counter()
+    resolved_config_path = resolve_inference_config_path(checkpoint_path, config_path)
+    if resolved_config_path != Path(config_path):
+        config_path = str(resolved_config_path)
+        print(f"[{_ts()}] Using pretrained sidecar config: {config_path}", flush=True)
     model, config, class_names = load_model_from_checkpoint(checkpoint_path, config_path, device)
     print(
         f"[{_ts()}] Model loaded in {time.perf_counter() - t_load0:.1f}s",

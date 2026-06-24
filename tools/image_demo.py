@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PIL import Image
 
 from oriented_det.train.config import get_preprocessing_params
-from oriented_det.runtime.checkpoint import load_model_from_checkpoint
+from oriented_det.runtime.checkpoint import load_model_from_checkpoint, resolve_inference_config_path
 from oriented_det.runtime.inference import (
     get_model_size,
     preprocess_crop,
@@ -47,7 +47,7 @@ def parse_args():
     )
     parser.add_argument("img", type=Path, help="Image file or directory of images")
     parser.add_argument("config", type=Path, help="Path to experiment config (e.g. .json)")
-    parser.add_argument("checkpoint", type=Path, help="Path to checkpoint (.pth)")
+    parser.add_argument("checkpoint", type=str, help="Path to checkpoint (.pth) or hf://<slug>")
     parser.add_argument(
         "--out-file",
         type=Path,
@@ -115,6 +115,7 @@ def main():
     if not checkpoint_path.exists():
         print(f"Checkpoint not found: {args.checkpoint}")
         sys.exit(1)
+    config_path = resolve_inference_config_path(checkpoint_path, args.config)
 
     images = collect_images(args.img)
     if not images:
@@ -122,10 +123,10 @@ def main():
         sys.exit(1)
 
     # Load model from config + checkpoint (model type, num_classes, preprocessing, class_names from config)
-    print(f"Loading config: {args.config}")
+    print(f"Loading config: {config_path}")
     print(f"Loading checkpoint: {checkpoint_path}")
     model, config, class_names = load_model_from_checkpoint(
-        str(checkpoint_path), str(args.config), device=args.device
+        str(checkpoint_path), str(config_path), device=args.device
     )
     preprocessing = get_preprocessing_params(config)
     slice_h, slice_w = get_model_size(preprocessing)

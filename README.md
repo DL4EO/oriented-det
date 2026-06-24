@@ -34,6 +34,7 @@ uv pip install -e .
 
 - From PyPI: `pip install oriented-det`
 - For development and tests: `uv pip install -e ".[dev]"`
+- For the Gradio prediction viewer: `uv pip install -e ".[viewer]"` or `pip install "oriented-det[viewer]"`
 - For **macOS Apple Silicon** or **CPU-only**, see [Installation](docs/getting-started/installation.md).
 - Verify: `pytest tests/test_geometry.py tests/test_iou.py tests/test_nms.py`
 
@@ -92,7 +93,7 @@ After that, copy-pasted commands and unmodified configs that reference `/path/to
 Full documentation is in the **docs/** folder and can be built and served with MkDocs:
 
 - **Build/serve**: `make docs` or `make docs-serve` (see [docs/README.md](docs/README.md)); or `uv pip install -e ".[docs]"` then `mkdocs serve`.
-- **Guides**: [Getting Started](docs/getting-started/installation.md), [User Guide](docs/user-guide/geometry.md), [API Reference](docs/api/geometry.md), [Examples](docs/examples/visualization.md).
+- **Guides**: [Getting Started](docs/getting-started/installation.md), [User Guide](docs/user-guide/geometry.md), [API Reference](docs/api/geometry.md), [Examples](docs/examples/inference.md).
 
 ## Documentation by folder
 

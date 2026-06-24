@@ -26,22 +26,8 @@ After `uv pip install -e .`, use the **`odet`** CLI (`odet --help`). Script impl
 | `pretrained` | `list` / `download` Hub checkpoints (`hf://` slugs) |
 | `labels-to-comma` | Convert DOTA label files to comma-separated format |
 | `free-gpu` | Kill GPU processes (dev utility) |
-| `visualize-boxes` | Demo RBox / QBox / Polygon drawing |
 
 Common commands:
-
-### Visualization
-
-**`tools/visualize_boxes.py`** - Create and visualize geometric primitives:
-
-```bash
-python tools/visualize_boxes.py
-```
-
-This script shows:
-- Creating RBox, QBox, and Polygon objects
-- Converting between formats
-- Drawing boxes on images
 
 ### Training
 
@@ -324,5 +310,5 @@ data_dir/tiles_1024/
 
 ## Tutorials
 
-More detailed tutorials are available in the [Tools section](../examples/visualization.md).
+More detailed tutorials are available in the [training](../examples/training.md) and [inference](../examples/inference.md) examples.
 

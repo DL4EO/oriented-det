@@ -32,13 +32,13 @@ make docs-serve       # Build and serve documentation
 make clean            # Remove generated output files
 ```
 
-For **visualization**, **tiling**, and **inference** on single images, run the scripts directly (see Scripts below); there are no `make visualize` / `make tile` / `make inference` targets.
+For **tiling** and **inference** on single images, run the scripts directly (see Scripts below); there are no `make tile` / `make inference` targets.
 
 ## Scripts
 
 ### `image_demo.py`
 
-Run inference on image(s) using oriented-det **config + checkpoint**. Loads model type, num_classes, preprocessing, and class names from the config. Detection **labels are 1-based** foreground ids (same convention as training `class_map`); overlay text uses `class_names[label - 1]`.
+Run inference on image(s) using oriented-det **config + checkpoint**. Loads model type, num_classes, preprocessing, and class names from the config. For registered pretrained weights, a sidecar config beside the `.pth` is preferred only when the provided config is the checkpoint's manifest `source_recipe`; a different config is kept as-is. Detection **labels are 1-based** foreground ids (same convention as training `class_map`); overlay text uses `class_names[label - 1]`.
 
 **Inference:** If the image **width×height** equals the model canvas from `preprocessing.target_size` (same as `oriented_det.runtime.inference.get_model_size`), runs **one** `run_inference` forward (ToTensor+normalize, no resize). Otherwise uses **`run_inference_sliding_window`** (zero-pad smaller images, tile larger ones; NMS in image space), same as `oriented_det.runtime.inference` / `save_predictions`.
 
@@ -60,28 +60,6 @@ python tools/image_demo.py demo/demo.jpg config.json checkpoint.pth \
 Demo images: place test images in `demo/` (see `demo/README.md` for a sample image or using your own).
 
 **Makefile:** `make demo` runs `tools/image_demo.py` on every top-level `*.jpg` / `*.jpeg` / `*.png` in `DEMO_DIR` (default `demo/`) with the latest `runs/` checkpoint and config; outputs default to `demo/out/`. Variables: `DEMO_DIR`, `IMAGE_DEMO_OUT_DIR`, `IMAGE_DEMO_DEVICE` (see top-level `Makefile`).
-
-### `visualize_boxes.py`
-
-Demonstrates visualization and manipulation of oriented bounding boxes.
-
-**Usage:**
-```bash
-# Basic visualization (creates blank image with example boxes)
-python tools/visualize_boxes.py --output boxes.png
-
-# Visualize on your own image
-python tools/visualize_boxes.py --image path/to/image.jpg --output result.png
-
-# Run all demonstrations
-python tools/visualize_boxes.py --all --output demo.png
-```
-
-**Features:**
-- Create and visualize RBox, QBox, and Polygon objects
-- Demonstrate conversions between representations
-- Show geometric transformations (flip, rotate)
-- Draw boxes with labels on images
 
 ### `train.py`
 
@@ -324,6 +302,8 @@ Sweep controls:
 ### `app.py`
 
 Gradio app to browse **predictions** from `save_predictions.py`. Shows the current image path/name above the tabs and updates it when you navigate.
+
+The app includes a small Gradio 6.8 compatibility patch so cleared/null slider payloads fall back to the slider default instead of crashing during slider preprocessing.
 
 Predictions mode (requires a predictions directory from `save_predictions.py`):
 ```bash
@@ -569,9 +549,8 @@ See [oriented_det/ops/README.md](../oriented_det/ops/README.md#geometry-based-ri
 
 ## Tips
 
-1. **Start with visualization**: Use `visualize_boxes.py` to understand the geometry primitives
-2. **Preview augmentations**: Run `preview_augmentation.py` on your config to verify flips and Albumentations before a long training run
-3. **Test on small dataset**: Before full training, test on a subset of your data
-4. **Monitor training**: Check checkpoint directory for saved models
-5. **Adjust hyperparameters**: Learning rate, batch size, and thresholds may need tuning for your data
+1. **Preview augmentations**: Run `preview_augmentation.py` on your config to verify flips and Albumentations before a long training run
+2. **Test on small dataset**: Before full training, test on a subset of your data
+3. **Monitor training**: Check checkpoint directory for saved models
+4. **Adjust hyperparameters**: Learning rate, batch size, and thresholds may need tuning for your data
 

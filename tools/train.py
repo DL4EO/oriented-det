@@ -607,6 +607,7 @@ def create_model_from_config(
             target_stds=target_stds,
             roi_norm_factor=config.model.roi_norm_factor,
             roi_edge_swap=config.model.roi_edge_swap,
+            roi_proj_xy=getattr(config.model, "roi_proj_xy", False),
             roi_box_reg_angle_weight=getattr(config.model, "roi_box_reg_angle_weight", 1.0),
             roi_box_reg_angle_schedule_epochs=getattr(
                 config.model, "roi_box_reg_angle_schedule_epochs", None

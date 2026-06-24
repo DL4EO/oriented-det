@@ -211,10 +211,10 @@ Rotated RetinaNet provides a good balance between speed and accuracy for oriente
 
 DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 val tiles).
 
-| Backbone | mAP (eval-val) | Angle | lr schd | Aug | BS | Config | Download |
-| :----------------------: | :---: | :---: | :-----: | :-: | :--: | :----: | :----: |
-| ResNet50 (1024,1024,200) | 64.14 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | `hf://rotated_retinanet_dota_le90_1x` |
-| ResNet50 (1024,1024,200) | 71.52 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | `hf://rotated_retinanet_dota_le90_3x` |
+| Backbone | mAP (eval-val) | Angle | lr schd | Aug | BS | Config | Final config | Final log | Download |
+| :----------------------: | :---: | :---: | :-----: | :-: | :--: | :----: | :----------: | :-------: | :----: |
+| ResNet50 (1024,1024,200) | 64.14 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log) | `hf://rotated_retinanet_dota_le90_1x` |
+| ResNet50 (1024,1024,200) | 71.52 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log) | `hf://rotated_retinanet_dota_le90_3x` |
 
 Eval reports: [`predictions/20260615_030209/`](../../predictions/20260615_030209/), [`predictions/20260615_005855/`](../../predictions/20260615_005855/).
 
