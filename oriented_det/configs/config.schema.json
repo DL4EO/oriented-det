@@ -30,6 +30,34 @@
       "type": ["string", "null"],
       "description": "Path to the training recipe JSON used for this run (set when saving config.json)."
     },
+    "source_code_root": {
+      "type": ["string", "null"],
+      "description": "Framework source tree used at train start (set when saving config.json)."
+    },
+    "git_commit": {
+      "type": ["string", "null"],
+      "description": "Full git commit hash of the framework source at train start."
+    },
+    "git_describe": {
+      "type": ["string", "null"],
+      "description": "Output of git describe --dirty --always --tags at train start."
+    },
+    "git_dirty": {
+      "type": ["boolean", "null"],
+      "description": "True when the framework source tree had uncommitted changes at train start."
+    },
+    "git_branch": {
+      "type": ["string", "null"],
+      "description": "Git branch name at train start (may be HEAD when detached)."
+    },
+    "git_commit_date": {
+      "type": ["string", "null"],
+      "description": "Committer date (ISO 8601) of git_commit at train start."
+    },
+    "package_version": {
+      "type": ["string", "null"],
+      "description": "Installed oriented-det package version at train start."
+    },
     "class_map": {
       "type": ["object", "null"],
       "additionalProperties": { "type": "integer" },
@@ -87,6 +115,11 @@
           "default": 0,
           "minimum": 0,
           "description": "For Airbus split.csv with integer fold ids: which fold id is treated as validation (default 0). Ignored when split.csv uses legacy train/val strings."
+        },
+        "train_includes_val": {
+          "type": "boolean",
+          "default": false,
+          "description": "Airbus Playground fold mode only: when true, the train split includes all folds (DOTA trainval parity). Validation still uses val_split_id for monitoring only."
         },
         "ignore_labels": {
           "type": ["array", "null"],
@@ -170,6 +203,9 @@
         "roi_box_reg_iou_loss_type": { "type": "string", "default": "riou", "enum": ["riou", "kfiou", "probiou"], "description": "Auxiliary regression term when roi_box_reg_iou_weight > 0: riou = mean(1 - rIoU); kfiou = Kalman-filter IoU surrogate; probiou = mean ProbIoU (Gaussian BBox)." },
         "roi_box_reg_kfiou_fun": { "type": ["string", "null"], "default": null, "enum": [null, "none", "ln", "exp"], "description": "When roi_box_reg_iou_loss_type is kfiou, overlap mapping: none → 1-KFIoU; ln → -log(KFIoU); exp → exp(1-KFIoU)-1." },
         "roi_box_reg_probiou_mode": { "type": ["string", "null"], "default": null, "enum": [null, "l1", "l2"], "description": "When roi_box_reg_iou_loss_type is probiou, metric variant: l1 (bounded, default) or l2 (-log(1-l1^2))." },
+        "roi_box_reg_main_loss_type": { "type": "string", "default": "smooth_l1", "enum": ["smooth_l1", "probiou", "riou", "kfiou"], "description": "Primary ROI box regression loss for Rotated Faster R-CNN: smooth_l1 (encoded) or decoded probiou/riou/kfiou." },
+        "roi_box_reg_norm": { "type": "string", "default": "sampled_all", "enum": ["sampled_all", "positives_only"], "description": "Smooth L1 normalization: sampled_all (MMDet avg_factor over pos+neg) or positives_only (mean over positives)." },
+        "roi_box_reg_smooth_l1_aux_weight": { "type": "number", "default": 0.0, "description": "Encoded Smooth L1 aux weight when roi_box_reg_main_loss_type is probiou/riou/kfiou." },
         "retinanet_stacked_convs": { "type": "integer", "default": 1, "minimum": 1, "description": "RetinaNet shared 3x3 conv depth before cls/reg (MMRotate: 4)." },
         "box_reg_loss_type": { "type": "string", "default": "smooth_l1", "enum": ["smooth_l1", "l1"], "description": "RetinaNet box regression loss (MMRotate: l1)." },
         "box_reg_weight": { "type": "number", "default": 1.0, "description": "RetinaNet box regression loss weight." },
@@ -187,7 +223,8 @@
         "rpn_negative_iou_threshold": { "type": "number", "default": 0.3, "description": "IoU threshold for negative RPN anchors." },
         "rpn_min_pos_iou": { "type": "number", "default": 0.3, "description": "Min IoU for best-anchor-per-GT to be positive (MMRotate RPN)." },
         "rpn_match_low_quality": { "type": "boolean", "default": true, "description": "Force best anchor per GT to positive when IoU >= rpn_min_pos_iou." },
-        "use_hbb_for_matching": { "type": "boolean", "default": false, "description": "Use axis-aligned (HBB) IoU for matching. When true, helps angle regression and classifier stability (e.g. TOY-200)." },
+        "use_hbb_for_matching": { "type": "boolean", "default": false, "description": "Use axis-aligned (HBB) IoU for RPN/anchor matching (MMRotate RPN stage)." },
+        "roi_use_hbb_for_matching": { "type": "boolean", "default": false, "description": "Oriented R-CNN only: use HBB IoU for ROI-stage matching. Default false (rotated IoU, MMRotate RCNN)." },
         "add_gt_as_proposals": { "type": "boolean", "default": true, "description": "Append GT boxes to RPN proposals in training (MMRotate default)." },
         "final_nms_iou_threshold": { "type": "number", "default": 0.5, "description": "Final detection NMS IoU threshold after ROI head (distinct from rpn_nms_threshold)." },
         "nms_class_agnostic": { "type": "boolean", "default": false, "description": "If true, run one oriented NMS on all classes (suppresses overlapping car/truck); if false, NMS per class (default)." },

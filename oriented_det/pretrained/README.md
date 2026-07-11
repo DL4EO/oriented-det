@@ -11,6 +11,8 @@ Manifest-driven downloads from [Hugging Face Hub](https://huggingface.co/docs/hu
 Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 
 - `oriented_rcnn_dota_le90_1x`
+- `oriented_rcnn_dota_le90_3x`
+- `rotated_faster_rcnn_dota_le90_1x`
 - `rotated_faster_rcnn_dota_le90_3x`
 - `rotated_retinanet_dota_le90_1x`
 - `rotated_retinanet_dota_le90_3x`
@@ -37,7 +39,8 @@ Simple inference (`odet image-demo`, `odet preds`, deploy/export paths through `
 ## Publishing weights
 
 1. `python tools/publish_checkpoint.py <run_ckpt> pretrained/<basename_without_hash>`
-2. Update `manifest.json` (`filename`, `sha256`, `source_recipe`, `eval_map50`, …). **`eval_map50`** is mAP50 from `odet preds` on val tiles (same protocol as `make eval-val`), not `compute_map_final` from training — see [pretrained/README.md](../../pretrained/README.md).
-3. Upload: `make upload-pretrained` (or `hf upload …` — see [pretrained/README.md](../../pretrained/README.md)).
+2. Copy `<experiment>/config.json` and `train.log` to `pretrained/<weight-stem>.json` and `.log`
+3. Update `manifest.json` (`filename`, `sha256`, `source_recipe`, `eval_map50`, …). **`eval_map50`** is mAP50 from `odet preds` on val tiles (same protocol as `make eval-val`), not `compute_map_final` from training — see [pretrained/README.md](../../pretrained/README.md).
+4. Upload: `make upload-pretrained` (`.pth` plus sidecar `.json` / `.log` when present)
 
 See also [pretrained/README.md](../../pretrained/README.md) at the repository root.

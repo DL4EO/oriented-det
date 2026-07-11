@@ -9,6 +9,7 @@ pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 import torch
+import torch.nn.functional as F
 
 from oriented_det.geometry import RBox
 from oriented_det.models.oriented_roi import (
@@ -19,7 +20,9 @@ from oriented_det.models.oriented_roi import (
     assign_roi_fpn_levels_mmrotate,
     match_oriented_proposals_to_gt,
     compute_oriented_roi_loss,
+    compute_horizontal_roi_loss,
     compute_horizontal_roi_loss_mmrotate,
+    _smooth_l1_encoded_regression_loss,
     focal_loss,
 )
 
@@ -544,10 +547,10 @@ class TestROILoss:
         assert "loss_classifier" in losses
         assert "loss_box_reg" in losses
 
-    def test_roi_loss_angle_term_is_periodic(self):
-        """Equivalent wrapped angle errors should produce the same ROI box loss."""
-        proposals = torch.tensor([[64.0, 64.0, 32.0, 16.0, 0.0]])
+    def test_roi_loss_angle_term_uses_encoded_smooth_l1(self):
+        """ROI box regression uses encoded-space Smooth L1 (MMRotate), not radian periodic loss."""
         gt_boxes = torch.tensor([[64.0, 64.0, 32.0, 16.0, math.radians(89.0)]])
+        proposals = gt_boxes.clone()
         gt_labels = torch.tensor([1], dtype=torch.int64)
         class_logits = torch.tensor([[0.0, 10.0]])
 
@@ -555,8 +558,6 @@ class TestROILoss:
         target_stds = (0.1, 0.1, 0.2, 0.2, 0.1)
         norm_factor = 2.0
 
-        # Two predictions whose decoded angles differ by 180 degrees but represent
-        # the same wrapped angular error relative to the target.
         target_angle_encoded = (
             (math.radians(89.0) / (norm_factor * math.pi) - target_means[4]) / target_stds[4]
         )
@@ -592,7 +593,7 @@ class TestROILoss:
             include_assignment_diagnostics=False,
         )
 
-        assert torch.allclose(losses_a["loss_box_reg"], losses_b["loss_box_reg"], atol=1e-6)
+        assert losses_a["loss_box_reg"].item() < losses_b["loss_box_reg"].item()
 
     def test_roi_loss_iou_term_penalizes_geometrically_worse_box(self):
         """Adding the ROI IoU term should increase loss for a worse decoded box."""
@@ -716,6 +717,157 @@ def test_horizontal_roi_loss_angle_weight_scales_angle_term():
         include_assignment_diagnostics=False,
     )
     assert loss_w3["loss_box_reg"] > loss_w1["loss_box_reg"]
+
+
+def test_horizontal_roi_loss_angle_term_uses_encoded_smooth_l1():
+    """Horizontal RoI Smooth L1 uses encoded deltas (MMRotate), not radian periodic loss."""
+    from oriented_det.models.horizontal_roi_coder import encode_delta_xywh_th
+
+    proposals_xyxy, gt_boxes, gt_labels, class_logits, _ = _horizontal_roi_fixture()
+    target_stds = (0.1, 0.1, 0.2, 0.2, 0.1)
+    norm_factor = 2.0
+    encoded = encode_delta_xywh_th(
+        proposals_xyxy,
+        gt_boxes,
+        stds=target_stds,
+        norm_factor=norm_factor,
+        edge_swap=False,
+    )
+    box_regression_a = encoded.clone()
+    box_regression_b = encoded.clone()
+    box_regression_b[0, 4] = box_regression_b[0, 4] + (1.0 / target_stds[4])
+    kwargs = dict(
+        class_logits=class_logits,
+        proposals_xyxy=proposals_xyxy,
+        gt_boxes=gt_boxes,
+        gt_labels=gt_labels,
+        positive_iou_threshold=0.5,
+        negative_iou_threshold=0.3,
+        main_loss_type="smooth_l1",
+        box_reg_iou_weight=0.0,
+        stds=target_stds,
+        norm_factor=norm_factor,
+        edge_swap=False,
+        include_assignment_diagnostics=False,
+    )
+    loss_a = compute_horizontal_roi_loss(box_regression=box_regression_a, **kwargs)
+    loss_b = compute_horizontal_roi_loss(box_regression=box_regression_b, **kwargs)
+    assert loss_a["loss_box_reg"].item() < loss_b["loss_box_reg"].item()
+
+
+def _horizontal_roi_fixture():
+    proposals_xyxy = torch.tensor([[40.0, 50.0, 88.0, 82.0]], dtype=torch.float32)
+    gt_boxes = torch.tensor([[64.0, 64.0, 32.0, 16.0, 0.3]], dtype=torch.float32)
+    gt_labels = torch.tensor([1], dtype=torch.int64)
+    class_logits = torch.tensor([[0.0, 10.0]], requires_grad=False)
+    box_regression = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.5]], requires_grad=True)
+    return proposals_xyxy, gt_boxes, gt_labels, class_logits, box_regression
+
+
+def test_horizontal_roi_loss_mmrotate_matches_sampled_all():
+    proposals_xyxy, gt_boxes, gt_labels, class_logits, box_regression = _horizontal_roi_fixture()
+    box_regression = box_regression.detach()
+    kwargs = dict(
+        class_logits=class_logits,
+        box_regression=box_regression,
+        proposals_xyxy=proposals_xyxy,
+        gt_boxes=gt_boxes,
+        gt_labels=gt_labels,
+        positive_iou_threshold=0.5,
+        negative_iou_threshold=0.3,
+        box_reg_iou_weight=0.0,
+        edge_swap=False,
+        include_assignment_diagnostics=False,
+    )
+    loss_mm = compute_horizontal_roi_loss_mmrotate(**kwargs)
+    loss_all = compute_horizontal_roi_loss(**kwargs, reg_norm="sampled_all")
+    assert loss_mm["loss_box_reg"].item() == pytest.approx(loss_all["loss_box_reg"].item())
+
+
+def test_smooth_l1_encoded_regression_loss_norm_modes():
+    """positives_only uses per-element mean; sampled_all divides sum by total sample count."""
+    pred = torch.zeros(2, 5)
+    target = torch.zeros(2, 5)
+    target[:, :4] = 1.0
+    loss_all = _smooth_l1_encoded_regression_loss(
+        pred,
+        target,
+        angle_weight=1.0,
+        reg_norm="sampled_all",
+        num_total_samples=512,
+    )
+    loss_pos = _smooth_l1_encoded_regression_loss(
+        pred,
+        target,
+        angle_weight=1.0,
+        reg_norm="positives_only",
+        num_total_samples=512,
+    )
+    assert loss_pos.item() > loss_all.item()
+    assert loss_all.item() == pytest.approx(4.0 / 512.0)
+    assert loss_pos.item() == pytest.approx(0.4)
+
+
+def test_roi_encoded_regression_matches_mmrotate_smooth_l1_sum_avg_factor():
+    """Hand-computed encoded Smooth L1 / num_total_samples matches the ROI helper."""
+    pred = torch.tensor([[0.1, 0.2, 0.0, 0.0, 0.05]])
+    target = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0]])
+    num_total = 512
+    hand = F.smooth_l1_loss(pred, target, beta=1.0, reduction="sum") / float(num_total)
+    got = _smooth_l1_encoded_regression_loss(
+        pred,
+        target,
+        reg_norm="sampled_all",
+        num_total_samples=num_total,
+    )
+    assert got.item() == pytest.approx(hand.item())
+
+
+def test_horizontal_roi_loss_probiou_main_with_smooth_l1_aux_backward():
+    proposals_xyxy, gt_boxes, gt_labels, class_logits, box_regression = _horizontal_roi_fixture()
+    box_regression = box_regression.clone().detach().requires_grad_(True)
+    out = compute_horizontal_roi_loss(
+        class_logits=class_logits,
+        box_regression=box_regression,
+        proposals_xyxy=proposals_xyxy,
+        gt_boxes=gt_boxes,
+        gt_labels=gt_labels,
+        positive_iou_threshold=0.5,
+        negative_iou_threshold=0.3,
+        main_loss_type="probiou",
+        box_reg_probiou_mode="l1",
+        smooth_l1_aux_weight=0.1,
+        reg_norm="positives_only",
+        box_reg_iou_weight=0.0,
+        edge_swap=False,
+        include_assignment_diagnostics=False,
+    )
+    assert torch.isfinite(out["loss_box_reg"])
+    out["loss_box_reg"].backward()
+    assert box_regression.grad is not None
+    assert torch.isfinite(box_regression.grad).all()
+
+
+def test_horizontal_roi_loss_default_smooth_l1_main_unchanged_with_probiou_aux():
+    proposals_xyxy, gt_boxes, gt_labels, class_logits, box_regression = _horizontal_roi_fixture()
+    kwargs = dict(
+        class_logits=class_logits,
+        box_regression=box_regression.clone(),
+        proposals_xyxy=proposals_xyxy,
+        gt_boxes=gt_boxes,
+        gt_labels=gt_labels,
+        positive_iou_threshold=0.5,
+        negative_iou_threshold=0.3,
+        main_loss_type="smooth_l1",
+        box_reg_iou_weight=0.1,
+        box_reg_iou_loss_type="probiou",
+        box_reg_probiou_mode="l1",
+        edge_swap=False,
+        include_assignment_diagnostics=False,
+    )
+    loss_mm = compute_horizontal_roi_loss_mmrotate(**kwargs)
+    loss_explicit = compute_horizontal_roi_loss(**kwargs, reg_norm="sampled_all")
+    assert loss_mm["loss_box_reg"].item() == pytest.approx(loss_explicit["loss_box_reg"].item())
 
 
 def test_horizontal_roi_loss_uses_hbb_style_matching(monkeypatch):
@@ -907,3 +1059,34 @@ class TestFocalLoss:
         focal = focal_loss(logits, targets, alpha=1.0, gamma=2.0)
         
         assert focal >= 0
+
+
+def test_oriented_roi_align_uses_first_four_fpn_levels(monkeypatch):
+    """Oriented RoIAlign matches MMRotate: pool from strides 4–32 only."""
+    captured = {"strides": None}
+
+    def _fake_assign(boxes, fpn_strides, finest_scale=56.0, box_format="obb"):
+        captured["strides"] = list(fpn_strides)
+        return torch.zeros((boxes.shape[0],), dtype=torch.long, device=boxes.device)
+
+    monkeypatch.setattr("oriented_det.models.oriented_roi.assign_roi_fpn_levels_mmrotate", _fake_assign)
+
+    device = torch.device("cpu")
+    feature_maps = [
+        torch.randn(1, 8, 128, 128, device=device),
+        torch.randn(1, 8, 64, 64, device=device),
+        torch.randn(1, 8, 32, 32, device=device),
+        torch.randn(1, 8, 16, 16, device=device),
+        torch.randn(1, 8, 8, 8, device=device),
+    ]
+    boxes = torch.tensor([[64.0, 64.0, 56.0, 56.0, 0.0]], device=device)
+    out = oriented_roi_align(
+        feature_maps,
+        boxes,
+        image_sizes=[(512, 512)],
+        output_size=(7, 7),
+        fpn_strides=[4, 8, 16, 32, 64],
+        chunk_size=1,
+    )
+    assert out.shape == (1, 8, 7, 7)
+    assert captured["strides"] == [4, 8, 16, 32]

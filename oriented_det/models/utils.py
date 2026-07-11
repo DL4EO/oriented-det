@@ -153,6 +153,7 @@ def setup_backbone(
     pretrained_backbone: bool = False,
     trainable_layers: int = 5,
     returned_layers: Optional[List[int]] = None,
+    use_p6p7_extra_levels: bool = False,
 ) -> Tuple[nn.Module, int]:
     """Setup backbone and return backbone module and output channels.
 
@@ -162,6 +163,7 @@ def setup_backbone(
         pretrained_backbone: Whether to use pretrained backbone weights
         trainable_layers: Number of backbone layers to keep trainable
         returned_layers: ResNet stages for FPN (e.g. [2,3,4] for MMRotate C3–C5 only)
+        use_p6p7_extra_levels: RetinaNet-style P6/P7 convs on C5 (MMRotate on_input).
 
     Returns:
         Tuple of (backbone, output_channels):
@@ -177,6 +179,7 @@ def setup_backbone(
             pretrained=pretrained_backbone,
             trainable_layers=trainable_layers,
             returned_layers=returned_layers,
+            use_p6p7_extra_levels=use_p6p7_extra_levels,
         )
     
     # Get backbone output channels (typically 256 for FPN)

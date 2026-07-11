@@ -30,7 +30,6 @@ from .oriented_rpn import (
     encode_oriented_boxes,
     decode_oriented_boxes,
     match_oriented_anchors_to_gt,
-    normalize_angle_delta,
 )
 from .utils import (
     rboxes_to_tensor,
@@ -45,25 +44,19 @@ from .utils import (
 
 
 class OrientedRetinaNetHead(nn.Module):
-    """Rotated RetinaNet head that predicts oriented boxes with classification and regression.
-    
-    This head outputs:
-    - Classification logits: num_classes per anchor
-    - Regression predictions: 5 parameters (cx, cy, w, h, angle) per anchor
-    
-    Args:
-        in_channels: Number of input channels from backbone/FPN
-        num_classes: Number of object classes (excluding background)
-        num_anchors: Number of anchors per spatial location
-        stacked_convs: Number of shared 3x3 conv layers before cls/reg (MMRotate default: 4)
+    """Rotated RetinaNet head (MMRotate-style separate cls/reg subnets).
+
+    Two independent 3x3 conv towers (``stacked_convs`` each) feed 3x3 prediction
+    heads. Classification uses sigmoid focal loss (``use_sigmoid=True``); regression
+    outputs 5 parameters per anchor.
     """
-    
+
     def __init__(
         self,
         in_channels: int,
         num_classes: int,
         num_anchors: int,
-        stacked_convs: int = 1,
+        stacked_convs: int = 4,
     ):
         if nn is None:
             raise RuntimeError("PyTorch is required for OrientedRetinaNetHead.")
@@ -71,74 +64,49 @@ class OrientedRetinaNetHead(nn.Module):
         self.num_classes = num_classes
         self.num_anchors = num_anchors
         self.stacked_convs = max(1, int(stacked_convs))
-        
-        # Shared 3x3 conv stack before cls and reg heads (MMRotate: stacked_convs=4)
-        self.convs = nn.ModuleList([
+
+        self.cls_convs = nn.ModuleList([
             nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
             for _ in range(self.stacked_convs)
         ])
-        
-        # Classification head: num_anchors * num_classes sigmoid logits (MMRotate/RetinaNet style,
-        # use_sigmoid=True: K independent binary classifiers per anchor, no background channel).
-        self.conv_cls = nn.Conv2d(in_channels, num_anchors * num_classes, kernel_size=1, stride=1)
-        
-        # Regression head: num_anchors * 5 parameters (cx, cy, w, h, angle)
-        self.conv_bbox = nn.Conv2d(in_channels, num_anchors * 5, kernel_size=1, stride=1)
-        
-        # Initialize weights
-        for layer in list(self.convs) + [self.conv_bbox]:
+        self.reg_convs = nn.ModuleList([
+            nn.Conv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
+            for _ in range(self.stacked_convs)
+        ])
+
+        # MMRotate: 3x3 prediction convs (not 1x1).
+        self.conv_cls = nn.Conv2d(
+            in_channels, num_anchors * num_classes, kernel_size=3, stride=1, padding=1
+        )
+        self.conv_bbox = nn.Conv2d(
+            in_channels, num_anchors * 5, kernel_size=3, stride=1, padding=1
+        )
+
+        for layer in list(self.cls_convs) + list(self.reg_convs) + [self.conv_bbox]:
             nn.init.normal_(layer.weight, std=0.01)
             nn.init.constant_(layer.bias, 0)
-        # Classification head: RetinaNet prior init so sigmoid(logit) ~= prior_prob (0.01) for
-        # every class at the start of training. Positives are "wrong" and get strong focal
-        # gradients; the abundant negatives are nearly "right" and get tiny gradients.
         nn.init.normal_(self.conv_cls.weight, std=0.01)
         prior_prob = 0.01
         bias_init = -math.log((1 - prior_prob) / prior_prob)
         nn.init.constant_(self.conv_cls.bias, bias_init)
-    
+
     def forward(self, features: List[torch.Tensor]) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-        """Forward pass through Rotated RetinaNet head.
-        
-        Args:
-            features: List of feature maps from FPN, each of shape [B, C, H, W]
-        
-        Returns:
-            Tuple of (classification_logits, bbox_regression):
-            - classification_logits: List of tensors, each [B, num_anchors*num_classes, H, W]
-              (sigmoid logits, no background channel)
-            - bbox_regression: List of tensors, each [B, num_anchors*5, H, W]
-        """
         classification_logits = []
         bbox_regression = []
-        
+
         for feat in features:
-            x = feat
-            for conv in self.convs:
-                x = F.relu(conv(x))
-            
-            # Classification: [B, C, H, W] -> [B, num_anchors*num_classes, H, W]
-            cls_logits = self.conv_cls(x)
-            classification_logits.append(cls_logits)
-            
-            # Regression: [B, C, H, W] -> [B, num_anchors*5, H, W]
-            bbox_pred = self.conv_bbox(x)
-            bbox_regression.append(bbox_pred)
-        
+            cls_x = feat
+            for conv in self.cls_convs:
+                cls_x = F.relu(conv(cls_x))
+            reg_x = feat
+            for conv in self.reg_convs:
+                reg_x = F.relu(conv(reg_x))
+
+            classification_logits.append(self.conv_cls(cls_x))
+            bbox_regression.append(self.conv_bbox(reg_x))
+
         return classification_logits, bbox_regression
 
-
-def _retinanet_reg_element_loss(
-    pred: torch.Tensor,
-    target: torch.Tensor,
-    *,
-    box_reg_loss_type: str,
-    beta: float,
-) -> torch.Tensor:
-    """Per-element regression loss (xy/wh or angle)."""
-    if box_reg_loss_type == "l1":
-        return F.l1_loss(pred, target, reduction="mean")
-    return F.smooth_l1_loss(pred, target, beta=beta, reduction="mean")
 
 
 def sigmoid_focal_loss_sum(
@@ -245,7 +213,7 @@ def compute_oriented_retinanet_loss(
     # normalized once by the total number of positive anchors in the batch (avg_factor).
     cls_loss_sums = []
     num_pos_total = 0
-    all_loss_box_reg = []
+    reg_loss_sums: List[torch.Tensor] = []
     
     for level_idx in range(num_levels):
         # Get shapes for this level
@@ -291,8 +259,6 @@ def compute_oriented_retinanet_loss(
             level_anchors.requires_grad_(False)
         
         # Process each image in the batch for this level
-        level_reg_losses = []
-        
         for img_idx in range(B):
             # Get anchors for this image at this level
             start_idx = img_idx * anchors_per_image
@@ -386,51 +352,27 @@ def compute_oriented_retinanet_loss(
                 )
             num_pos_total += int((labels == 1).sum())
             
-            # Compute regression loss (smooth L1) on positive anchors only
+            # Compute regression loss on positive anchors (encoded space, MMDet avg_factor)
             positive_mask = labels == 1
             if positive_mask.any():
                 positive_bbox_pred = img_bbox_pred[positive_mask]
                 positive_regression_targets = regression_targets[positive_mask]
-                
-                # Use normalized deltas for xy/wh, raw deltas for angle periodicity
-                positive_bbox_pred_normalized = positive_bbox_pred
-                if target_means is not None and target_stds is not None:
-                    means = torch.tensor(target_means, dtype=torch.float32, device=positive_bbox_pred.device)
-                    stds = torch.tensor(target_stds, dtype=torch.float32, device=positive_bbox_pred.device)
-                    positive_bbox_pred_raw = positive_bbox_pred * stds + means
-                    positive_targets_raw = positive_regression_targets * stds + means
+                if box_reg_loss_type == "l1":
+                    reg_elem = F.l1_loss(
+                        positive_bbox_pred,
+                        positive_regression_targets,
+                        reduction="none",
+                    )
                 else:
-                    positive_bbox_pred_raw = positive_bbox_pred
-                    positive_targets_raw = positive_regression_targets
-                
-                # Compute periodic angle loss; with norm_factor, denorm gives "norm_factor space" - convert back to radians
-                pred_angle_rad = positive_bbox_pred_raw[:, 4] * (target_norm_factor * math.pi) if target_norm_factor is not None else positive_bbox_pred_raw[:, 4]
-                target_angle_rad = positive_targets_raw[:, 4] * (target_norm_factor * math.pi) if target_norm_factor is not None else positive_targets_raw[:, 4]
-                angle_diff = pred_angle_rad - target_angle_rad
-                angle_diff_normalized = normalize_angle_delta(angle_diff)
-                loss_angle = _retinanet_reg_element_loss(
-                    angle_diff_normalized,
-                    torch.zeros_like(angle_diff_normalized),
-                    box_reg_loss_type=box_reg_loss_type,
-                    beta=0.1,
-                )
-                
-                # Regression loss for center/size
-                loss_xy = _retinanet_reg_element_loss(
-                    positive_bbox_pred_normalized[:, :2],
-                    positive_regression_targets[:, :2],
-                    box_reg_loss_type=box_reg_loss_type,
-                    beta=1.0 / 9.0,
-                )
-                loss_wh = _retinanet_reg_element_loss(
-                    positive_bbox_pred_normalized[:, 2:4],
-                    positive_regression_targets[:, 2:4],
-                    box_reg_loss_type=box_reg_loss_type,
-                    beta=1.0 / 9.0,
-                )
-                
-                reg_loss = loss_xy + loss_wh + loss_angle
+                    reg_elem = F.smooth_l1_loss(
+                        positive_bbox_pred,
+                        positive_regression_targets,
+                        beta=1.0 / 9.0,
+                        reduction="none",
+                    )
+                reg_loss = reg_elem.sum()
                 if box_reg_iou_weight > 0.0:
+                    matched_gt = img_gt_boxes[matched_indices[positive_mask]]
                     decoded_boxes = decode_oriented_boxes(
                         img_anchors[positive_mask],
                         positive_bbox_pred,
@@ -448,12 +390,9 @@ def compute_oriented_retinanet_loss(
                         probiou_mode=box_reg_probiou_mode,
                     )
                     reg_loss = reg_loss + (box_reg_iou_weight * loss_iou)
-                level_reg_losses.append(reg_loss * box_reg_weight)
+                reg_loss_sums.append(reg_loss * box_reg_weight)
         
-        # Accumulate losses for this level
-        if level_reg_losses:
-            all_loss_box_reg.append(torch.stack(level_reg_losses).mean())
-    
+        # Accumulate losses for this level (classification only; reg summed globally below)
     # Aggregate losses across all levels.
     # Classification: total focal sum / num positive anchors (MMDet avg_factor, clamped to >= 1).
     if cls_loss_sums:
@@ -467,8 +406,8 @@ def compute_oriented_retinanet_loss(
             # Fallback: create a small constant loss from device
             loss_classification = torch.tensor(0.0, device=device, requires_grad=True)
     
-    if all_loss_box_reg:
-        loss_box_reg = torch.stack(all_loss_box_reg).mean()
+    if reg_loss_sums:
+        loss_box_reg = torch.stack(reg_loss_sums).sum() / max(num_pos_total, 1)
     else:
         # Maintain gradient flow: compute zero loss from model outputs
         # Use first level's bbox regression to maintain connection
@@ -588,13 +527,14 @@ class RotatedRetinaNet(nn.Module):
         self.scales_per_octave = scales_per_octave
         self.box_reg_loss_type = box_reg_loss_type
         
-        # Setup backbone using shared utility
+        # Setup backbone (P6/P7 convs on C5 when fpn_extra_level, MMRotate on_input)
         self.backbone, backbone_channels = setup_backbone(
             backbone=backbone,
             backbone_name=backbone_name,
             pretrained_backbone=pretrained_backbone,
             trainable_layers=trainable_layers,
             returned_layers=returned_layers,
+            use_p6p7_extra_levels=fpn_extra_level,
         )
         
         # Default: horizontal priors (theta=0), MMRotate-style. Optional anchor_angles is Python-only (not in JSON).
@@ -616,12 +556,6 @@ class RotatedRetinaNet(nn.Module):
             self.fpn_strides = [4, 8, 16, 32, 64]
         
         self.fpn_extra_level = fpn_extra_level
-        if fpn_extra_level:
-            self.extra_fpn_conv = nn.Conv2d(backbone_channels, backbone_channels, kernel_size=3, stride=2, padding=1)
-            nn.init.normal_(self.extra_fpn_conv.weight, std=0.01)
-            nn.init.constant_(self.extra_fpn_conv.bias, 0)
-        else:
-            self.extra_fpn_conv = None
         
         # Create Rotated RetinaNet head
         self.head = OrientedRetinaNetHead(
@@ -714,11 +648,8 @@ class RotatedRetinaNet(nn.Module):
             images,
             use_checkpoint=False,  # Rotated RetinaNet doesn't use checkpointing currently
             training=self.training,
-            include_pool_level=True,  # keep torchvision's "pool" level (P6, e.g. stride 64)
+            include_pool_level=not self.fpn_extra_level,
         )
-        if self.extra_fpn_conv is not None:
-            extra = F.relu(self.extra_fpn_conv(feature_list[-1]))
-            feature_list = list(feature_list) + [extra]
         feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feature_list]
         fpn_strides_live = derive_fpn_strides_from_grid(image_sizes[0], feature_map_sizes)
         warn_if_fpn_strides_mismatch(self.fpn_strides, fpn_strides_live)

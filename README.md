@@ -7,7 +7,7 @@
 - **Geometry**: Rotated bounding boxes (rbox: cx, cy, w, h, angle), quadrilateral boxes (qbox), polygon ↔ rbox ↔ hbox conversions, angle normalization (le90, 0–180°), flip/rotate/scale transforms, visualization helpers
 - **IoU & NMS**: Rotated IoU and oriented NMS (CPU with optional GPU kernels when available); AABB pre-filtering; `obb_to_xyxy` / HBB conversion
 - **Datasets**: DOTA polygon loader (pattern, split file, or separate folders), image tiling, label filtering, ignore masks, oriented mAP evaluation
-- **Models**: **Oriented R-CNN** (horizontal RPN + MidpointOffset → oriented ROI), **Rotated Faster R-CNN** (oriented RPN + oriented ROI), **Rotated RetinaNet** (oriented anchors, focal loss); ResNet + FPN backbones; selective loading of external checkpoints where configs wire `checkpoint.load_from_checkpoint`
+- **Models**: **Oriented R-CNN** ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html); horizontal RPN + MidpointOffset → oriented RoIAlign + oriented ROI head), **Rotated Faster R-CNN** (Ren et al., NeurIPS 2015 two-stage baseline with horizontal RPN + horizontal RoIAlign + rotated ROI head; MMRotate reference), **Rotated RetinaNet** ([Lin et al., ICCV 2017](https://openaccess.thecvf.com/content_ICCV_2017/papers/Lin_Focal_Loss_for_ICCV_2017_paper.pdf); oriented anchors, sigmoid focal loss); ResNet + FPN backbones; selective loading of external checkpoints where configs wire `checkpoint.load_from_checkpoint`
 - **Training**: JSON configs + **`odet train`**, mixed precision (AMP), gradient accumulation, checkpointing, best-metric tracking, TensorBoard, optional curriculum learning and profiling
 
 ## Installation
@@ -32,6 +32,7 @@ uv pip install -r requirements.txt
 uv pip install -e .
 ```
 
+- To auto-activate `.venv` when entering this repo, install the [`direnv`](https://direnv.net/) shell hook and run `direnv allow` from the repo root. The local `.envrc` is intentionally gitignored so each developer can opt in on their machine.
 - From PyPI: `pip install oriented-det`
 - For development and tests: `uv pip install -e ".[dev]"`
 - For the Gradio prediction viewer: `uv pip install -e ".[viewer]"` or `pip install "oriented-det[viewer]"`
@@ -124,8 +125,8 @@ DOTA configs: per-model `dota_le90_1x.json` / `dota_le90_3x.json` under [configs
 
 ## Pretrained weights and evaluation
 
-- Place exported best checkpoints under **`pretrained/`** or use Hub slugs (`odet pretrained download oriented_rcnn_dota_le90_1x`). See [pretrained/README.md](pretrained/README.md) and [configs/README.md](configs/README.md#dota-pretrained-models-model-zoo).
-- **Tiled validation:** after training, run `make preds` then `make metrics` (or `odet preds` / `odet preds --metrics-from-json`). Large images use sliding-window inference when they exceed the model canvas; thresholds and overlap come from **`production.*`** in the experiment config.
+- Place exported best checkpoints under **`pretrained/`** or use Hub slugs (`odet pretrained download oriented_rcnn_dota_le90_3x` or `oriented_rcnn_dota_le90_1x`). See [pretrained/README.md](pretrained/README.md) and [configs/README.md](configs/README.md#dota-pretrained-models-model-zoo).
+- **Tiled validation:** after training, run `make preds` then `make metrics`. Published mAP reports: [`docs/eval-reports/`](docs/eval-reports/) (git). Raw detections for the viewer: gitignored [`predictions/`](predictions/).
 
 ## Important notes
 
@@ -135,9 +136,14 @@ DOTA configs: per-model `dota_le90_1x.json` / `dota_le90_3x.json` under [configs
 
 ## Roadmap
 
-- **v0.1** (current): Geometry, IoU/NMS, DOTA loader + tiler, three baseline detectors, config-based training, Hub pretrained weights
-- **Next**: HRSC2016 dataset support, expanded tutorials, hosted docs
-- **Future**: Additional oriented detectors (e.g. FAIR1M), optional fused CUDA kernels
+See **[docs/roadmap.md](docs/roadmap.md)** for the full public plan. Summary:
+
+- **v0.1** (shipped): Geometry, IoU/NMS, DOTA, three ResNet-FPN detectors, config training, Hub pretrained weights
+- **v0.2**: probiou Faster R-CNN 3× on Hub
+- **v0.3**: Rotated FCOS (anchor-free single-stage)
+- **v0.4**: HRSC2016 and FAIR1M dataset support
+- **v0.5**: RTMDet-R and native YOLO-OBB (AGPL-free production tier)
+- **v0.6+**: Swin-FPN backbone; optional fused CUDA kernels; hosted docs
 
 ## Contributing
 
@@ -145,7 +151,7 @@ Contributions are welcome. Run tests with `pytest`, format with `black` and `ruf
 
 ## Publishing to PyPI
 
-Version **0.1.0** — tag releases as **`v0.1.0`** (git) matching `version` in `pyproject.toml`.
+Version **0.1.1** — tag releases as **`v0.1.1`** (git) matching `version` in `pyproject.toml`.
 
 Configs: edit **`configs/`** at the repo root, then **`make sync-configs`** so **`oriented_det/configs/`** stays in sync (see **`oriented_det/configs/vendored_manifest.txt`**). CI runs **`make check-configs`**.
 

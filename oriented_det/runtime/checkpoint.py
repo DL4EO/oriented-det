@@ -258,6 +258,18 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             'roi_box_reg_iou_schedule_values': getattr(
                 config.model, 'roi_box_reg_iou_schedule_values', None
             ),
+            'roi_box_reg_iou_loss_type': getattr(
+                config.model, 'roi_box_reg_iou_loss_type', 'riou'
+            ),
+            'roi_box_reg_kfiou_fun': getattr(config.model, 'roi_box_reg_kfiou_fun', None),
+            'roi_box_reg_probiou_mode': getattr(config.model, 'roi_box_reg_probiou_mode', None),
+            'roi_box_reg_main_loss_type': getattr(
+                config.model, 'roi_box_reg_main_loss_type', 'smooth_l1'
+            ),
+            'roi_box_reg_norm': getattr(config.model, 'roi_box_reg_norm', 'sampled_all'),
+            'roi_box_reg_smooth_l1_aux_weight': getattr(
+                config.model, 'roi_box_reg_smooth_l1_aux_weight', 0.0
+            ),
             'use_hbb_for_matching': use_hbb,
             'inference_pre_nms_score_threshold': inference_pre_nms_score_threshold,
             'rpn_min_size': getattr(config.model, 'rpn_min_size', 0.0),
@@ -288,9 +300,19 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
         model = RotatedFasterRCNN(**model_kwargs)
     elif 'oriented_rcnn' in model_type_lower:
         oriented_kwargs = dict(model_kwargs)
-        # OrientedRCNN constructor does not accept these RotatedFasterRCNN-only args.
-        oriented_kwargs.pop('add_gt_as_proposals', None)
-        oriented_kwargs.pop('rpn_min_size', None)
+        # RotatedFasterRCNN-only ROI regression knobs (not on OrientedRCNN).
+        for key in (
+            'rpn_min_size',
+            'roi_box_reg_main_loss_type',
+            'roi_box_reg_smooth_l1_aux_weight',
+        ):
+            oriented_kwargs.pop(key, None)
+        oriented_kwargs['roi_box_reg_norm'] = getattr(
+            config.model, 'roi_box_reg_norm', 'sampled_all'
+        )
+        oriented_kwargs['roi_use_hbb_for_matching'] = getattr(
+            config.model, 'roi_use_hbb_for_matching', False
+        )
         model = OrientedRCNN(**oriented_kwargs)
     elif 'retinanet' in model_type_lower:
         m = config.model
@@ -306,7 +328,7 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             anchor_ratios=m.anchor_ratios if m else None,
             octave_base_scale=getattr(m, "anchor_octave_base_scale", None) if m else None,
             scales_per_octave=getattr(m, "anchor_scales_per_octave", None) if m else None,
-            stacked_convs=getattr(m, "retinanet_stacked_convs", 1) if m else 1,
+            stacked_convs=getattr(m, "retinanet_stacked_convs", 4) if m else 4,
             positive_iou_threshold=getattr(m, "rpn_positive_iou_threshold", 0.5) if m else 0.5,
             negative_iou_threshold=getattr(m, "rpn_negative_iou_threshold", 0.4) if m else 0.4,
             focal_alpha=model_kwargs.get('roi_focal_alpha', 0.25),

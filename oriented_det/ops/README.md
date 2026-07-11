@@ -192,8 +192,7 @@ RetinaNet checkpoints (hundreds of weakly-suppressing candidates per class).
 
 ## Auxiliary decoded-box losses (`kfiou.py`, `probiou.py`)
 
-When **`model.roi_box_reg_iou_weight`** > 0, training adds a scalar term on
-decoded ROI (or RetinaNet) positives. Select the metric with
+When **`model.roi_box_reg_iou_weight`** > 0 and **`model.roi_box_reg_main_loss_type`** is `smooth_l1` (default), training adds a scalar decoded-box term on ROI positives. When main is `probiou` / `riou` / `kfiou`, that decoded metric is the **primary** loss instead; use **`model.roi_box_reg_smooth_l1_aux_weight`** for encoded Smooth L1 aux.
 **`model.roi_box_reg_iou_loss_type`**: **`riou`** (default), **`kfiou`**, or
 **`probiou`**. All three are wired through
 `mean_auxiliary_box_reg_loss` in [kfiou.py](kfiou.py).

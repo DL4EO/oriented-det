@@ -156,7 +156,10 @@ odet viewer
 # or
 python tools/app.py
 
-# Specify predictions directory (from make preds / odet preds)
+# Published Hub eval (reports only — use predictions/ for viewer JSON)
+make viewer VIEWER_PRED_DIR=predictions/20260627_082942 DOTA_DATA_ROOT=/path/to/DOTA-v1.0-tiled
+
+# Local scratch run
 python tools/app.py --predictions-dir predictions/20260602_120000 --data-root /path/to/DOTA
 ```
 

@@ -24,9 +24,18 @@ Regression guards: `tests/test_roi.py` (eager vs export RoIAlign), `tests/test_m
 
 `RotatedFasterRCNN` defaults (RPN/ROI IoU assign thresholds, ROI `target_stds`, post-RPN caps, final rotated NMS IoU) follow MMRotate’s DOTA le90 Faster R-CNN config unless overridden.
 
-ROI training loss uses `compute_horizontal_roi_loss_mmrotate`, which honors `roi_box_reg_angle_weight` (5th encoded dim; optional `roi_box_reg_angle_schedule_epochs` / `roi_box_reg_angle_schedule_values`), `roi_box_reg_iou_weight` (decoded auxiliary term per `roi_box_reg_iou_loss_type`; optional `roi_box_reg_iou_schedule_epochs` / `roi_box_reg_iou_schedule_values` for piecewise scheduling), `roi_match_low_quality`, and `roi_min_pos_iou` (wired from config via `tools/train.py`).
+ROI training loss uses `compute_horizontal_roi_loss` (Rotated Faster R-CNN). Defaults match MMRotate via `compute_horizontal_roi_loss_mmrotate` (`reg_norm='sampled_all'`). Configurable via:
 
-**Oriented R-CNN** uses `compute_oriented_roi_loss` (oriented proposals); it applies the same angle-weighting formula when `roi_box_reg_angle_weight` is set.
+- `roi_box_reg_main_loss_type`: `smooth_l1` (encoded primary, default) or decoded `probiou` / `riou` / `kfiou`
+- `roi_box_reg_norm`: `sampled_all` (MMDet avg_factor over pos+neg sample count) or `positives_only` (per-dim mean over positives)
+- `roi_box_reg_iou_weight`: decoded aux when main is Smooth L1 (optional `roi_box_reg_iou_schedule_*`)
+- `roi_box_reg_smooth_l1_aux_weight`: encoded Smooth L1 aux when main is decoded
+- `roi_box_reg_angle_weight` (5th encoded dim; optional `roi_box_reg_angle_schedule_*`), `roi_match_low_quality`, `roi_min_pos_iou`
+- `roi_proj_xy`: encode/decode ROI dx/dy in the proposal local frame (`true` in DOTA base configs; no-op for axis-aligned xyxy RoIs, required for non-horizontal proposal angles)
+
+Encoded Smooth L1 (main or aux) applies **directly to all five encoded channels** (MMRotate / MMDet `L1Loss` on bbox targets), including the angle channel after `norm_factor` and `target_stds` normalization. Optional `roi_box_reg_angle_weight` scales only the 5th channel.
+
+**Oriented R-CNN** uses `compute_oriented_roi_loss` with the same encoded Smooth L1 and MMDet `avg_factor` normalization (`roi_box_reg_norm: sampled_all` by default).
 
 ### `roi_inference_top_class_only` (two-stage models)
 
@@ -41,10 +50,11 @@ ROI training loss uses `compute_horizontal_roi_loss_mmrotate`, which honors `roi
 
 ### MMRotate parity notes (two-stage detectors)
 
-- **FPN levels:** the RPN runs on all 5 levels (P2–P6, strides 4–64; `include_pool_level=True` keeps torchvision's stride-64 max-pool level). `RotatedFasterRCNN` ROI extraction uses only the first 4 levels (strides 4–32) via `horizontal_roi_align`, matching MMRotate's `SingleRoIExtractor`. `OrientedRCNN` uses `oriented_roi_align` on all passed levels.
+- **FPN levels:** the RPN runs on all 5 levels (P2–P6, strides 4–64; `include_pool_level=True` keeps torchvision's stride-64 max-pool level). **Both** two-stage detectors restrict ROI extraction to the **first 4 FPN levels** (strides 4–32): `horizontal_roi_align` (Rotated Faster R-CNN) and `oriented_roi_align` (Oriented R-CNN), matching MMRotate `SingleRoIExtractor` / `RotatedSingleRoIExtractor`.
 - **RoIAlign:** `horizontal_roi_align` uses `aligned=True` (half-pixel aligned), matching mmcv's `RoIAlign` default.
 - **Backbone BN:** frozen statistics (`FrozenBatchNorm2d`) by default, matching MMRotate `norm_eval=True`. See `backbones/README.md`.
-- **Loss normalization:** RPN and ROI SmoothL1 box-regression losses are summed over positives and divided by the **total** number of sampled anchors/RoIs (MMDet `avg_factor`), not averaged over positives only.
+- **Loss normalization:** RPN and ROI SmoothL1 box-regression losses are summed over positives and divided by the **total** number of sampled anchors/RoIs (MMDet `avg_factor`), including Oriented R-CNN midpoint RPN and oriented ROI stages.
+- **Assignment IoU:** RPN stages use HBB IoU when `use_hbb_for_matching: true` (MMRotate horizontal RPN). Oriented R-CNN ROI matching uses rotated IoU by default (`roi_use_hbb_for_matching: false`). RetinaNet uses rotated IoU (`use_hbb_for_matching: false`).
 
 RPN proposal pruning uses horizontal xyxy proposals and `torchvision.ops.nms` on GPU.
 The RPN proposal geometry is horizontal; rotated geometry is introduced by the ROI
@@ -68,15 +78,19 @@ add in-repo CUDA kernels behind the same abstraction after the first release.
 - Training uses **sigmoid focal loss** (`sigmoid_focal_loss_sum`): one-hot binary targets per anchor, `alpha` (default 0.25) weighting positive entries and `1-alpha` weighting negatives, summed over all anchors/levels and normalized by the **total number of positive anchors** in the batch (MMDet `avg_factor`).
 - Inference scores are **`sigmoid(logits)`** per class; the best class per anchor is kept (labels stay 1-indexed downstream).
 
-This replaced an earlier softmax background+K formulation whose background-bias init plus uniform-alpha focal loss starved the classification head of gradients (cls grad norm ~1000x smaller than bbox), producing 0 detections after 12 epochs. Checkpoints from before this change have incompatible `head.conv_cls` shapes and cannot be loaded.
+This replaced an earlier softmax background+K formulation whose background-bias init plus uniform-alpha focal loss starved the classification head of gradients (cls grad norm ~1000x smaller than bbox), producing 0 detections after 12 epochs.
 
-### Rotated RetinaNet MMRotate alignment fixes
+**Checkpoint break (v0.2+):** RetinaNet now uses MMRotate-style **separate cls/reg 4-conv towers** with **3×3 prediction heads** and **P6/P7 convs on C5** (`LastLevelP6P7`). Pre-change checkpoints (`head.convs`, 1×1 `conv_cls`/`conv_bbox`, `extra_fpn_conv`) are incompatible.
 
-Three further misalignments with the MMRotate `rotated_retinanet_obb_r50_fpn_1x_dota_le90` reference were fixed:
+### Rotated RetinaNet MMRotate alignment
 
-- **5 FPN levels (P3–P7).** `extract_backbone_features` used to drop torchvision's `LastLevelMaxPool` output (dict key `"pool"`), so RetinaNet silently ran with 4 levels instead of the configured 5 (`[8, 16, 32, 64, 128]`). RetinaNet (and its export wrapper) now pass `include_pool_level=True` to keep the pool level as P6; `extra_fpn_conv` then adds P7. Both two-stage detectors (`RotatedFasterRCNN`, `OrientedRCNN`) also pass `include_pool_level=True` so the RPN sees P2–P6 (strides 4–64). `warn_if_fpn_strides_mismatch` warns when the configured stride *count* disagrees with the produced level count.
-- **`min_pos_iou=0` in anchor assignment.** RetinaNet's matcher call now passes `min_pos_iou=0.0, match_low_quality=True` (MMRotate `MaxIoUAssigner`), so every GT gets its best-overlapping anchor as a positive even when that IoU is below the 0.5 positive threshold. Previously the default `min_pos_iou=0.3` left small/extreme-ratio GTs with no positive anchor at all.
-- **le90 angle wrap in `edge_swap` encoding.** `encode_oriented_boxes(edge_swap=True)` now wraps both dtheta candidates with the π-periodic le90 norm (`norm_angle_le90`, MMRotate `bbox2delta`), so the regression angle target is always in `[-π/4, π/4]` instead of up to ±π/2. Decoding is unchanged and round-trips exactly (decode's edge-swap inverse recovers π-shifted angles).
+- **Head:** independent `cls_convs` / `reg_convs` (default 4×3×3 each) + 3×3 `conv_cls` / `conv_bbox` (MMRotate `RetinaHead`).
+- **FPN P6/P7:** `fpn_extra_level: true` attaches torchvision `LastLevelP6P7` on C5 (`add_extra_convs='on_input'`), not max-pool P6 + manual P7 conv.
+- **5 FPN levels (P3–P7)** with strides `[8, 16, 32, 64, 128]` when `fpn_returned_layers: [2,3,4]`.
+- **`min_pos_iou=0`** in anchor assignment (MMRotate `MaxIoUAssigner`).
+- **Regression loss:** encoded L1/SmoothL1 summed over positives, normalized by batch positive count (MMDet `avg_factor`).
+- **Rotated IoU assignment** (`use_hbb_for_matching: false`).
+- **le90 angle wrap in `edge_swap` encoding** (`norm_angle_le90` in `encode_oriented_boxes`).
 
 ### `final_nms_use_cpu` (exact final NMS)
 

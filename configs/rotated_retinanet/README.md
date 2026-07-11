@@ -2,7 +2,7 @@
 
 See the [main README](../../README.md) for installation and [configs/README.md](../README.md) for config layout.
 
-> [Focal Loss for Dense Object Detection](https://arxiv.org/abs/1708.02002)
+> [Focal Loss for Dense Object Detection](https://arxiv.org/abs/1708.02002) (Lin et al., ICCV 2017). Rotated variant per [MMRotate](https://arxiv.org/abs/2203.06617) (Zhou et al., ACM MM 2022).
 
 <!-- [ALGORITHM] -->
 
@@ -10,7 +10,7 @@ See the [main README](../../README.md) for installation and [configs/README.md](
 
 | File | Purpose |
 |------|---------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** (12 epochs, lr 0.0025, batch 2, train+val tiles, H+V+diagonal flips). HBB anchor matching; mAP every **4** epochs. Hub: `rotated_retinanet_dota_le90_1x`. |
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** (12 epochs, lr 0.0025, batch 2, train+val tiles, H+V+diagonal flips). Rotated IoU anchor matching; mAP every **4** epochs. Hub: `rotated_retinanet_dota_le90_1x`. |
 | [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** (36 epochs, milestones [24, 33]); inherits 1×. `compute_map_final: true`, exact CPU IoU for final mAP. Hub: `rotated_retinanet_dota_le90_3x`. |
 
 Hub **`eval_map50`** in the manifest is from **`odet preds`** on val tiles (see [pretrained/README.md](../../pretrained/README.md)), not the training **final mAP** printed at the end of `train.log`.
@@ -145,8 +145,9 @@ Rotated RetinaNet uses a 5-parameter encoding scheme for oriented bounding boxes
 
 - **FPN**: `fpn_returned_layers: [2, 3, 4]` (C3–C5) + `fpn_extra_level: true` for stride-128 P7
 - **Anchors**: `anchor_octave_base_scale: 4`, `anchor_scales_per_octave: 3`, ratios `[0.5, 1.0, 2.0]`, angle `0`
-- **Head**: `retinanet_stacked_convs: 4`
-- **Assigner**: HBB IoU for training (`use_hbb_for_matching: true`; chunked GPU matcher), pos 0.5 / neg 0.4 (`rpn_positive_iou_threshold` / `rpn_negative_iou_threshold`). MMRotate’s reference uses OBB IoU via mmcv; we use HBB for speed until a fast OBB matcher lands.
+- **Head**: separate `cls_convs` / `reg_convs` (4×3×3 each) + 3×3 `conv_cls` / `conv_bbox` (MMRotate `RetinaHead`)
+- **FPN extra levels**: `LastLevelP6P7` convs on C5 (`fpn_extra_level: true`), not max-pool P6
+- **Assigner**: rotated IoU (`use_hbb_for_matching: false`), pos 0.5 / neg 0.4, `min_pos_iou=0` with low-quality matching
 - **Evaluation**: mAP every 4 epochs (`compute_map_every_n_epochs: 4`); non-mAP val epochs skip CPU GT–IoU matching (forward + detection counts only)
 - **Inference (val/train)**: GPU sampling NMS (`model.final_nms_use_cpu: false`); pre-NMS score filter at `inference_pre_nms_score_threshold` (0.05)
 - **Box coder**: `roi_norm_factor: null`, `roi_edge_swap: true`, L1 regression loss
@@ -171,7 +172,7 @@ Following MMRotate's design:
 - **Negative anchors**: IoU < 0.4 with all ground-truth boxes (configurable via `negative_iou_threshold`)
 - **Ignored anchors**: Between thresholds (0.4 ≤ IoU ≤ 0.5)
 
-With `use_hbb_for_matching: true`, assignment uses **axis-aligned (HBB) IoU** between anchor and GT circumboxes. Predictions remain oriented (5-parameter boxes); only the train-time assigner uses HBB.
+Assignment uses **rotated IoU** (`use_hbb_for_matching: false`, MMRotate `RBboxOverlaps2D`).
 
 ### Training Configuration (MMRotate 1×)
 
@@ -216,7 +217,7 @@ DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 
 | ResNet50 (1024,1024,200) | 64.14 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log) | `hf://rotated_retinanet_dota_le90_1x` |
 | ResNet50 (1024,1024,200) | 71.52 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log) | `hf://rotated_retinanet_dota_le90_3x` |
 
-Eval reports: [`predictions/20260615_030209/`](../../predictions/20260615_030209/), [`predictions/20260615_005855/`](../../predictions/20260615_005855/).
+Eval reports: [`docs/eval-reports/rotated_retinanet_dota_le90_1x/`](../../docs/eval-reports/rotated_retinanet_dota_le90_1x/model_analysis.md), [`docs/eval-reports/rotated_retinanet_dota_le90_3x/`](../../docs/eval-reports/rotated_retinanet_dota_le90_3x/model_analysis.md).
 
 MMRotate reference (1× le90): **68.42** mAP (different assigner / eval protocol).
 

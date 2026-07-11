@@ -43,8 +43,11 @@ from oriented_det.data import DOTADataset, DOTAAnnotation
 from oriented_det.data import (
     Detection,
     GroundTruth,
+    compute_gt_best_iou_alignment_metrics,
     compute_oriented_map,
+    format_gt_best_iou_alignment_table_from_dict,
     format_mmrotate_class_metrics_table,
+    gt_best_iou_alignment_metrics_to_dict,
 )
 from oriented_det.data.airbus_playground import AirbusPlaygroundCSVDataset
 from oriented_det.geometry import RBox, normalize_le90
@@ -418,6 +421,35 @@ def _write_model_analysis_md(
         lines.append(
             f"- {_map_metric_label(_miou)}: `{diagnostics['mAP']:.4f}` ({float(diagnostics['mAP']) * 100:.2f}%)"
         )
+        align_raw = diagnostics.get("gt_alignment_metrics")
+        if isinstance(align_raw, dict) and align_raw.get("per_class"):
+            lines.extend(
+                [
+                    "",
+                    "## GT alignment (mean best IoU vs raw detections)",
+                    "",
+                    (
+                        f"- Global mean best IoU (any class): "
+                        f"`{float(align_raw.get('mean_best_iou_any', 0.0)):.4f}`"
+                    ),
+                    (
+                        f"- Global mean best IoU (same class): "
+                        f"`{float(align_raw.get('mean_best_iou_same_class', 0.0)):.4f}` "
+                        f"(median `{float(align_raw.get('median_best_iou_same_class', 0.0)):.4f}`)"
+                    ),
+                    "",
+                    "Per-class breakdown (each GT: max rotated IoU vs detections on the same image):",
+                    "",
+                ]
+            )
+            class_order = metadata.get("class_names")
+            table_md = format_gt_best_iou_alignment_table_from_dict(
+                align_raw,
+                class_names=class_order if isinstance(class_order, list) else None,
+                markdown=True,
+            )
+            if table_md:
+                lines.append(table_md)
         class_metrics = diagnostics.get("class_metrics") or {}
         class_aps = diagnostics.get("class_aps") or {}
         if isinstance(class_metrics, dict) and class_metrics:
@@ -967,6 +999,29 @@ def run_diagnostics_pipeline(
         diagnostics['sample_max_iou'] = max_iou
         diagnostics['sample_max_iou_num_checked'] = len(flat_sample)
 
+    print("Computing GT alignment metrics (per-class mean best IoU)...", flush=True)
+    try:
+        align_device = None if use_exact_rotated_iou else torch.device(device)
+        gt_alignment = compute_gt_best_iou_alignment_metrics(
+            all_detections,
+            all_ground_truths,
+            class_names=class_names,
+            use_exact_rotated_iou=use_exact_rotated_iou,
+            device=align_device,
+            show_progress=True,
+            progress_stream=tqdm_progress_stream(),
+        )
+        diagnostics["gt_alignment_metrics"] = gt_best_iou_alignment_metrics_to_dict(gt_alignment)
+        print(
+            f"  Global mean best IoU (same class): {gt_alignment.mean_best_iou_same_class:.4f}, "
+            f"median: {gt_alignment.median_best_iou_same_class:.4f}",
+            flush=True,
+        )
+    except Exception as e:
+        diagnostics["gt_alignment_metrics"] = None
+        diagnostics["gt_alignment_metrics_error"] = str(e)
+        print(f"\nWarning: GT alignment metrics failed: {e}\n", flush=True)
+
     try:
         device_obj = None if use_exact_rotated_iou else torch.device(device)
         mean_ap, class_aps, class_metrics = compute_oriented_map(
@@ -1006,6 +1061,18 @@ def run_diagnostics_pipeline(
                     class_metrics,
                     class_names=class_names,
                     mean_ap=mean_ap,
+                ),
+                flush=True,
+            )
+            print("", flush=True)
+        align_dict = diagnostics.get("gt_alignment_metrics")
+        if isinstance(align_dict, dict) and align_dict.get("per_class"):
+            print("Per-class GT alignment (mean best IoU vs raw detections):", flush=True)
+            print("", flush=True)
+            print(
+                format_gt_best_iou_alignment_table_from_dict(
+                    align_dict,
+                    class_names=class_names,
                 ),
                 flush=True,
             )
@@ -1184,6 +1251,9 @@ def run_diagnostics_pipeline(
         "per_class_score_threshold_applied": per_cls_thr,
         "class_aps": dict((diagnostics or {}).get("class_aps") or {}),
         "class_metrics": dict((diagnostics or {}).get("class_metrics") or {}),
+        "gt_alignment_metrics": dict((diagnostics or {}).get("gt_alignment_metrics") or {})
+        if isinstance((diagnostics or {}).get("gt_alignment_metrics"), dict)
+        else None,
         "best_threshold": {
             "threshold": float(best["threshold"]),
             "precision": float(best["precision"]),
@@ -1976,6 +2046,14 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
             )
         else:
             print(f"  mAP: {diagnostics.get('mAP_error', 'N/A')}")
+        align_dict = diagnostics.get("gt_alignment_metrics")
+        if isinstance(align_dict, dict) and align_dict.get("mean_best_iou_same_class") is not None:
+            print(
+                f"  GT alignment mean best IoU (same class): "
+                f"{float(align_dict['mean_best_iou_same_class']):.4f} "
+                f"(median {float(align_dict.get('median_best_iou_same_class', 0.0)):.4f}; "
+                "see per-class table in model_analysis / analysis JSON)"
+            )
         if diagnostics.get('sample_max_iou') is not None:
             nchk = diagnostics.get('sample_max_iou_num_checked', "")
             suf = f" (random sample of {nchk} dets)" if nchk else ""

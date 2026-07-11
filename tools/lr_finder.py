@@ -319,6 +319,7 @@ def run_lr_finder(
             annotations_file=config.dataset.annotations_file,
             split_file=config.dataset.split_file,
             val_split_id=config.dataset.val_split_id,
+            train_includes_val=getattr(config.dataset, "train_includes_val", False),
             difficult_strategy=config.dataset.difficult_strategy,
             allowed_classes=config.dataset.allowed_classes,
             ignore_labels=config.dataset.ignore_labels,

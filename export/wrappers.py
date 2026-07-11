@@ -65,7 +65,7 @@ class RetinaNetBackboneHeadExportWrapper(nn.Module):
     def __init__(self, model: RotatedRetinaNet) -> None:
         super().__init__()
         self.backbone = model.backbone
-        self.extra_fpn_conv = model.extra_fpn_conv
+        self.fpn_extra_level = model.fpn_extra_level
         self.head = model.head
 
     def forward(self, images: torch.Tensor) -> Tuple[torch.Tensor, ...]:
@@ -76,11 +76,8 @@ class RetinaNetBackboneHeadExportWrapper(nn.Module):
             img_list,
             use_checkpoint=False,
             training=False,
-            include_pool_level=True,  # match RotatedRetinaNet.forward (P6 pool level)
+            include_pool_level=not self.fpn_extra_level,
         )
-        if self.extra_fpn_conv is not None:
-            extra = F.relu(self.extra_fpn_conv(feat_list[-1]))
-            feat_list = list(feat_list) + [extra]
         cls_list, bbox_list = self.head(feat_list)
         out: List[torch.Tensor] = []
         for c, b in zip(cls_list, bbox_list):

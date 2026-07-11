@@ -40,8 +40,9 @@ https://dl4eo.github.io/oriented-det/
 ## Structure
 
 - **docs/** — Source Markdown (this folder)
+- **roadmap.md** — Public release plan (v0.2–v1.0)
 - **user-guide/configuration.md** — Canonical JSON training config reference
-- **documentation-audit.md** — Doc alignment status log
+- **eval-reports/** — Published eval-val reports per Hub slug (markdown + analysis JSON); see [eval-reports/README.md](eval-reports/README.md). Raw `predictions.json` lives in gitignored `predictions/`.
 - **code-analysis-report.md** — Deep code/doc analysis (2026-06-15): inventory, validation, findings
 - **mkdocs.yml** — MkDocs configuration and nav
 - **site/** — Generated HTML (created by `mkdocs build`)

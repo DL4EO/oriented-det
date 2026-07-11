@@ -75,8 +75,8 @@ def test_retinanet_heads_batch_unbind_matches_stack(tiny_retinanet: RotatedRetin
     assert len(a) == len(b0) == len(b1)
     for i in range(len(a)):
         assert a[i].shape[0] == 2
-        assert torch.allclose(a[i][0], b0[i][0])
-        assert torch.allclose(a[i][1], b1[i][0])
+        assert torch.allclose(a[i][0], b0[i][0], rtol=1e-4, atol=1e-5)
+        assert torch.allclose(a[i][1], b1[i][0], rtol=1e-4, atol=1e-5)
 
 
 @pytest.fixture

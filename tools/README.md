@@ -38,28 +38,80 @@ For **tiling** and **inference** on single images, run the scripts directly (see
 
 ### `image_demo.py`
 
-Run inference on image(s) using oriented-det **config + checkpoint**. Loads model type, num_classes, preprocessing, and class names from the config. For registered pretrained weights, a sidecar config beside the `.pth` is preferred only when the provided config is the checkpoint's manifest `source_recipe`; a different config is kept as-is. Detection **labels are 1-based** foreground ids (same convention as training `class_map`); overlay text uses `class_names[label - 1]`.
+Run inference on image(s) using oriented-det **config + checkpoint**. Loads model type, num_classes, preprocessing, and class names from the config. For registered pretrained weights, you can omit the config and pass only `hf://<slug>`; the checkpoint sidecar JSON is used automatically. If you do pass a config, a sidecar config beside the `.pth` is preferred only when the provided config is the checkpoint's manifest `source_recipe`; a different config is kept as-is. Detection **labels are 1-based** foreground ids (same convention as training `class_map`); overlay text uses `class_names[label - 1]`.
 
-**Inference:** If the image **width×height** equals the model canvas from `preprocessing.target_size` (same as `oriented_det.runtime.inference.get_model_size`), runs **one** `run_inference` forward (ToTensor+normalize, no resize). Otherwise uses **`run_inference_sliding_window`** (zero-pad smaller images, tile larger ones; NMS in image space), same as `oriented_det.runtime.inference` / `save_predictions`.
+**Inference:** If the image **width×height** equals the model canvas from `preprocessing.target_size` (same as `oriented_det.runtime.inference.get_model_size`), runs **one** `run_inference` forward (ToTensor+normalize, no resize). Otherwise uses **`run_inference_sliding_window`** (zero-pad smaller images, tile larger ones; NMS in image space), same as `oriented_det.runtime.inference` / `save_predictions`. Use `--zoom 2` or `--zoom 4` to upscale for inference only; detections are mapped back to the original image before visualization.
 
 **Usage:**
 ```bash
 # Single image (output path optional)
 python tools/image_demo.py demo/demo.jpg configs/oriented_rcnn/dota_le90_1x.json runs/.../checkpoints/best.pth --out-file result.jpg
 
+# Registered pretrained weights (sidecar config auto-resolved)
+python tools/image_demo.py demo/demo.jpg hf://oriented_rcnn_dota_le90_3x --out-file result.jpg
+python tools/image_demo.py demo/demo.jpg hf://oriented_rcnn_dota_le90_1x --out-file result.jpg
+
 # All images in a directory (writes to demo/out by default)
 python tools/image_demo.py demo configs/.../config.json runs/.../checkpoints/best.pth --out-dir demo/out
 
 # Options
 python tools/image_demo.py demo/demo.jpg config.json checkpoint.pth \
-    --out-file result.jpg --device cuda:0 --score-thr 0.3 --nms-thr 0.5 --overlap-pixels 200
+    --out-file result.jpg --device cuda:0 --score-thr 0.3 --nms-thr 0.5 \
+    --classes ship --zoom 2 --overlap-pixels 200 --ignore-margin-pixels 100 \
+    --window-batch-size 8 --json-per-image --json-batch demo/out/json
 ```
 
-**Arguments:** `img` (file or directory), `config` (experiment JSON), `checkpoint` (.pth). Optional: `--out-file`, `--out-dir`, `--device`, `--score-thr`, `--nms-thr`, `--overlap-pixels` (default 200) or `--overlap-ratio` (pad/tile path only; ratio overrides pixels).
+**Arguments:** `img` (file or directory), then either `checkpoint` alone (registered pretrained checkpoint with sidecar config) or `config` + `checkpoint`. Optional: `--out-file`, `--out-dir`, `--device`, `--score-thr`, `--nms-thr`, `--classes`, `--zoom`, `--overlap-pixels` (default from `production.overlap_pixels`, else 200), `--ignore-margin-pixels` (default from `production.ignore_margin_pixels`, else dataset overlap/2), `--overlap-ratio` (pad/tile path only; ratio overrides pixels), `--window-batch-size` (fixed sliding-window micro-batch; skips auto GPU probing), `--json-per-image` (rich JSON next to each visualization: rbox, polygon, run metadata), or `--json-batch [PATH]` (compact batch JSON for pipelines: per-image files plus combined `detections.json` when `img` is a directory).
 
 Demo images: place test images in `demo/` (see `demo/README.md` for a sample image or using your own).
 
 **Makefile:** `make demo` runs `tools/image_demo.py` on every top-level `*.jpg` / `*.jpeg` / `*.png` in `DEMO_DIR` (default `demo/`) with the latest `runs/` checkpoint and config; outputs default to `demo/out/`. Variables: `DEMO_DIR`, `IMAGE_DEMO_OUT_DIR`, `IMAGE_DEMO_DEVICE` (see top-level `Makefile`).
+
+### Horizontal BB → oriented BB (`hbb_to_obb.py`, `filter_predictions_by_gt.py`, `generate_oriented_annotations.py`)
+
+Convert **horizontal** ground-truth boxes to **oriented** boxes using model predictions from `odet image-demo --json-batch`:
+
+1. Run inference on images (high recall: e.g. `--score-thr 0.05 --nms-thr 0.5`).
+2. Match predictions to horizontal GT by oriented IoU; drop unmatched detections (false positives).
+3. For each GT box: use the matched oriented prediction, or fall back to the horizontal box (0°).
+
+**Supported GT formats** (`--gt-format`):
+
+| Format | Layout | Notes |
+|--------|--------|-------|
+| `csv` | `annotations.csv` with `id`, `image_id`, `geometry`, `class` | Polygon corners (axis-aligned OK) |
+| `yolo` | `images/` + `labels/*.txt` | `class cx cy w h` normalized |
+| `dota` | `images/` + `labelTxt/*.txt` | Standard DOTA lines |
+
+**Output** (`--output-format`): `csv` → `annotations_oriented.csv`; `dota` → per-image `.txt` in `labels_oriented/`.
+
+```bash
+# 1) Inference
+odet image-demo /path/to/images hf://oriented_rcnn_dota_le90_3x \
+  --classes plane --score-thr 0.05 --nms-thr 0.5 \
+  --json-batch /path/to/predictions --out-dir /path/to/predictions/vis
+
+# 2) Optional: filter only (inspect FP removal)
+python tools/filter_predictions_by_gt.py \
+  --gt-format csv --dataset-root /path/to/data --annotations annotations.csv \
+  --detections-json /path/to/predictions/detections.json \
+  --output-json /path/to/predictions/detections_gt_filtered.json \
+  --ignore-class Truncated_airplane
+
+# 3) Generate oriented annotations (CSV or DOTA)
+python tools/generate_oriented_annotations.py \
+  --gt-format yolo --dataset-root /path/to/data \
+  --yolo-class-name 0=plane \
+  --detections-json /path/to/predictions/detections.json \
+  --output-format csv
+
+# Compare raw prediction counts vs horizontal GT
+python tools/compare_hbb_obb_counts.py \
+  --gt-format csv --annotations annotations.csv \
+  --detections-json /path/to/predictions/detections.json
+```
+
+Shared library: `tools/hbb_to_obb.py`.
 
 ### `train.py`
 
@@ -117,12 +169,14 @@ Prepare a training checkpoint for Hub distribution: strip optimizer state, save 
 
 ```bash
 python tools/publish_checkpoint.py \\
-  runs/oriented_rcnn/20260616-030231/checkpoints/best_mAP_0.78.pth \\
-  pretrained/oriented_rcnn_r50_fpn_dota_le90_1x
-# -> pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-<hash8>.pth
+  runs/oriented_rcnn/20260621-092802/checkpoints/best_mAP_0.82.pth \\
+  pretrained/oriented_rcnn_r50_fpn_dota_le90_3x
+# -> pretrained/oriented_rcnn_r50_fpn_dota_le90_3x-<hash8>.pth
 ```
 
-Update `oriented_det/pretrained/manifest.json` with the new `filename` and `sha256`, then upload to the Hub repo.
+Copy the experiment **`config.json`** and **`train.log`** beside the published weight as `<weight-stem>.json` and `<weight-stem>.log` (same hash stem as the `.pth`).
+
+Update `oriented_det/pretrained/manifest.json` with the new `filename` and `sha256`, then upload to the Hub repo (`make upload-pretrained` uploads `.pth`, sidecar `.json`, and `.log`).
 
 ### `lr_finder.py`
 
@@ -174,8 +228,8 @@ From the repo root you can run: `make lr-finder` or `make lr-finder CONFIG=confi
 
 Runs inference on a dataset split, writes `predictions.json`, and (when diagnostics are enabled) produces:
 
-- `analysis_iouXX.json`: PR/F1 sweep + **per-class AP** (`class_aps`) and **MMRotate-style stats** (`class_metrics`: gts, dets, recall, ap per class)
-- `model_analysis_<timestamp>.md`: human-readable report including a **per-class gts / dets / recall / AP** table
+- `analysis_iouXX.json`: PR/F1 sweep + **per-class AP** (`class_aps`) and **MMRotate-style stats** (`class_metrics`: gts, dets, recall, ap per class) + **`gt_alignment_metrics`** (global and per-class mean best IoU vs raw detections)
+- `model_analysis_<timestamp>.md`: human-readable report including a **per-class gts / dets / recall / AP** table and a **GT alignment (mean best IoU)** section
 
 **Note:** This tool requires a properly formatted DOTA dataset with tiled images:
 ```
@@ -275,10 +329,10 @@ python tools/save_predictions.py --config runs/.../config.json --val-dir /path/t
 **Progress (tqdm):** Bars use `oriented_det.utils.tqdm_progress_stream()` so they can render on the real terminal when stderr is piped (e.g. `2>&1 | tee preds.log`), like training’s `progress_stream`—log files stay line-based without `\\r` spam; mAP/PR use the same stream.
 
 **Precision-recall and F1 analysis:** `save_predictions.py` computes a dataset-level precision-recall curve by sweeping score thresholds, selects the best **global** threshold using **F1**, and writes:
-- `analysis_iou0.50.json` (threshold curve + best-threshold block + confusion matrix + per-image metrics including precision/recall/F1/F2)
+- `analysis_iou0.50.json` (threshold curve + best-threshold block + confusion matrix + per-image metrics including precision/recall/F1/F2 + **`gt_alignment_metrics`**)
 - `pr_curve.png` (precision vs recall)
 - `threshold_metrics.png` (precision/recall/F1 vs threshold)
-- `model_analysis_<timestamp>.md` (timestamped model report with model/date/data/metrics, **per-class gts/dets/recall/AP** table like MMRotate, optional **per-class best-threshold table** (F1), confusion matrix, and artifact references)
+- `model_analysis_<timestamp>.md` (timestamped model report with model/date/data/metrics, **per-class gts/dets/recall/AP** table like MMRotate, **per-class mean best IoU (GT alignment)** table, optional **per-class best-threshold table** (F1), confusion matrix, and artifact references)
 
 The confusion matrix is computed at the best global F1 threshold. Rows are GT classes and columns are predicted classes; the extra `False Positive` row contains unmatched detections, and the extra `Missed` column contains unmatched GTs.
 
@@ -301,7 +355,7 @@ Sweep controls:
 
 ### `app.py`
 
-Gradio app to browse **predictions** from `save_predictions.py`. Shows the current image path/name above the tabs and updates it when you navigate.
+Gradio app to browse **predictions** from `save_predictions.py`, explore a DOTA dataset, or **edit OBB CSV annotations** with an optional read-only reference overlay.
 
 The app includes a small Gradio 6.8 compatibility patch so cleared/null slider payloads fall back to the slider default instead of crashing during slider preprocessing.
 
@@ -310,6 +364,26 @@ Predictions mode (requires a predictions directory from `save_predictions.py`):
 python tools/app.py --mode predictions --predictions-dir predictions/20250101_120000
 # Optional: --data-root /path/to/dota --threshold 0.3 --port 7860
 ```
+
+Dataset mode (browse DOTA labels without predictions):
+```bash
+python tools/app.py --mode dataset --data-root /path/to/dota --tiles-dir train/tiles_1024
+```
+
+CSV annotation editor (finalize HBB→OBB conversions or manual QA):
+```bash
+python tools/app.py --mode csv \
+  --data-root /path/to/dataset \
+  --annotations-csv /path/to/dataset/annotations_oriented.csv \
+  --reference-csv /path/to/dataset/annotations.csv
+```
+
+- **Green** = read-only reference (`--reference-csv`, e.g. original horizontal GT).
+- **Red** = editable layer (`--annotations-csv`); yellow outline = selected box.
+- Edit **class**, **cx/cy/width/height/angle** fields and click **Apply changes**.
+- **Add box**, **Delete selected**, **Copy reference → editable**, then **Save CSV** to write the editable file.
+
+Related pipeline tools: `generate_oriented_annotations.py`, `filter_predictions_by_gt.py`, `compare_hbb_obb_counts.py` (see `hbb_to_obb.py`).
 
 
 ### `dataset_stats.py`

@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 import math
+import statistics
 import sys
 
 try:
@@ -589,6 +590,282 @@ def compute_oriented_map(
     return mean_ap, class_aps, class_metrics
 
 
+@dataclass(frozen=True)
+class ClassGtBestIouMetrics:
+    """Per-class GT alignment: max IoU vs raw detections (before score filter)."""
+
+    num_gts: int
+    mean_best_iou_any: float
+    mean_best_iou_same_class: float
+    median_best_iou_same_class: float
+
+
+@dataclass(frozen=True)
+class GtBestIouAlignmentMetrics:
+    """Global and per-class mean best IoU (per-GT max over raw detections)."""
+
+    num_gts: int
+    mean_best_iou_any: float
+    mean_best_iou_same_class: float
+    median_best_iou_any: float
+    median_best_iou_same_class: float
+    per_class: Dict[str, ClassGtBestIouMetrics]
+
+
+def detection_matches_ground_truth_class(det: Detection, gt: GroundTruth) -> bool:
+    """True when ``det`` and ``gt`` refer to the same object class."""
+    if det.class_id == gt.class_id:
+        return True
+    # Some inference paths use 1-based class labels.
+    if det.class_id == gt.class_id + 1 or det.class_id - 1 == gt.class_id:
+        return True
+    if det.class_name and gt.class_name and det.class_name == gt.class_name:
+        return True
+    return False
+
+
+def _aggregate_gt_best_iou_samples(
+    best_any_by_class: Dict[str, List[float]],
+    best_same_by_class: Dict[str, List[float]],
+    *,
+    class_names: Optional[Sequence[str]] = None,
+) -> GtBestIouAlignmentMetrics:
+    all_any: List[float] = []
+    all_same: List[float] = []
+    for vals in best_any_by_class.values():
+        all_any.extend(vals)
+    for vals in best_same_by_class.values():
+        all_same.extend(vals)
+
+    class_keys = set(best_any_by_class) | set(best_same_by_class)
+    if class_names:
+        ordered = [c for c in class_names if c in class_keys]
+        ordered.extend(c for c in sorted(class_keys) if c not in ordered)
+    else:
+        ordered = sorted(class_keys)
+
+    per_class: Dict[str, ClassGtBestIouMetrics] = {}
+    for cname in ordered:
+        vals_any = best_any_by_class.get(cname, [])
+        vals_same = best_same_by_class.get(cname, [])
+        per_class[cname] = ClassGtBestIouMetrics(
+            num_gts=len(vals_any),
+            mean_best_iou_any=statistics.fmean(vals_any) if vals_any else 0.0,
+            mean_best_iou_same_class=statistics.fmean(vals_same) if vals_same else 0.0,
+            median_best_iou_same_class=float(statistics.median(vals_same)) if vals_same else 0.0,
+        )
+
+    return GtBestIouAlignmentMetrics(
+        num_gts=len(all_same),
+        mean_best_iou_any=statistics.fmean(all_any) if all_any else 0.0,
+        mean_best_iou_same_class=statistics.fmean(all_same) if all_same else 0.0,
+        median_best_iou_any=float(statistics.median(all_any)) if all_any else 0.0,
+        median_best_iou_same_class=float(statistics.median(all_same)) if all_same else 0.0,
+        per_class=per_class,
+    )
+
+
+def compute_gt_best_iou_alignment_metrics(
+    all_detections: Dict[str, List[Detection]],
+    all_ground_truths: Dict[str, List[GroundTruth]],
+    *,
+    class_names: Optional[Sequence[str]] = None,
+    skip_difficult: bool = False,
+    use_exact_rotated_iou: bool = True,
+    device: DeviceType = None,
+    show_progress: bool = False,
+    progress_stream: Optional[Any] = None,
+) -> GtBestIouAlignmentMetrics:
+    """Per-GT max rotated IoU vs raw detections (global + per-class means).
+
+    For each non-skipped GT, ``best_any`` is the max IoU over all detections on the
+    same image; ``best_same`` restricts to same-class detections. Uses exact polygon
+    IoU on CPU when ``use_exact_rotated_iou`` is true (same as mAP matching).
+    """
+    best_any_by_class: Dict[str, List[float]] = defaultdict(list)
+    best_same_by_class: Dict[str, List[float]] = defaultdict(list)
+
+    image_ids = sorted(all_ground_truths.keys())
+    tqdm_file = progress_stream if progress_stream is not None else sys.stderr
+    use_pbar = show_progress and tqdm is not None and len(image_ids) > 200
+    img_iter: Any = (
+        tqdm(image_ids, desc="GT alignment IoU", unit="img", leave=False, file=tqdm_file)
+        if use_pbar
+        else image_ids
+    )
+
+    for image_id in img_iter:
+        ground_truths = all_ground_truths.get(image_id, [])
+        raw_detections = all_detections.get(image_id, [])
+        if not ground_truths:
+            continue
+
+        raw_iou: Optional[list[list[float]]] = None
+        if raw_detections:
+            gt_rboxes = [g.rbox for g in ground_truths]
+            if use_exact_rotated_iou:
+                raw_iou = iou.batch_rbox_iou(
+                    [d.rbox for d in raw_detections],
+                    gt_rboxes,
+                    intersection_backend=resolve_exact_polygon_iou_backend(),
+                )
+            else:
+                if torch is None:
+                    raw_iou = iou.batch_rbox_iou(
+                        [d.rbox for d in raw_detections],
+                        gt_rboxes,
+                    )
+                else:
+                    from ..ops.gpu_ops import oriented_box_iou_gpu
+                    from ..ops.utils import rboxes_to_tensor
+
+                    dev = device
+                    if dev is None:
+                        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                    ta = rboxes_to_tensor([d.rbox for d in raw_detections], device=dev)
+                    tb = rboxes_to_tensor(gt_rboxes, device=dev)
+                    raw_iou = oriented_box_iou_gpu(ta, tb).detach().cpu().tolist()
+
+        for gt_idx, gt in enumerate(ground_truths):
+            if skip_difficult and gt.difficult != 0:
+                continue
+            best_any = 0.0
+            best_same = 0.0
+            if raw_iou is not None:
+                for det_idx, det in enumerate(raw_detections):
+                    iou_val = raw_iou[det_idx][gt_idx]
+                    if iou_val > best_any:
+                        best_any = iou_val
+                    if detection_matches_ground_truth_class(det, gt) and iou_val > best_same:
+                        best_same = iou_val
+            cname = gt.class_name or "unknown"
+            best_any_by_class[cname].append(best_any)
+            best_same_by_class[cname].append(best_same)
+
+    return _aggregate_gt_best_iou_samples(
+        best_any_by_class,
+        best_same_by_class,
+        class_names=class_names,
+    )
+
+
+def gt_best_iou_alignment_metrics_to_dict(
+    metrics: GtBestIouAlignmentMetrics,
+) -> Dict[str, Any]:
+    """JSON-serializable view of :class:`GtBestIouAlignmentMetrics`."""
+    return {
+        "num_gts": metrics.num_gts,
+        "mean_best_iou_any": metrics.mean_best_iou_any,
+        "mean_best_iou_same_class": metrics.mean_best_iou_same_class,
+        "median_best_iou_any": metrics.median_best_iou_any,
+        "median_best_iou_same_class": metrics.median_best_iou_same_class,
+        "per_class": {
+            name: {
+                "num_gts": row.num_gts,
+                "mean_best_iou_any": row.mean_best_iou_any,
+                "mean_best_iou_same_class": row.mean_best_iou_same_class,
+                "median_best_iou_same_class": row.median_best_iou_same_class,
+            }
+            for name, row in metrics.per_class.items()
+        },
+    }
+
+
+def format_gt_best_iou_alignment_table(
+    metrics: GtBestIouAlignmentMetrics,
+    class_names: Optional[Sequence[str]] = None,
+    *,
+    markdown: bool = False,
+) -> str:
+    """Format per-class mean best IoU (same class) table."""
+    if not metrics.per_class:
+        return ""
+
+    if class_names:
+        ordered = [c for c in class_names if c in metrics.per_class]
+        ordered.extend(c for c in sorted(metrics.per_class) if c not in ordered)
+    else:
+        ordered = sorted(metrics.per_class.keys())
+
+    rows = [(name, metrics.per_class[name]) for name in ordered]
+    class_w = max(len("class"), *(len(name) for name, _ in rows))
+    col_n = max(len("gts"), 3)
+    col_any = max(len("mean_any"), 8)
+    col_same = max(len("mean_same"), 9)
+    col_med = max(len("med_same"), 8)
+
+    if markdown:
+        lines = [
+            "| Class | gts | mean_any | mean_same | med_same |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+        for name, row in rows:
+            lines.append(
+                f"| `{name}` | {row.num_gts} | {row.mean_best_iou_any:.4f} | "
+                f"{row.mean_best_iou_same_class:.4f} | {row.median_best_iou_same_class:.4f} |"
+            )
+        lines.append(
+            f"| **global** | {metrics.num_gts} | {metrics.mean_best_iou_any:.4f} | "
+            f"{metrics.mean_best_iou_same_class:.4f} | {metrics.median_best_iou_same_class:.4f} |"
+        )
+        return "\n".join(lines)
+
+    def _sep() -> str:
+        return (
+            f"|{'-' * (class_w + 2)}|{'-' * (col_n + 2)}:|"
+            f"{'-' * (col_any + 2)}:|{'-' * (col_same + 2)}:|{'-' * (col_med + 2)}:|"
+        )
+
+    lines = [
+        f"| {'class'.ljust(class_w)} | {'gts'.rjust(col_n)} | "
+        f"{'mean_any'.rjust(col_any)} | {'mean_same'.rjust(col_same)} | "
+        f"{'med_same'.rjust(col_med)} |",
+        _sep(),
+    ]
+    for name, row in rows:
+        lines.append(
+            f"| {name.ljust(class_w)} | {row.num_gts:>{col_n}d} | "
+            f"{row.mean_best_iou_any:>{col_any}.4f} | {row.mean_best_iou_same_class:>{col_same}.4f} | "
+            f"{row.median_best_iou_same_class:>{col_med}.4f} |"
+        )
+    lines.append(
+        f"| {'global'.ljust(class_w)} | {metrics.num_gts:>{col_n}d} | "
+        f"{metrics.mean_best_iou_any:>{col_any}.4f} | {metrics.mean_best_iou_same_class:>{col_same}.4f} | "
+        f"{metrics.median_best_iou_same_class:>{col_med}.4f} |"
+    )
+    return "\n".join(lines)
+
+
+def format_gt_best_iou_alignment_table_from_dict(
+    data: Dict[str, Any],
+    class_names: Optional[Sequence[str]] = None,
+    *,
+    markdown: bool = False,
+) -> str:
+    """Format table from :func:`gt_best_iou_alignment_metrics_to_dict` output."""
+    per_class_raw = data.get("per_class") or {}
+    if not per_class_raw:
+        return ""
+    per_class = {
+        name: ClassGtBestIouMetrics(
+            num_gts=int(row.get("num_gts", 0)),
+            mean_best_iou_any=float(row.get("mean_best_iou_any", 0.0)),
+            mean_best_iou_same_class=float(row.get("mean_best_iou_same_class", 0.0)),
+            median_best_iou_same_class=float(row.get("median_best_iou_same_class", 0.0)),
+        )
+        for name, row in per_class_raw.items()
+    }
+    metrics = GtBestIouAlignmentMetrics(
+        num_gts=int(data.get("num_gts", 0)),
+        mean_best_iou_any=float(data.get("mean_best_iou_any", 0.0)),
+        mean_best_iou_same_class=float(data.get("mean_best_iou_same_class", 0.0)),
+        median_best_iou_any=float(data.get("median_best_iou_any", 0.0)),
+        median_best_iou_same_class=float(data.get("median_best_iou_same_class", 0.0)),
+        per_class=per_class,
+    )
+    return format_gt_best_iou_alignment_table(metrics, class_names, markdown=markdown)
+
+
 def format_mmrotate_class_metrics_table(
     class_metrics: Dict[str, ClassEvalMetrics],
     class_names: Optional[Sequence[str]] = None,
@@ -642,7 +919,14 @@ __all__ = [
     "Detection",
     "GroundTruth",
     "ClassEvalMetrics",
+    "ClassGtBestIouMetrics",
+    "GtBestIouAlignmentMetrics",
     "APCalculator",
     "compute_oriented_map",
+    "compute_gt_best_iou_alignment_metrics",
+    "detection_matches_ground_truth_class",
+    "format_gt_best_iou_alignment_table",
+    "format_gt_best_iou_alignment_table_from_dict",
     "format_mmrotate_class_metrics_table",
+    "gt_best_iou_alignment_metrics_to_dict",
 ]

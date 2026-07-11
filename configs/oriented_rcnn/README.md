@@ -123,41 +123,7 @@ Our implementation is compatible with MMRotate's Oriented R-CNN implementation:
 | File | Purpose |
 |------|---------|
 | [`dota_le90_1x.json`](./dota_le90_1x.json) | **Full DOTA 1× recipe** — plain ROI cross-entropy (MMRotate-style baseline) |
-| [`dota_le90_1x_class_weighted.json`](./dota_le90_1x_class_weighted.json) | **1× class-balance experiment** — focal + effective-num weights, overrides for weak classes |
 | [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33] |
-
-### Class-weighted 1× recipe (`dota_le90_1x_class_weighted.json`)
-
-Inherits [`dota_le90_1x.json`](./dota_le90_1x.json) and only changes the **`loss`** block:
-
-| Setting | Value | Why |
-|---------|-------|-----|
-| `loss_type` | `focal_weighted` | Focal loss down-weights easy negatives; class weights address imbalance |
-| `class_weight_method` | `effective_num` (β=0.9999) | Stronger boost for rare DOTA classes than `sqrt` |
-| `focal_alpha` / `focal_gamma` | 0.25 / 2.0 | Standard focal settings for dense detection |
-| `class_weight_schedule_type` | `linear_ramp` (epochs 0→4) | Ramp weights from uniform → computed to avoid early instability |
-| `class_weight_overrides` | see config | Extra up-weight on **weak frequent** classes from baseline 1× eval: `small-vehicle`, `ship`, plus `bridge`, `harbor`, `swimming-pool`, `storage-tank` |
-
-Rare classes (e.g. `ground-track-field`, `helicopter`) already reach the **3.0 clip** under `effective_num` without overrides.
-
-**Train:**
-
-```bash
-odet train --config configs/oriented_rcnn/dota_le90_1x_class_weighted.json
-```
-
-**Optional fine-tune** from a plain-CE 1× checkpoint (faster A/B): set in config or override:
-
-```json
-"checkpoint": {
-  "load_from_experiment": "runs/oriented_rcnn/20260616-030231",
-  "resume_from_checkpoint_epoch": false,
-  "load_optimizer_state": false,
-  "load_scheduler_state": false
-}
-```
-
-That loads `best_*.pth` and retrains with the new loss for 12 epochs.
 
 ### Loss Functions
 
@@ -178,7 +144,7 @@ Following the paper's design:
 
 Note: IoU computation uses the **external rectangles** (axis-aligned bounding boxes) of oriented ground-truth boxes, not the oriented boxes themselves.
 
-**Train-time matching (`use_hbb_for_matching: true`):** RPN and ROI assigners use **axis-aligned (HBB) IoU** on GPU (chunked anchor matcher + `oriented_box_hbb_iou_gpu` for proposals). Predictions remain oriented; only assignment uses HBB. This matches the Rotated Faster R-CNN / RetinaNet DOTA recipes and avoids slow exact rotated IoU during matching. Set explicitly in [`dota_le90_1x.json`](./dota_le90_1x.json) and [`oriented_rcnn_r50.json`](../_base_/models/oriented_rcnn_r50.json).
+**Train-time matching:** RPN uses **HBB IoU** on external rectangles (`use_hbb_for_matching: true`, paper design). ROI stage uses **rotated IoU** by default (`roi_use_hbb_for_matching: false`, MMRotate `RBboxOverlaps2D`). Set `roi_use_hbb_for_matching: true` only if you need legacy HBB ROI assignment.
 
 ### Training Configuration
 
@@ -201,14 +167,13 @@ Oriented R-CNN is slower per step than Rotated Faster R-CNN (~2–3×) because *
 | **Learning rate** | If you increase batch size, scale LR linearly (e.g. bs 4 → `learning_rate: 0.01` at the reference bs 2). |
 | **vs RetinaNet batch 6** | One-stage RetinaNet has no per-image RoI align over thousands of proposals; Oriented R-CNN usually **cannot** use the same batch size on the same GPU. |
 
-**Do not** set `use_hbb_for_matching: false` for speed — that switches assignment to exact rotated IoU and is typically **slower**, not faster.
+**Do not** disable HBB matching on the RPN for speed experiments — ROI rotated IoU is already the default at stage 2.
 
 ### Inference Configuration
 
-- **RPN**: Top 2000 proposals per FPN level before NMS, horizontal NMS with IoU threshold 0.8
-- **Final proposals**: Top 1000 proposals after merging all levels
-- **ROI NMS**: Poly NMS with IoU threshold 0.1 per class
-- **Score threshold**: 0.05 (configurable via `eval_score_threshold`)
+- **Training validation** (`model.*`): poly NMS IoU **0.1**; RPN top-2000, horizontal NMS 0.8
+- **Production / deploy** (`production.*`): poly NMS IoU **0.3**; RPN top-6000; score floor 0.05; `max_detections_per_image: 3000`. `dota_le90_3x.json` inherits these from `dota_le90_1x.json`.
+- **mAP metrics** (`evaluation.iou_threshold: 0.5`): rotated IoU for GT–det matching in `make eval-val` / `make metrics` — **not** the detection NMS threshold
 
 ### Rotated RoIAlign Implementation
 
@@ -238,11 +203,14 @@ The method achieves state-of-the-art accuracy while maintaining competitive effi
 
 ### OrientedDet
 
-`dota_le90_1x.json` trained on DOTA train+val tiles and evaluated on the full val tile split (`filter_empty_gt=false`) reaches **74.79% mAP50**. Hub slug: `oriented_rcnn_dota_le90_1x`; eval report: `predictions/20260618_140030/model_analysis_20260618_175528.md`.
+`dota_le90_1x.json` trained on DOTA train+val tiles and evaluated on the full val tile split (`filter_empty_gt=false`) reaches **74.79% mAP50**. Hub slug: `oriented_rcnn_dota_le90_1x`; eval report: [`docs/eval-reports/oriented_rcnn_dota_le90_1x/model_analysis.md`](../../docs/eval-reports/oriented_rcnn_dota_le90_1x/model_analysis.md).
+
+`dota_le90_3x.json` (36 epochs, LR milestones at 24 and 33) reaches **79.40% mAP50** on the same eval-val protocol. Hub slug: `oriented_rcnn_dota_le90_3x`; eval report: [`docs/eval-reports/oriented_rcnn_dota_le90_3x/model_analysis.md`](../../docs/eval-reports/oriented_rcnn_dota_le90_3x/model_analysis.md).
 
 | Config | Final config | Final log | Schedule | Training run | Checkpoint | eval-val mAP50 | Hub slug |
 |--------|--------------|-----------|----------|--------------|------------|----------------|----------|
 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log) | 1× (12 ep) | `runs/oriented_rcnn/20260616-030231` | `best_mAP_0.78.pth` | 74.79% | `oriented_rcnn_dota_le90_1x` |
+| [`dota_le90_3x.json`](./dota_le90_3x.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log) | 3× (36 ep) | `runs/oriented_rcnn/20260621-092802` | `best_mAP_0.82.pth` | 79.40% | `oriented_rcnn_dota_le90_3x` |
 
 ### MMRotate reference
 
@@ -260,9 +228,6 @@ DOTA1.0
 ```bash
 # Edit dataset paths in the config, then:
 odet train --config configs/oriented_rcnn/dota_le90_1x.json
-
-# 1× with focal + class weights (weak-class experiment):
-odet train --config configs/oriented_rcnn/dota_le90_1x_class_weighted.json
 
 # Primary benchmark (36 epochs):
 odet train --config configs/oriented_rcnn/dota_le90_3x.json

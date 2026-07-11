@@ -476,6 +476,27 @@ class TestRotatedRetinaNet:
             box_reg_iou_weight=0.25,
         )
         assert model.box_reg_iou_weight == 0.25
+
+    def test_retinanet_head_separate_cls_reg_towers(self):
+        """RetinaNet head uses MMRotate-style separate subnets and 3x3 prediction convs."""
+        from oriented_det.models.rotated_retinanet import OrientedRetinaNetHead
+
+        num_classes, num_anchors = 3, 9
+        head = OrientedRetinaNetHead(
+            in_channels=256,
+            num_classes=num_classes,
+            num_anchors=num_anchors,
+            stacked_convs=4,
+        )
+        assert len(head.cls_convs) == 4
+        assert len(head.reg_convs) == 4
+        assert not hasattr(head, "convs")
+        assert head.conv_cls.kernel_size == (3, 3)
+        assert head.conv_bbox.kernel_size == (3, 3)
+        feats = [torch.randn(1, 256, 32, 32)]
+        cls_logits, bbox_pred = head(feats)
+        assert cls_logits[0].shape == (1, num_anchors * num_classes, 32, 32)
+        assert bbox_pred[0].shape == (1, num_anchors * 5, 32, 32)
     
     def test_rotated_retinanet_angle_prediction(self):
         """Test that RotatedRetinaNet predicts non-zero angles."""

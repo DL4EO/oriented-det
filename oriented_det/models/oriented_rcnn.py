@@ -41,6 +41,7 @@ from .oriented_roi import (
     OrientedROIHead,
     match_oriented_proposals_to_gt,
     compute_oriented_roi_loss,
+    compute_horizontal_roi_loss,
     compute_horizontal_roi_loss_mmrotate,
     compute_roi_matching_diagnostics,
 )
@@ -190,6 +191,9 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         roi_box_reg_iou_loss_type: str = "riou",
         roi_box_reg_kfiou_fun: Optional[str] = None,
         roi_box_reg_probiou_mode: Optional[str] = None,
+        roi_box_reg_main_loss_type: str = "smooth_l1",
+        roi_box_reg_norm: str = "sampled_all",
+        roi_box_reg_smooth_l1_aux_weight: float = 0.0,
         use_hbb_for_matching: bool = False,
         inference_pre_nms_score_threshold: float = 0.05,
         final_nms_iou_schedule_epochs: Optional[List[int]] = None,
@@ -253,10 +257,14 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                 horizontal xyxy RoIs (angle 0) this is equivalent to global offsets.
             roi_box_reg_angle_weight: Weight for the angle (5th) component in ROI box regression loss.
                 Use > 1.0 (e.g. 2.0) to improve orientation alignment when predictions stick to anchor angles.
-            roi_box_reg_iou_weight: Weight for auxiliary decoded-box loss on ROI positives (``riou`` / ``kfiou``).
-            roi_box_reg_iou_loss_type: ``riou`` (default), ``kfiou``, or ``probiou`` for that auxiliary term.
+            roi_box_reg_iou_weight: Weight for auxiliary decoded-box loss when main is Smooth L1.
+            roi_box_reg_iou_loss_type: ``riou`` (default), ``kfiou``, or ``probiou`` for decoded aux/main.
             roi_box_reg_kfiou_fun: Optional KFIoU overlap mapping when using ``kfiou``.
             roi_box_reg_probiou_mode: ``l1`` (default) or ``l2`` when using ``probiou``.
+            roi_box_reg_main_loss_type: Primary ROI reg loss: ``smooth_l1`` (default) or decoded
+                ``probiou`` / ``riou`` / ``kfiou``.
+            roi_box_reg_norm: ``sampled_all`` (MMRotate avg_factor) or ``positives_only``.
+            roi_box_reg_smooth_l1_aux_weight: Encoded Smooth L1 aux when main is decoded.
             roi_min_pos_iou: Min IoU for low-quality ROI matches when ``roi_match_low_quality`` is True.
             roi_inference_top_class_only: If True, ROI inference uses argmax fg class per proposal
                 (see ``oriented_det/models/README.md``); if False, multiclass thresholding.
@@ -280,6 +288,9 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         self.roi_box_reg_iou_loss_type = roi_box_reg_iou_loss_type
         self.roi_box_reg_kfiou_fun = roi_box_reg_kfiou_fun
         self.roi_box_reg_probiou_mode = roi_box_reg_probiou_mode
+        self.roi_box_reg_main_loss_type = roi_box_reg_main_loss_type
+        self.roi_box_reg_norm = roi_box_reg_norm
+        self.roi_box_reg_smooth_l1_aux_weight = float(roi_box_reg_smooth_l1_aux_weight)
         self.use_hbb_for_matching = use_hbb_for_matching
         self.inference_pre_nms_score_threshold = inference_pre_nms_score_threshold
         self._roi_box_reg_angle_schedule_epochs = roi_box_reg_angle_schedule_epochs
@@ -649,7 +660,7 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                         img_gt_labels = gt_labels_list[img_idx]
                         
                         if len(img_gt_boxes) > 0:
-                            roi_losses = compute_horizontal_roi_loss_mmrotate(
+                            roi_losses = compute_horizontal_roi_loss(
                                 class_logits=img_class_logits,
                                 box_regression=img_box_regression,
                                 proposals_xyxy=img_proposals,
@@ -660,10 +671,13 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                                 negative_iou_threshold=self.roi_negative_iou_threshold,
                                 box_reg_weight=1.0,
                                 box_reg_angle_weight=self.roi_box_reg_angle_weight,
+                                main_loss_type=self.roi_box_reg_main_loss_type,
+                                reg_norm=self.roi_box_reg_norm,
                                 box_reg_iou_weight=self.roi_box_reg_iou_weight,
                                 box_reg_iou_loss_type=self.roi_box_reg_iou_loss_type,
                                 box_reg_kfiou_fun=self.roi_box_reg_kfiou_fun,
                                 box_reg_probiou_mode=self.roi_box_reg_probiou_mode,
+                                smooth_l1_aux_weight=self.roi_box_reg_smooth_l1_aux_weight,
                                 fg_bg_sampling_ratio=self.roi_fg_bg_sampling_ratio,
                                 batch_size_per_image=self.roi_batch_size_per_image,
                                 num_classes=self.num_classes,
@@ -804,7 +818,9 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         roi_box_reg_iou_loss_type: str = "riou",
         roi_box_reg_kfiou_fun: Optional[str] = None,
         roi_box_reg_probiou_mode: Optional[str] = None,
+        roi_box_reg_norm: str = "sampled_all",
         use_hbb_for_matching: bool = False,
+        roi_use_hbb_for_matching: bool = False,
         inference_pre_nms_score_threshold: float = 0.05,
         final_nms_iou_schedule_epochs: Optional[List[int]] = None,
         final_nms_iou_schedule_values: Optional[List[float]] = None,
@@ -835,7 +851,9 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         self.roi_box_reg_iou_loss_type = roi_box_reg_iou_loss_type
         self.roi_box_reg_kfiou_fun = roi_box_reg_kfiou_fun
         self.roi_box_reg_probiou_mode = roi_box_reg_probiou_mode
+        self.roi_box_reg_norm = roi_box_reg_norm
         self.use_hbb_for_matching = use_hbb_for_matching
+        self.roi_use_hbb_for_matching = roi_use_hbb_for_matching
         self.inference_pre_nms_score_threshold = inference_pre_nms_score_threshold
         self.roi_loss_type = roi_loss_type
         self.roi_focal_alpha = roi_focal_alpha
@@ -1005,7 +1023,7 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                 bbox_reg,
                 anchors,
                 image_sizes,
-                score_threshold=self.inference_pre_nms_score_threshold,
+                score_threshold=0.0,
                 nms_threshold=self.rpn_nms_threshold,
                 pre_nms_top_n=self.rpn_pre_nms_top_n,
                 post_nms_top_n=self.rpn_post_nms_top_n,
@@ -1075,7 +1093,8 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                             box_reg_iou_loss_type=self.roi_box_reg_iou_loss_type,
                             box_reg_kfiou_fun=self.roi_box_reg_kfiou_fun,
                             box_reg_probiou_mode=self.roi_box_reg_probiou_mode,
-                            use_hbb_for_matching=self.use_hbb_for_matching,
+                            use_hbb_for_matching=self.roi_use_hbb_for_matching,
+                            reg_norm=self.roi_box_reg_norm,
                             match_low_quality=self.roi_match_low_quality,
                             label_smoothing=self.roi_label_smoothing,
                             **self.roi_grouped_ce_kwargs(),

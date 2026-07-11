@@ -176,16 +176,3 @@ def test_oriented_rcnn_dota_3x_config_loads():
     assert cfg.training.num_epochs == 36
     assert cfg.training.lr_scheduler_milestones == [24, 33]
     assert cfg.model.rpn_nms_threshold == pytest.approx(0.8)
-
-
-def test_oriented_rcnn_dota_1x_class_weighted_config_loads():
-    root = Path(__file__).resolve().parents[1]
-    cfg = TrainingExperimentConfig.load(
-        root / "configs/oriented_rcnn/dota_le90_1x_class_weighted.json"
-    )
-    assert cfg.model_type == "oriented_rcnn"
-    assert cfg.training.num_epochs == 12
-    assert cfg.loss.loss_type == "focal_weighted"
-    assert cfg.loss.class_weight_method == "effective_num"
-    assert cfg.loss.class_weight_overrides["small-vehicle"] == pytest.approx(3.0)
-    assert cfg.loss.class_weight_schedule_type == "linear_ramp"

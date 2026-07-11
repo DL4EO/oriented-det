@@ -2,6 +2,19 @@
 
 Training loop, evaluation, checkpointing, and **`TrainingExperimentConfig`**. Full JSON reference: [Configuration](../../docs/user-guide/configuration.md). User guide: [Training](../../docs/user-guide/training.md).
 
+## Source provenance (`git_commit`, …)
+
+When training starts, rank 0 stamps the saved `config.json` and prints to `train.log`:
+
+- **`git_commit`** — full hash of the framework source tree (the installed `oriented_det` package root, not `ORIENTED_DET_PROJECT_ROOT`)
+- **`git_describe`** — `git describe --dirty --always --tags`
+- **`git_dirty`** — uncommitted changes at launch
+- **`git_branch`**, **`git_commit_date`**, **`package_version`**, **`source_code_root`**
+
+Use these fields to compare runs when the recipe JSON is unchanged but code moved forward (e.g. architecture parity commits). Recipe files do not set these keys; they are runtime-only like `experiment_timestamp` and `source_recipe`.
+
+To reconstruct provenance for an old run without stamps, align `train.log` start time with `git rev-list -1 --before='<started_at>' HEAD` on the framework repo.
+
 ## RPN anchor priors
 
 Anchor-based detectors (`RotatedFasterRCNN`, `OrientedRCNN`, `RotatedRetinaNet`) default to **horizontal RPN priors** (`theta = 0`), aligned with MMRotate-style generators. **`model.anchor_angles` is not a config field**—if present in JSON, strict loading rejects it as an unknown `model` key. Advanced use: pass **`anchor_angles=...`** only when constructing a model in Python (see `oriented_det/models/README.md`).
@@ -14,7 +27,7 @@ When training with `--debug` (or `make train DEBUG=1`), extra logs are printed a
 - **First batch**: GT counts per image (min/max/mean) and per-class counts to spot data/annotation issues.
 - **Each epoch**: Full loss breakdown (all `loss_*` components) and current learning rate.
 - **TensorBoard**: RPN/ROI metrics (e.g. `roi_num_pos`, `roi_match_rate`; for Rotated Faster R-CNN these reflect **RPN-only** proposals, not the training pool after GT append) and anchor/proposal visualizations when `log_debug_anchors_proposals` is enabled. Validation prediction images (`val/predictions`) overlay the source **filename** (basename with extension) at the top-left when the dataloader provides `image_filename` (DOTA train script collate does).
-- **After mAP**: Per-class AP, detections per class, ground truths per class, GT cover rates (pre/post score threshold), detection score stats, and optionally **GT–IoU diagnostics** when `evaluation.extended_gt_metrics` is true (mean/median of each GT’s best IoU against all raw detections vs same-class dets only, counts of GTs with **0% best IoU** (no overlap with any raw det), high IoU but wrong class vs no box above the eval IoU threshold, histograms of best IoU into `[0,0.25)`, `[0.25,0.5)`, `[0.5,0.75)`, `[0.75,1]`, and **class-agnostic duplicate rate** on score-thresholded boxes: sort by score, greedy “keep”; a box is duplicate if its IoU with any kept higher-score box is ≥ the eval IoU threshold—reports micro and macro duplicate rates). Leave `extended_gt_metrics` false (default) for faster validation.
+- **After mAP**: Per-class AP, detections per class, ground truths per class, GT cover rates (pre/post score threshold), detection score stats, and optionally **GT–IoU diagnostics** when `evaluation.extended_gt_metrics` is true (mean/median of each GT’s best IoU against all raw detections vs same-class dets only, **per-class mean best IoU table**, counts of GTs with **0% best IoU** (no overlap with any raw det), high IoU but wrong class vs no box above the eval IoU threshold, histograms of best IoU into `[0,0.25)`, `[0.25,0.5)`, `[0.5,0.75)`, `[0.75,1]`, and **class-agnostic duplicate rate** on score-thresholded boxes: sort by score, greedy “keep”; a box is duplicate if its IoU with any kept higher-score box is ≥ the eval IoU threshold—reports micro and macro duplicate rates). Leave `extended_gt_metrics` false (default) for faster validation.
 
 **Score thresholds:** `evaluation.score_threshold` is the global minimum confidence for metrics. Optional `evaluation.per_class_score_threshold` maps class names to per-class minimum scores (post-NMS); classes not listed use the global value.
 
@@ -86,7 +99,25 @@ When `model.roi_box_reg_iou_weight` > 0, an optional piecewise schedule can redu
 - **`model.roi_box_reg_iou_schedule_epochs`**: 0-based epoch boundaries (same convention as `freeze_backbone_epochs` and `final_nms_iou_schedule_epochs`).
 - **`model.roi_box_reg_iou_schedule_values`**: weight per segment; length = `len(epochs) + 1`. When either schedule field is null, `roi_box_reg_iou_weight` stays constant.
 
-Each training epoch, the engine calls `set_roi_box_reg_iou_weight_for_epoch(epoch)` on two-stage models (or `set_box_reg_iou_weight_for_epoch` on RetinaNet).
+Each training epoch, the engine calls `set_roi_box_reg_iou_weight_for_epoch(epoch)` on two-stage models (or `set_box_reg_iou_weight_for_epoch` on RetinaNet). This schedule applies to **decoded aux** when `roi_box_reg_main_loss_type` is `smooth_l1` (default).
+
+## ROI main regression loss (`model.roi_box_reg_main_loss_type`, Rotated Faster R-CNN)
+
+- **`smooth_l1`** (default): encoded Smooth L1 primary; optional decoded aux via `roi_box_reg_iou_weight` / `roi_box_reg_iou_loss_type`.
+- **`probiou` / `riou` / `kfiou`**: decoded primary on positive RoIs; optional encoded Smooth L1 aux via `roi_box_reg_smooth_l1_aux_weight`.
+- **`roi_box_reg_norm`**: `sampled_all` (MMRotate avg_factor) or `positives_only` (per-dim mean over positives). Default `sampled_all` preserves existing DOTA recipes.
+
+Example (ProbIoU main + Smooth L1 aux, see [`dota_le90_1x.json`](../../configs/rotated_faster_rcnn/dota_le90_1x.json)):
+
+```json
+"model": {
+  "roi_box_reg_main_loss_type": "probiou",
+  "roi_box_reg_probiou_mode": "l1",
+  "roi_box_reg_iou_weight": 0.0,
+  "roi_box_reg_smooth_l1_aux_weight": 0.1,
+  "roi_box_reg_norm": "positives_only"
+}
+```
 
 Example (piecewise ROI IoU aux weight):
 

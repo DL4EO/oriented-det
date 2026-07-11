@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """
-Gradio app to browse inference results (predictions mode) or explore a DOTA
-dataset without predictions (dataset mode). Supports tiled and original
-DOTA directory layouts.
+Gradio app to browse inference results (predictions mode), explore a DOTA
+dataset without predictions (dataset mode), or edit polygon/OBB CSV annotations
+(csv mode) with an optional read-only reference layer.
 """
 
 import os
@@ -1283,14 +1283,17 @@ def create_app(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Launch Gradio app: predictions viewer or dataset explorer."
+        description="Launch Gradio app: predictions viewer, dataset explorer, or CSV annotation editor."
     )
     parser.add_argument(
         "--mode",
         type=str,
-        choices=["predictions", "dataset"],
+        choices=["predictions", "dataset", "csv"],
         default="predictions",
-        help="Mode: 'predictions' (browse inference results) or 'dataset' (explore dataset only)",
+        help=(
+            "Mode: 'predictions' (inference results), 'dataset' (DOTA browse), "
+            "or 'csv' (edit OBB CSV with optional reference overlay)"
+        ),
     )
     parser.add_argument(
         "--predictions-dir",
@@ -1317,6 +1320,24 @@ def main():
         help="Confidence threshold for predictions mode (default: 0.3)",
     )
     parser.add_argument(
+        "--annotations-csv",
+        type=str,
+        default=None,
+        help="Editable annotations CSV (required when --mode csv)",
+    )
+    parser.add_argument(
+        "--reference-csv",
+        type=str,
+        default=None,
+        help="Read-only reference CSV overlay in csv mode (e.g. original horizontal GT)",
+    )
+    parser.add_argument(
+        "--images-dir",
+        type=str,
+        default="images",
+        help="Images subdirectory under --data-root (csv mode)",
+    )
+    parser.add_argument(
         "--port",
         type=int,
         default=7860,
@@ -1328,14 +1349,29 @@ def main():
         parser.error("--predictions-dir is required when --mode predictions")
     if args.mode == "dataset" and not args.data_root:
         parser.error("--data-root is required when --mode dataset")
+    if args.mode == "csv":
+        if not args.data_root:
+            parser.error("--data-root is required when --mode csv")
+        if not args.annotations_csv:
+            parser.error("--annotations-csv is required when --mode csv")
 
-    app = create_app(
-        mode=args.mode,
-        predictions_dir=args.predictions_dir,
-        data_root=args.data_root,
-        tiles_dir=args.tiles_dir,
-        threshold=args.threshold,
-    )
+    if args.mode == "csv":
+        from viewer_annotations import create_csv_annotation_app
+
+        app = create_csv_annotation_app(
+            data_root=args.data_root,
+            annotations_csv=args.annotations_csv,
+            reference_csv=args.reference_csv,
+            images_dir=args.images_dir,
+        )
+    else:
+        app = create_app(
+            mode=args.mode,
+            predictions_dir=args.predictions_dir,
+            data_root=args.data_root,
+            tiles_dir=args.tiles_dir,
+            threshold=args.threshold,
+        )
     app.launch(server_port=args.port, server_name="0.0.0.0")
 
 

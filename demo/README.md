@@ -33,4 +33,4 @@ make demo              # all *.jpg / *.jpeg / *.png directly under demo/ → dem
 # Optional: DEMO_DIR=other/dir IMAGE_DEMO_DEVICE=cpu IMAGE_DEMO_OUT_DIR=/tmp/demo-out
 ```
 
-Only images **directly inside** `DEMO_DIR` are used (not subfolders such as `demo/out/`). See `tools/README.md` for more options (`--score-thr`, `--nms-thr`, `--device`, `--overlap-pixels` / `--overlap-ratio`). If the image size matches the model input from your config (e.g. 1024×1024), inference uses a single forward pass; otherwise images are padded or tiled to that size.
+Only images **directly inside** `DEMO_DIR` are used (not subfolders such as `demo/out/`). See `tools/README.md` for more options (`--score-thr`, `--nms-thr`, `--classes`, `--zoom`, `--device`, `--overlap-pixels` / `--overlap-ratio`). If the image size matches the model input from your config (e.g. 1024×1024), inference uses a single forward pass; otherwise images are padded or tiled to that size. With `--zoom 2` or `--zoom 4`, inference runs on the zoomed image and the final visualization remains at the original size.

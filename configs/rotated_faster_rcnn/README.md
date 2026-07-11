@@ -148,7 +148,7 @@ The ROI head uses a 5-parameter horizontal-to-rotated encoding:
 **Key Parameters**:
 - `norm_factor=2.0`: Scales angle delta to [-0.5, 0.5] range for le90 convention
 - `edge_swap=True`: Optimizes angle representation by swapping width/height when beneficial
-- `roi_proj_xy=true`: Explicit in base config for parity with Oriented R-CNN. Horizontal `xyxy` RoIs have implicit angle 0, so local-frame `dx`/`dy` match global offsets (no behavioral change vs `false`).
+- `roi_proj_xy=true`: Explicit in base config for parity with Oriented R-CNN. Horizontal `xyxy` RoIs have implicit angle 0, so local-frame `dx`/`dy` match global offsets (no behavioral change vs `false`). When proposal angles are non-zero, `DeltaXYWHTHBBoxCoder` rotates offsets into the RoI frame.
 
 ## Implementation Details
 
@@ -161,19 +161,20 @@ Our implementation targets MMRotate semantics:
   - Regression outputs 4 parameters (dx, dy, dw, dh).
   
 - **ROI Head**:
-  - Horizontal RoIAlign and single 5D SmoothL1 regression loss over encoded targets (MMRotate-style).
+  - Horizontal RoIAlign (first 4 FPN levels) and encoded 5D SmoothL1 regression (`roi_box_reg_norm: sampled_all`, MMRotate avg_factor).
   - **add_gt_as_proposals** (config `model.add_gt_as_proposals`, default `true`).
 
 ### Training defaults (DOTA-style recipes)
 
-Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **batch size 2**, **12 epochs**, **MultiStepLR** with milestones at epochs **8** and **11** (\(\gamma=0.1\)), **lr=0.005**, **1024×1024** tiles, and **horizontal-anchor** matching with **`use_hbb_for_matching: true`**. [`dota_le90_1x.json`](./dota_le90_1x.json) is the full 1× recipe; [`dota_le90_3x.json`](./dota_le90_3x.json) inherits it and extends training to **36 epochs** with milestones **24/33**. Both use **FP32**, cross-entropy classification, and **ProbIoU** auxiliary ROI regression (`roi_box_reg_iou_loss_type: probiou`, `roi_box_reg_probiou_mode: l1`, weight **0.1**).
+Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **batch size 2**, **12 epochs**, **MultiStepLR** with milestones at epochs **8** and **11** (\(\gamma=0.1\)), **lr=0.005**, **1024×1024** tiles, and **horizontal-anchor** matching with **`use_hbb_for_matching: true`**. [`dota_le90_1x.json`](./dota_le90_1x.json) is the full 1× recipe; [`dota_le90_3x.json`](./dota_le90_3x.json) inherits it and extends training to **36 epochs** with milestones **24/33**. Both use **FP32**, cross-entropy classification, and **ProbIoU primary** ROI regression with **Smooth L1 aux** (0.1), `roi_box_reg_norm: positives_only`, `roi_box_reg_angle_weight: 1.0`.
 
 ## Config files in this folder
 
 | File | Purpose |
 |------|---------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** — 12 epochs, lr 0.005, MultiStep @ 8/11, train+val tiles, H+V+diagonal flips, ProbIoU ROI aux. |
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** — 12 epochs, lr 0.005, MultiStep @ 8/11, ProbIoU main + Smooth L1 aux 0.1, angle weight 1.0. Hub: `rotated_faster_rcnn_dota_le90_1x`. |
 | [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Hub: `rotated_faster_rcnn_dota_le90_3x`. |
+| [`dota_le90_3x_probiou_main_angle_ft.json`](./dota_le90_3x_probiou_main_angle_ft.json) | **Angle fine-tune** — 12 epochs from `best_mAP_0.88.pth`; frozen backbone+RPN, lr 5e-4, angle weight 2.0, Smooth L1 aux **0.3** (stronger encoded angle signal for near-square GT). |
 
 ### First run (1× baseline)
 
@@ -181,11 +182,25 @@ Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **b
 python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_1x.json
 ```
 
-### 3× from ImageNet
+### 3× (inherits standard 1× ROI loss)
 
 ```bash
 python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
 ```
+
+If training is unstable, try `roi_box_reg_smooth_l1_aux_weight` in `{0.05, 0.2}` or `roi_box_reg_norm: sampled_all`.
+
+### Angle fine-tune (optional polish from a 3× checkpoint)
+
+Low-risk polish for orientation alignment: RoI head only (backbone and RPN frozen), higher angle SmoothL1 weight, stronger encoded-regression aux (**0.3**). ProbIoU main loss has **zero angle gradient when w≈h** (Gaussian surrogate is rotation-invariant for squares), so aux must carry angle supervision for baseball-diamond–like classes. Update `checkpoint.load_from_checkpoint` if your source run differs.
+
+```bash
+python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x_probiou_main_angle_ft.json
+```
+
+If val mAP drops more than ~0.5 pt, stop early and keep the source checkpoint. To also adapt proposals, set `training.freeze_rpn_epochs` to `0`.
+
+If training is unstable on a full 1×/3× run, try `roi_box_reg_smooth_l1_aux_weight` in `{0.05, 0.2}` or `roi_box_reg_norm: sampled_all`.
 
 ## Results and models
 
@@ -193,7 +208,8 @@ DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 
 
 | Backbone | mAP (eval-val) | Angle | lr schd | Aug | BS | Config | Final config | Final log | Download |
 | :----------------------: | :---: | :---: | :-----: | :-: | :--: | :----: | :----------: | :-------: | :----: |
-| ResNet50 (1024,1024,200) | 76.41 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.log) | `hf://rotated_faster_rcnn_dota_le90_3x` |
+| ResNet50 (1024,1024,200) | 77.57 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log) | `hf://rotated_faster_rcnn_dota_le90_1x` |
+| ResNet50 (1024,1024,200) | 83.42 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.log) | `hf://rotated_faster_rcnn_dota_le90_3x` |
 | ResNet50 (1024,1024,200) | 75.58 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log) | `hf://rotated_faster_rcnn_dota_le90_3x_ce` |
 
-Eval report: [`predictions/20260615_082332/`](../../predictions/20260615_082332/).
+Eval reports: [`docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/model_analysis.md), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/model_analysis.md), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x_ce/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x_ce/model_analysis.md).

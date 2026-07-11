@@ -10,7 +10,10 @@ This module implements ROI head components that work with oriented bounding boxe
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
+
+RegNorm = Literal["sampled_all", "positives_only"]
+MainRegLossType = Literal["smooth_l1", "probiou", "riou", "kfiou"]
 
 try:
     import torch
@@ -201,24 +204,32 @@ def oriented_roi_align(
     
     if len(feature_maps) == 0:
         raise ValueError("At least one feature map is required.")
+
+  # MMRotate RotatedSingleRoIExtractor: ROI uses first 4 FPN levels (e.g. strides 4–32).
+    num_roi_levels = min(len(feature_maps), 4)
+    if fpn_strides is not None:
+        roi_strides = [int(s) for s in fpn_strides[:num_roi_levels]]
+    else:
+        roi_strides = None
+    roi_feature_maps = feature_maps[:num_roi_levels]
     
     with logger.trace_block(
         "oriented_roi_align(num_boxes={}, num_levels={}, output_size={}, chunk_size={})",
-        boxes.shape[0], len(feature_maps), output_size, chunk_size
+        boxes.shape[0], len(roi_feature_maps), output_size, chunk_size
     ):
-        device = feature_maps[0].device
+        device = roi_feature_maps[0].device
         num_boxes = boxes.shape[0]
         
         if num_boxes == 0:
             # Return empty tensor with correct shape
-            C = feature_maps[0].shape[1]
+            C = roi_feature_maps[0].shape[1]
             logger.trace("No boxes provided, returning empty tensor")
             return torch.zeros((0, C, output_size[0], output_size[1]), device=device)
     
     # Determine which feature map to use for each box
-    if len(feature_maps) > 1 and fpn_strides is not None:
+    if len(roi_feature_maps) > 1 and roi_strides is not None:
         feature_map_indices = assign_roi_fpn_levels_mmrotate(
-            boxes, fpn_strides, finest_scale=finest_scale, box_format="obb"
+            boxes, roi_strides, finest_scale=finest_scale, box_format="obb"
         )
     else:
         # Use first feature map for all boxes
@@ -227,18 +238,20 @@ def oriented_roi_align(
     # Determine spatial scales
     if spatial_scales is None:
         # Default: compute from FPN level
-        if fpn_strides is not None:
-            spatial_scales = [1.0 / stride for stride in fpn_strides]
+        if roi_strides is not None:
+            spatial_scales = [1.0 / stride for stride in roi_strides]
         else:
             # Default scale for single feature map
             spatial_scales = [1.0 / 16.0]
+    else:
+        spatial_scales = spatial_scales[:num_roi_levels]
     
     # Determine which image each box belongs to
     if box_to_image is None:
         box_to_image = torch.zeros(num_boxes, dtype=torch.long, device=device)
     
-    B = feature_maps[0].shape[0]
-    C = feature_maps[0].shape[1]
+    B = roi_feature_maps[0].shape[0]
+    C = roi_feature_maps[0].shape[1]
     
     # Create base sampling grid (in box-local coordinates)
     # Grid coordinates in normalized [-1, 1] range
@@ -252,12 +265,12 @@ def oriented_roi_align(
     grid_local = torch.stack([grid_x, grid_y], dim=-1)  # [grid_h, grid_w, 2]
     
     # Pre-allocate output tensor for efficiency
-    output_features = torch.zeros((num_boxes, C, grid_h, grid_w), device=device, dtype=feature_maps[0].dtype)
+    output_features = torch.zeros((num_boxes, C, grid_h, grid_w), device=device, dtype=roi_feature_maps[0].dtype)
     
     # Process boxes by feature map level and image
     # MEMORY-EFFICIENT: Process boxes sequentially to avoid expand() memory explosion
-    for feat_idx in range(len(feature_maps)):
-        feature_map = feature_maps[feat_idx]  # [B, C, H, W]
+    for feat_idx in range(len(roi_feature_maps)):
+        feature_map = roi_feature_maps[feat_idx]  # [B, C, H, W]
         _, _, H, W = feature_map.shape
         spatial_scale = spatial_scales[min(feat_idx, len(spatial_scales) - 1)]
         
@@ -1122,6 +1135,7 @@ def compute_oriented_roi_loss(
     grouped_alpha: float = 0.0,
     group_index_lists: Optional[Sequence[Sequence[int]]] = None,
     class_in_group_id: Optional[torch.Tensor] = None,
+    reg_norm: RegNorm = "sampled_all",
     include_assignment_diagnostics: bool = True,
 ) -> Dict[str, Any]:
     """Compute ROI losses for oriented object detection.
@@ -1301,16 +1315,13 @@ def compute_oriented_roi_loss(
             torch.zeros_like(regression_targets, device=regression_targets.device),
         )
 
-        # SmoothL1 beta=1.0; angle dim weighted by box_reg_angle_weight (MMRotate ROI style).
-        loss_elem = F.smooth_l1_loss(
+        # MMRotate: Smooth L1 on all 5 encoded channels; avg_factor over sampled RoIs.
+        loss_box_reg = _smooth_l1_encoded_regression_loss(
             selected_regression,
             regression_targets,
-            beta=1.0,
-            reduction="none",
-        )
-        loss_box_reg = (
-            loss_elem[:, :4].mean() * (4.0 / 5.0)
-            + loss_elem[:, 4].mean() * (box_reg_angle_weight / 5.0)
+            angle_weight=box_reg_angle_weight,
+            reg_norm=_normalize_reg_norm(reg_norm),
+            num_total_samples=max(1, int(len(sampled_indices))),
         )
         if box_reg_iou_weight > 0.0:
             decoded_boxes = decode_oriented_boxes(
@@ -1358,7 +1369,69 @@ def compute_oriented_roi_loss(
     return out
 
 
-def compute_horizontal_roi_loss_mmrotate(
+def _normalize_reg_norm(reg_norm: str) -> RegNorm:
+    norm = (reg_norm or "positives_only").strip().lower()
+    if norm not in ("sampled_all", "positives_only"):
+        raise ValueError(f"reg_norm must be 'sampled_all' or 'positives_only', got {reg_norm!r}")
+    return norm  # type: ignore[return-value]
+
+
+def _normalize_main_reg_loss_type(main_loss_type: str) -> MainRegLossType:
+    lt = (main_loss_type or "smooth_l1").strip().lower()
+    if lt not in ("smooth_l1", "probiou", "riou", "kfiou"):
+        raise ValueError(
+            f"main_loss_type must be smooth_l1|probiou|riou|kfiou, got {main_loss_type!r}"
+        )
+    return lt  # type: ignore[return-value]
+
+
+def _smooth_l1_encoded_regression_loss(
+    selected_regression: torch.Tensor,
+    regression_targets: torch.Tensor,
+    *,
+    angle_weight: float = 1.0,
+    reg_norm: RegNorm = "sampled_all",
+    num_total_samples: int = 1,
+    beta: float = 1.0,
+) -> torch.Tensor:
+    """Smooth L1 on all 5 encoded channels (MMRotate / MMDet L1Loss on bbox targets).
+
+    Predictions and targets are already coder-normalized (edge_swap, norm_factor,
+  stds applied at encode time). The 5th channel uses ``angle_weight`` as a scalar
+    multiplier on its element losses.
+    """
+    loss_per_dim = F.smooth_l1_loss(
+        selected_regression,
+        regression_targets,
+        beta=beta,
+        reduction="none",
+    )
+    if angle_weight != 1.0:
+        loss_per_dim = loss_per_dim.clone()
+        loss_per_dim[:, 4] = loss_per_dim[:, 4] * angle_weight
+    if reg_norm == "sampled_all":
+        return loss_per_dim.sum() / float(max(1, num_total_samples))
+    return loss_per_dim.mean()
+
+
+def _horizontal_decoded_reg_loss(
+    decoded_boxes: torch.Tensor,
+    matched_gt: torch.Tensor,
+    *,
+    loss_type: str,
+    kfiou_fun: Optional[str] = None,
+    probiou_mode: Optional[str] = None,
+) -> torch.Tensor:
+    return mean_auxiliary_box_reg_loss(
+        decoded_boxes,
+        matched_gt,
+        loss_type=loss_type,
+        kfiou_fun=kfiou_fun,
+        probiou_mode=probiou_mode,
+    )
+
+
+def compute_horizontal_roi_loss(
     *,
     class_logits: torch.Tensor,
     box_regression: torch.Tensor,
@@ -1370,10 +1443,13 @@ def compute_horizontal_roi_loss_mmrotate(
     negative_iou_threshold: float = 0.5,
     box_reg_weight: float = 1.0,
     box_reg_angle_weight: float = 1.0,
+    main_loss_type: str = "smooth_l1",
+    reg_norm: RegNorm = "positives_only",
     box_reg_iou_weight: float = 0.0,
     box_reg_iou_loss_type: str = "riou",
     box_reg_kfiou_fun: Optional[str] = None,
     box_reg_probiou_mode: Optional[str] = None,
+    smooth_l1_aux_weight: float = 0.0,
     fg_bg_sampling_ratio: float = 0.25,
     batch_size_per_image: int = 512,
     num_classes: int = 1,
@@ -1394,18 +1470,18 @@ def compute_horizontal_roi_loss_mmrotate(
     roi_min_pos_iou: float = 0.5,
     include_assignment_diagnostics: bool = True,
 ) -> Dict[str, Any]:
-    """MMRotate-style ROI loss for Rotated Faster R-CNN: horizontal proposals (xyxy) + 5D SmoothL1.
+    """ROI loss for Rotated Faster R-CNN: horizontal proposals (xyxy) + 5D regression.
 
     - Proposals are axis-aligned xyxy.
     - Matching uses HBB-style IoU between ``xyxy_to_obb(proposals_xyxy)`` and ``gt_boxes``.
-      This mirrors MMRotate's ``RBbox2HBboxOverlaps2D`` assigner behavior.
     - Regression targets use DeltaXYWHTHBBoxCoder math (see ``horizontal_roi_coder.py``).
-    - Regression loss is normalized MMRotate-style: SmoothL1 summed over positive RoIs
-      divided by the total number of sampled RoIs (pos + neg).
-    - ``box_reg_angle_weight``: scales the angle (5th encoded dim) term; at 1.0 the loss
-      matches MMRotate exactly.
-    - ``box_reg_iou_weight``: optional auxiliary loss on decoded boxes (``riou`` or ``kfiou``;
-      see ``box_reg_iou_loss_type``).
+    - ``main_loss_type``: ``smooth_l1`` (encoded deltas, default) or decoded ``probiou`` /
+      ``riou`` / ``kfiou``.
+    - ``reg_norm``: ``sampled_all`` (MMDet avg_factor: divide by pos+neg sample count) or
+      ``positives_only`` (mean over positive RoIs).
+    - When main is ``smooth_l1``, ``box_reg_iou_weight`` adds decoded aux loss
+      (``box_reg_iou_loss_type``). When main is decoded, ``smooth_l1_aux_weight`` adds
+      encoded Smooth L1 aux.
     """
     if torch is None or F is None:
         raise RuntimeError("PyTorch is required for loss computation.")
@@ -1472,6 +1548,9 @@ def compute_horizontal_roi_loss_mmrotate(
         positive_rois = proposals_xyxy[sampled_fg].detach()
         positive_matched_gt = matched_gt_boxes[sampled_fg].detach()
         positive_labels = matched_labels[sampled_fg]
+        positive_roi_angle = (
+            proposals_obb[sampled_fg, 4].detach() if proj_xy else None
+        )
 
         positive_regression = box_regression[sampled_fg].clone()
         if positive_regression.shape[1] == 5:
@@ -1489,44 +1568,54 @@ def compute_horizontal_roi_loss_mmrotate(
             norm_factor=norm_factor,
             edge_swap=edge_swap,
             proj_xy=proj_xy,
+            roi_angle=positive_roi_angle,
         )
         regression_targets = torch.where(
             torch.isfinite(regression_targets),
             regression_targets,
             torch.zeros_like(regression_targets, device=device),
         )
-        # SmoothL1 beta=1.0 per MMRotate ROI head. MMRotate normalization: sum over the
-        # positive RoIs' 5 encoded dims divided by the total number of sampled RoIs
-        # (pos + neg, avg_factor in MMDet), not by the positive count. The angle dim is
-        # scaled by box_reg_angle_weight; weight==1.0 recovers MMRotate exactly.
-        loss_elem = F.smooth_l1_loss(
+        num_total_samples = max(1, int(len(sampled_indices)))
+        norm = _normalize_reg_norm(reg_norm)
+        main_lt = _normalize_main_reg_loss_type(main_loss_type)
+        smooth_l1_loss = _smooth_l1_encoded_regression_loss(
             selected_regression,
             regression_targets,
-            beta=1.0,
-            reduction="none",
+            angle_weight=box_reg_angle_weight,
+            reg_norm=norm,
+            num_total_samples=num_total_samples,
         )
-        num_total_samples = max(1, int(len(sampled_indices)))
-        loss_box_reg = (
-            loss_elem[:, :4].sum() + box_reg_angle_weight * loss_elem[:, 4].sum()
-        ) / float(num_total_samples)
-        if box_reg_iou_weight > 0.0:
-            decoded_boxes = decode_delta_xywh_th(
-                positive_rois,
-                selected_regression,
-                means=means,
-                stds=stds,
-                norm_factor=norm_factor,
-                edge_swap=edge_swap,
-                proj_xy=proj_xy,
-            )
-            loss_iou = mean_auxiliary_box_reg_loss(
+        decoded_boxes = decode_delta_xywh_th(
+            positive_rois,
+            selected_regression,
+            means=means,
+            stds=stds,
+            norm_factor=norm_factor,
+            edge_swap=edge_swap,
+            proj_xy=proj_xy,
+            roi_angle=positive_roi_angle,
+        )
+        if main_lt == "smooth_l1":
+            loss_box_reg = smooth_l1_loss
+            if box_reg_iou_weight > 0.0:
+                loss_iou = _horizontal_decoded_reg_loss(
+                    decoded_boxes,
+                    positive_matched_gt,
+                    loss_type=box_reg_iou_loss_type,
+                    kfiou_fun=box_reg_kfiou_fun,
+                    probiou_mode=box_reg_probiou_mode,
+                )
+                loss_box_reg = loss_box_reg + (box_reg_iou_weight * loss_iou)
+        else:
+            loss_box_reg = _horizontal_decoded_reg_loss(
                 decoded_boxes,
                 positive_matched_gt,
-                loss_type=box_reg_iou_loss_type,
+                loss_type=main_lt,
                 kfiou_fun=box_reg_kfiou_fun,
                 probiou_mode=box_reg_probiou_mode,
             )
-            loss_box_reg = loss_box_reg + (box_reg_iou_weight * loss_iou)
+            if smooth_l1_aux_weight > 0.0:
+                loss_box_reg = loss_box_reg + (smooth_l1_aux_weight * smooth_l1_loss)
     else:
         loss_box_reg = (box_regression[0:1] * 0.0).sum() if box_regression.numel() > 0 else (class_logits[0:1] * 0.0).sum()
 
@@ -1540,6 +1629,13 @@ def compute_horizontal_roi_loss_mmrotate(
     if include_assignment_diagnostics:
         out.update(assign_stats)
     return out
+
+
+def compute_horizontal_roi_loss_mmrotate(
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """MMRotate-style wrapper: ``reg_norm='sampled_all'`` (avg_factor over pos+neg)."""
+    return compute_horizontal_roi_loss(**kwargs, reg_norm="sampled_all")
 
 
 class OrientedROIHead(nn.Module if nn is not None else object):  # type: ignore
@@ -1661,6 +1757,7 @@ __all__ = [
     "roi_classification_loss",
     "compute_roi_matching_diagnostics",
     "compute_oriented_roi_loss",
+    "compute_horizontal_roi_loss",
     "compute_horizontal_roi_loss_mmrotate",
     "OrientedROIHead",
 ]

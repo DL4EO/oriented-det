@@ -91,12 +91,14 @@ oriented_det/
 
 ## Areas for Contribution
 
-- New datasets (HRSC2016, FAIR1M, etc.)
-- Additional model architectures
-- Performance optimizations
-- Documentation improvements
-- Bug fixes
-- Tool scripts and utilities
+Aligned with the [Roadmap](roadmap.md):
+
+- **v0.2–v0.3:** Faster R-CNN probiou Hub publish; Rotated FCOS model and configs
+- **v0.4:** HRSC2016 and FAIR1M dataset loaders
+- **v0.5:** RTMDet-R and native YOLO-OBB (clean-room, no Ultralytics)
+- **Docs:** Tutorials, hosted MkDocs, eval reports
+- **Ops:** Fused CUDA rotated IoU/NMS kernels
+- Bug fixes and tool scripts
 
 ## Questions?
 

@@ -263,6 +263,7 @@ CSV + split-file datasets (`dataset.format: airbus_playground` in [Configuration
 
 - `annotations_file` — object CSV from Playground export
 - `split_file` — fold or train/val column (`val_split_id` for integer folds)
+- `train_includes_val` — when `true`, train on all folds; `val_split_id` fold is still used for validation/monitoring only (DOTA `train_tiles_dirs` trainval parity)
 - `ignore_labels`, `map_labels` — filter and rename classes
 
 Keep dataset JSON in your own config tree and inherit `@odet:configs/_base_/...` fragments. Prep tools: `odet playground-csv`, `odet playground-to-dota` (see [tools/README.md](https://github.com/DL4EO/oriented-det/blob/main/tools/README.md)).

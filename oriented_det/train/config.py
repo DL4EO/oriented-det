@@ -87,6 +87,9 @@ class DatasetConfig:
     # Airbus Playground split.csv: integer fold id used as validation (default 0). Ignored for
     # legacy CSVs whose split column uses only the strings train/val.
     val_split_id: int = 0
+    # Airbus Playground fold mode: when true, train split includes all folds (DOTA trainval parity);
+    # val split still uses val_split_id for monitoring only.
+    train_includes_val: bool = False
     ignore_labels: Optional[List[str]] = None
     map_labels: Optional[Dict[str, str]] = None
     # How to handle DOTA "difficult" annotations (last field in label lines):
@@ -218,8 +221,11 @@ class ModelConfig:
     roi_box_reg_iou_loss_type: str = "riou"
     roi_box_reg_kfiou_fun: Optional[str] = None
     roi_box_reg_probiou_mode: Optional[str] = None
+    roi_box_reg_main_loss_type: str = "smooth_l1"
+    roi_box_reg_norm: str = "sampled_all"
+    roi_box_reg_smooth_l1_aux_weight: float = 0.0
     # RetinaNet head / regression
-    retinanet_stacked_convs: int = 1
+    retinanet_stacked_convs: int = 4
     box_reg_loss_type: str = "smooth_l1"
     box_reg_weight: float = 1.0
     # RPN
@@ -234,6 +240,7 @@ class ModelConfig:
     rpn_match_low_quality: bool = True
     # Matching / proposals
     use_hbb_for_matching: bool = True
+    roi_use_hbb_for_matching: bool = False
     add_gt_as_proposals: bool = True
     # NMS and inference (after ROI head; distinct from rpn_nms_threshold)
     final_nms_iou_threshold: float = 0.5
@@ -597,6 +604,14 @@ class TrainingExperimentConfig:
     model_type: str = "oriented_rcnn"
     experiment_timestamp: Optional[str] = None
     source_recipe: Optional[str] = None
+    # Set at train start (not in hand-written recipes): framework git + package stamp
+    source_code_root: Optional[str] = None
+    git_commit: Optional[str] = None
+    git_describe: Optional[str] = None
+    git_dirty: Optional[bool] = None
+    git_branch: Optional[str] = None
+    git_commit_date: Optional[str] = None
+    package_version: Optional[str] = None
     # Switches first
     enable_albumentation: bool = False
     enable_profiling: bool = False
@@ -750,6 +765,16 @@ class TrainingExperimentConfig:
         print(f"Model Type: {self.model_type}")
         if self.experiment_timestamp:
             print(f"Experiment Timestamp: {self.experiment_timestamp}")
+        if self.git_commit:
+            dirty = " dirty" if self.git_dirty else ""
+            label = self.git_describe or self.git_commit[:12]
+            print(f"Git: {label}{dirty}")
+            if self.git_branch:
+                print(f"Git branch: {self.git_branch}")
+            if self.git_commit_date:
+                print(f"Git commit date: {self.git_commit_date}")
+        if self.package_version:
+            print(f"Package: oriented-det {self.package_version}")
         print()
         
         if self.dataset:
@@ -759,6 +784,9 @@ class TrainingExperimentConfig:
             if self.dataset.format == "airbus_playground":
                 print(f"  Annotations File: {self.dataset.annotations_file}")
                 print(f"  Split File: {self.dataset.split_file}")
+                print(f"  Val Split Id: {self.dataset.val_split_id}")
+                if getattr(self.dataset, "train_includes_val", False):
+                    print("  Train Includes Val: true (all folds in train; val fold for monitoring only)")
                 print(f"  Ignore Labels: {self.dataset.ignore_labels}")
                 print(f"  Map Labels: {self.dataset.map_labels}")
             else:

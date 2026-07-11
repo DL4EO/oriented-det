@@ -32,8 +32,8 @@ For a quick overview and installation on GitHub, see the [repository README](htt
 - Oriented mAP evaluation compatible with DOTA protocol
 
 ### 🔸 Baseline Models
-- **Oriented R-CNN** — horizontal RPN with midpoint-offset proposals and oriented ROI head
-- **Rotated Faster R-CNN** — oriented RPN and oriented ROI two-stage detector
+- **Oriented R-CNN** — horizontal RPN + MidpointOffset (6-param) proposals + oriented RoIAlign ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html))
+- **Rotated Faster R-CNN** — horizontal RPN + horizontal RoIAlign + rotated ROI head (MMRotate DOTA baseline)
 - **Rotated RetinaNet** (1-stage baseline) — oriented anchors and focal loss head
 - **True oriented detection**: Predicts rotation angles, not just axis-aligned boxes
 - Standard backbones (ResNet + FPN)
@@ -78,6 +78,11 @@ See [Installation](getting-started/installation.md) for CUDA, macOS, and CPU set
 - **[User Guide](user-guide/geometry.md)** - Detailed usage for each module
 - **[API Reference](api/geometry.md)** - Complete API documentation
 - **[Examples](examples/inference.md)** - Ready-to-use inference and training examples
+- **[Roadmap](roadmap.md)** - Planned releases (v0.2–v1.0)
+
+## Roadmap
+
+**v0.1** is shipped (three ResNet detectors, DOTA, Hub). Upcoming: probiou Faster R-CNN on Hub (v0.2), Rotated FCOS (v0.3), HRSC2016/FAIR1M (v0.4), RTMDet-R + native YOLO-OBB (v0.5), Swin-FPN backbones (v0.6+). Details: **[Roadmap](roadmap.md)**.
 
 ## Important Notes
 

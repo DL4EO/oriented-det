@@ -26,7 +26,8 @@ ORIENTED_DET_WINDOW_BATCH_SIZE ?= 64
 CUDNN_LIB := $(shell python -c "import os, site; p=[x for x in site.getsitepackages() if 'site-packages' in x][0]; print(os.path.join(p,'nvidia/cudnn/lib'))" 2>/dev/null)
 TRAIN_ENV = LD_LIBRARY_PATH="$(CUDNN_LIB):$$LD_LIBRARY_PATH"
 
-# train-preds: directory for predictions.json + tile_metrics.csv (default: <latest_exp>/train_tile_eval)
+# VIEWER_PRED_DIR: predictions dir for make viewer (default: latest under predictions/)
+VIEWER_PRED_DIR ?=
 SAVE_TRAIN_PRED_OUT ?=
 # make metrics: explicit predictions dir (default: newest predictions/*/)
 METRICS_PRED_DIR ?=
@@ -63,7 +64,7 @@ help:
 	@echo "  make publish-pypi           - Upload dist/* to PyPI (TWINE_USERNAME/TWINE_PASSWORD or token)"
 	@echo ""
 	@echo "=== Pretrained (Hugging Face Hub) ==="
-	@echo "  make upload-pretrained        - Upload manifest-listed .pth from $(PRETRAINED_DIR)/ to $(HF_REPO_ID)"
+	@echo "  make upload-pretrained        - Upload manifest-listed .pth (+ sidecar .json/.log) from $(PRETRAINED_DIR)/ to $(HF_REPO_ID)"
 	@echo "    HF_REPO_ID=  HF_REVISION=  HF_COMMIT_MESSAGE=  PRETRAINED_DIR="
 	@echo "    Requires: hf auth login (huggingface_hub CLI)"
 	@echo ""
@@ -86,7 +87,7 @@ help:
 	@echo ""
 	@echo "=== Viewers, demos, TensorBoard ==="
 	@echo "  make tensorboard            - TensorBoard for all experiments under runs/"
-	@echo "  make viewer                 - Gradio: latest predictions/ (run make preds first)"
+	@echo "  make viewer                 - Gradio viewer (VIEWER_PRED_DIR= or latest predictions/; see docs/eval-reports/)"
 	@echo "  make demo                   - image_demo on all top-level images in DEMO_DIR ($(DEMO_DIR)) → $(IMAGE_DEMO_OUT_DIR)/"
 	@echo ""
 	@echo "=== Export (TensorFlow) ==="
@@ -164,6 +165,8 @@ upload-pretrained: check-install
 	@echo "Uploading to $(HF_REPO_ID) (revision=$(HF_REVISION)) ..."
 	@hf upload $(HF_REPO_ID) $(PRETRAINED_DIR)/ \
 		--include "*.pth" \
+		--include "*.json" \
+		--include "*.log" \
 		--repo-type model \
 		--revision $(HF_REVISION) \
 		--commit-message "$(HF_COMMIT_MESSAGE)"
@@ -406,26 +409,25 @@ demo: check-install
 # --- Gradio viewers ---
 # Launch Gradio app to view predictions (auto-detects latest predictions folder)
 viewer: check-install
-	@echo "Finding latest predictions directory..."; \
-	if [ ! -d "predictions" ]; then \
-		echo "Error: No predictions directory found."; \
-		echo "Run 'make preds' first to generate predictions."; \
-		exit 1; \
-	fi; \
-	LATEST_PRED=$$(find predictions -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -r | head -1); \
-	if [ -z "$$LATEST_PRED" ]; then \
-		echo "Error: No predictions directories found in predictions/"; \
-		echo "Run 'make preds' first to generate predictions."; \
-		exit 1; \
-	fi; \
-	echo "Latest predictions: $$LATEST_PRED"; \
-	if [ -z "$$DOTA_DATA_ROOT" ]; then \
-		echo "Warning: DOTA_DATA_ROOT environment variable not set."; \
-		echo "The app will try to auto-detect from predictions metadata."; \
-		echo ""; \
-		odet viewer --mode predictions --predictions-dir "$$LATEST_PRED"; \
+	@if [ -n "$(VIEWER_PRED_DIR)" ]; then \
+		PRED="$(VIEWER_PRED_DIR)"; \
+		echo "Using VIEWER_PRED_DIR: $$PRED"; \
+	elif [ -d "predictions" ] && [ -n "$$(find predictions -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)" ]; then \
+		PRED=$$(find predictions -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -r | head -1); \
+		echo "Latest local predictions: $$PRED"; \
 	else \
-		odet viewer --mode predictions --predictions-dir "$$LATEST_PRED" --data-root "$$DOTA_DATA_ROOT"; \
+		echo "Error: no predictions dir. Set VIEWER_PRED_DIR=predictions/<timestamp> or run make preds."; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$$PRED/predictions.json" ]; then \
+		echo "Error: predictions.json not found under $$PRED"; \
+		exit 1; \
+	fi; \
+	if [ -z "$$DOTA_DATA_ROOT" ]; then \
+		echo "Warning: DOTA_DATA_ROOT not set; viewer uses paths from predictions metadata."; \
+		odet viewer --mode predictions --predictions-dir "$$PRED"; \
+	else \
+		odet viewer --mode predictions --predictions-dir "$$PRED" --data-root "$$DOTA_DATA_ROOT"; \
 	fi
 
 # --- Utilities ---

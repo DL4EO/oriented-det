@@ -41,6 +41,74 @@ def get_project_root() -> Path:
     return Path.cwd().resolve()
 
 
+def get_framework_source_root() -> Path:
+    """Directory containing the installed ``oriented_det`` package (framework source tree)."""
+    from oriented_det import __file__ as _pkg_init
+
+    return Path(_pkg_init).resolve().parent.parent
+
+
+def _run_git(args: List[str], cwd: Path) -> Optional[str]:
+    """Run a git subcommand; return stripped stdout or ``None`` on failure."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    out = result.stdout.strip()
+    return out or None
+
+
+def capture_source_provenance(
+    repo_root: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Capture git revision and package version for experiment reproducibility.
+
+    Uses the framework install tree (not ``ORIENTED_DET_PROJECT_ROOT``) so runs
+    record the code that was actually imported, including editable installs.
+    """
+    root = (repo_root or get_framework_source_root()).resolve()
+    commit = _run_git(["rev-parse", "HEAD"], root)
+    describe = _run_git(["describe", "--dirty", "--always", "--tags"], root)
+    branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], root)
+    commit_date = _run_git(["log", "-1", "--format=%cI"], root)
+
+    dirty: Optional[bool] = None
+    if describe is not None:
+        dirty = describe.endswith("-dirty")
+    elif commit is not None:
+        status = _run_git(["status", "--porcelain"], root)
+        dirty = bool(status)
+
+    package_version: Optional[str] = None
+    try:
+        from importlib.metadata import version
+
+        package_version = version("oriented-det")
+    except Exception:
+        pass
+
+    return {
+        "source_code_root": str(root),
+        "git_commit": commit,
+        "git_describe": describe,
+        "git_dirty": dirty,
+        "git_branch": branch,
+        "git_commit_date": commit_date,
+        "package_version": package_version,
+    }
+
+
 def _require_torch() -> None:
     if torch is None:
         raise RuntimeError("PyTorch is required for training utilities.")

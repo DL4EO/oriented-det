@@ -57,7 +57,7 @@ Class Distribution Analysis - Training Set
 Total objects: 264,176
 Total classes: 15
 
-Class Name           Count        Percentage
+Class Name           Count        Percentage  
 --------------------------------------------------------------------------------
 ship                     82,131       31.09%
 small-vehicle            63,156       23.91%

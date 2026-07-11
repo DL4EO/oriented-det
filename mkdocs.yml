@@ -11,6 +11,7 @@ edit_uri: edit/main/docs/
 exclude_docs: |
   documentation-audit.md
   code-analysis-report.md
+  roadmap-detailed.md
 
 theme:
   name: material
@@ -81,8 +82,10 @@ nav:
     - Training: examples/training.md
     - Inference: examples/inference.md
   - Contributing: contributing.md
+  - Roadmap: roadmap.md
   - Documentation Guide: documentation.md
   - Changelog: changelog.md
+  - Eval reports (Hub): eval-reports/README.md
 
 plugins:
   - search

@@ -117,7 +117,9 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 
 `roi_box_reg_angle_weight` scales the angle (5th encoded dim) SmoothL1 term in ROI box regression (two-stage models only). Optional `roi_box_reg_angle_schedule_epochs` / `roi_box_reg_angle_schedule_values` piecewise-schedule that weight by 0-based epoch (`values` length = `len(epochs) + 1`; when either field is null, `roi_box_reg_angle_weight` stays constant). The engine calls `set_roi_box_reg_angle_weight_for_epoch(epoch)` each epoch.
 
-`roi_box_reg_iou_weight` > 0 enables auxiliary rIoU, KFIoU, or ProbIoU (`roi_box_reg_iou_loss_type`, `roi_box_reg_kfiou_fun`, `roi_box_reg_probiou_mode`). Optional `roi_box_reg_iou_schedule_epochs` / `roi_box_reg_iou_schedule_values` piecewise-schedule that weight by 0-based epoch (same convention as `final_nms_iou_schedule_*`).
+`roi_box_reg_iou_weight` > 0 enables auxiliary rIoU, KFIoU, or ProbIoU when **`roi_box_reg_main_loss_type`** is `smooth_l1` (default). Use `roi_box_reg_iou_loss_type`, `roi_box_reg_kfiou_fun`, `roi_box_reg_probiou_mode`. Optional `roi_box_reg_iou_schedule_epochs` / `roi_box_reg_iou_schedule_values` piecewise-schedule that weight by 0-based epoch.
+
+For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set `roi_box_reg_main_loss_type` and add encoded Smooth L1 aux with `roi_box_reg_smooth_l1_aux_weight`. Control Smooth L1 scale with `roi_box_reg_norm` (`sampled_all` = MMRotate, `positives_only` = mean over positives). Recipe: [`configs/rotated_faster_rcnn/dota_le90_1x.json`](../../configs/rotated_faster_rcnn/dota_le90_1x.json) (3× via [`dota_le90_3x.json`](../../configs/rotated_faster_rcnn/dota_le90_3x.json)).
 
 ### `training`
 
@@ -159,7 +161,6 @@ Top-level configs (inherit bases under `configs/_base_/`):
 | Config | Model | Use |
 |--------|-------|-----|
 | `configs/oriented_rcnn/dota_le90_1x.json` | Oriented R-CNN | **Default** `make train`; 1× DOTA pretrain (full recipe) |
-| `configs/oriented_rcnn/dota_le90_1x_class_weighted.json` | Oriented R-CNN | 1× with focal + class weights |
 | `configs/oriented_rcnn/dota_le90_3x.json` | Oriented R-CNN | 3× pretrain (inherits 1×) |
 | `configs/rotated_faster_rcnn/dota_le90_1x.json` | Rotated Faster R-CNN | **1× DOTA pretrain** (full recipe) |
 | `configs/rotated_faster_rcnn/dota_le90_3x.json` | Rotated Faster R-CNN | 3× pretrain (inherits 1×) |

@@ -22,11 +22,20 @@ from oriented_det.pretrained.hub import (
 
 def test_list_assets():
     assets = list_assets()
+    assert assets["oriented_rcnn_dota_le90_1x"] == (
+        "oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.pth"
+    )
+    assert assets["oriented_rcnn_dota_le90_3x"] == (
+        "oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.pth"
+    )
     assert assets["rotated_retinanet_dota_le90_1x"] == (
         "rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.pth"
     )
+    assert assets["rotated_faster_rcnn_dota_le90_1x"] == (
+        "rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.pth"
+    )
     assert assets["rotated_faster_rcnn_dota_le90_3x"] == (
-        "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth"
+        "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
     )
 
 
@@ -46,7 +55,7 @@ def test_resolve_pretrained_relative_ignores_project_root(tmp_path, monkeypatch)
     cache.mkdir()
     monkeypatch.setenv("ORIENTED_DET_PROJECT_ROOT", str(product))
     monkeypatch.setenv("ORIENTED_DET_PRETRAINED_DIR", str(cache))
-    hashed = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth"
+    hashed = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
     (cache / hashed).write_bytes(b"x")
     path = resolve_pretrained_path(f"pretrained/{hashed}")
     assert path == (cache / hashed).resolve()
@@ -57,7 +66,7 @@ def test_resolve_pretrained_relative_slug_maps_to_hashed_filename(tmp_path, monk
     cache = tmp_path / "pretrained-cache"
     cache.mkdir()
     monkeypatch.setenv("ORIENTED_DET_PRETRAINED_DIR", str(cache))
-    hashed = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth"
+    hashed = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
     (cache / hashed).write_bytes(b"x")
     path = resolve_pretrained_path("pretrained/rotated_faster_rcnn_dota_le90_3x")
     assert path == (cache / hashed).resolve()
@@ -67,8 +76,8 @@ def test_resolve_checkpoint_sidecar_config_uses_weight_stem(tmp_path, monkeypatc
     cache = tmp_path / "pretrained-cache"
     cache.mkdir()
     monkeypatch.setenv("ORIENTED_DET_PRETRAINED_DIR", str(cache))
-    hashed = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth"
-    sidecar = cache / "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.json"
+    hashed = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
+    sidecar = cache / "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.json"
     (cache / hashed).write_bytes(b"x")
     sidecar.write_text("{}", encoding="utf-8")
 
@@ -77,7 +86,7 @@ def test_resolve_checkpoint_sidecar_config_uses_weight_stem(tmp_path, monkeypatc
 
 
 def test_resolve_checkpoint_source_recipe_from_weight_filename():
-    recipe = resolve_checkpoint_source_recipe("rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth")
+    recipe = resolve_checkpoint_source_recipe("rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth")
     assert recipe == "configs/rotated_faster_rcnn/dota_le90_3x.json"
 
 
@@ -119,7 +128,7 @@ def test_get_pretrained_dir_defaults_to_framework_pretrained(monkeypatch):
 
 def test_ensure_checkpoint_skips_download_when_present(tmp_path, monkeypatch):
     monkeypatch.setenv("ORIENTED_DET_PRETRAINED_DIR", str(tmp_path / "pretrained"))
-    ckpt = tmp_path / "pretrained" / "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth"
+    ckpt = tmp_path / "pretrained" / "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
     ckpt.parent.mkdir(parents=True)
     ckpt.write_bytes(b"fake")
 
@@ -131,7 +140,7 @@ def test_ensure_checkpoint_skips_download_when_present(tmp_path, monkeypatch):
 
 def test_ensure_checkpoint_downloads_when_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("ORIENTED_DET_PRETRAINED_DIR", str(tmp_path / "pretrained"))
-    ckpt = tmp_path / "pretrained" / "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth"
+    ckpt = tmp_path / "pretrained" / "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
 
     with patch.object(hub, "download_asset", return_value=ckpt) as mock_dl:
         result = ensure_checkpoint("hf://rotated_faster_rcnn_dota_le90_3x", quiet=True)
@@ -149,7 +158,7 @@ def test_ensure_checkpoint_unknown_file_no_download(tmp_path, monkeypatch):
 
 def test_download_asset_calls_hf_hub(tmp_path, monkeypatch):
     monkeypatch.setenv("ORIENTED_DET_PRETRAINED_DIR", str(tmp_path / "pretrained"))
-    filename = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-6f8eb57c.pth"
+    filename = "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
     dest = tmp_path / "pretrained" / filename
     dest.parent.mkdir(parents=True)
 

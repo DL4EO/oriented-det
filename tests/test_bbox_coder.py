@@ -145,6 +145,28 @@ def test_delta_xywhth_bbox_coder_round_trip():
     assert dtheta.abs().max() < 2e-3
 
 
+def test_delta_xywhth_bbox_coder_proj_xy_with_roi_angle_round_trip():
+    torch.manual_seed(23)
+    n = 64
+    x1y1 = torch.rand(n, 2) * 200.0 + 32.0
+    wh = torch.rand(n, 2) * 60.0 + 20.0
+    rois = torch.cat([x1y1, x1y1 + wh], dim=1)
+    gt = _rand_le90_boxes(n)
+    roi_angle = (torch.rand(n) - 0.5) * math.pi
+
+    coder = DeltaXYWHTHBBoxCoder(norm_factor=2.0, edge_swap=True, proj_xy=True)
+    deltas = coder.encode(rois, gt, roi_angle=roi_angle)
+    decoded = coder.decode(rois, deltas, roi_angle=roi_angle)
+    gt_norm = normalize_boxes_to_le90(gt)
+    assert torch.allclose(decoded[:, :2], gt_norm[:, :2], atol=1e-3)
+    assert torch.allclose(decoded[:, 2:4], gt_norm[:, 2:4], atol=1e-3)
+    dtheta = torch.atan2(
+        torch.sin(decoded[:, 4] - gt_norm[:, 4]),
+        torch.cos(decoded[:, 4] - gt_norm[:, 4]),
+    )
+    assert dtheta.abs().max() < 5e-3
+
+
 def test_delta_xywhth_bbox_coder_proj_xy_matches_global_for_horizontal_rois():
     torch.manual_seed(22)
     n = 128

@@ -241,7 +241,8 @@ def detect_airbus_split_csv_format(split_values: Sequence[str]) -> Literal["trai
     """Infer whether split.csv uses legacy train/val strings or integer fold ids.
 
     Fold mode: every non-empty value must parse as a non-negative int. Training code treats
-    fold ``val_split_id`` (default 0) as validation and all other folds as training.
+    fold ``val_split_id`` (default 0) as validation and all other folds as training, unless
+    ``train_includes_val`` is enabled (train on all folds; val fold for monitoring only).
     """
     non_empty = [str(s).strip() for s in split_values if s is not None and str(s).strip() != ""]
     if not non_empty:
@@ -410,6 +411,7 @@ class AirbusPlaygroundCSVDataset:
         annotations_file: str | Path = "annotations.csv",
         split_file: str | Path = "split.csv",
         val_split_id: int = 0,
+        train_includes_val: bool = False,
         allowed_classes: Optional[Sequence[str]] = None,
         difficult_strategy: str = "drop",
         ignore_labels: Optional[Sequence[str]] = None,
@@ -431,6 +433,7 @@ class AirbusPlaygroundCSVDataset:
         self.data_root = Path(data_root)
         self.split = split
         self.val_split_id = int(val_split_id)
+        self.train_includes_val = bool(train_includes_val)
         self.allowed_classes = set(allowed_classes) if allowed_classes is not None else None
         self.difficult_strategy = ds
         self.ignore_labels = set(ignore_labels or [])
@@ -474,9 +477,13 @@ class AirbusPlaygroundCSVDataset:
 
         mode = detect_airbus_split_csv_format([r.get("split", "") for r in all_rows])
         want_val = self.split == "val"
+        include_all_for_train = self.split == "train" and self.train_includes_val
         rows: List[Dict[str, str]] = []
         for row in all_rows:
             raw = row.get("split", "")
+            if include_all_for_train:
+                rows.append(row)
+                continue
             if mode == "train_val":
                 if raw.strip().lower() == self.split:
                     rows.append(row)

@@ -20,6 +20,7 @@ def build_resnet_fpn_backbone(
     trainable_layers: int = 3,
     norm_layer=None,
     returned_layers: Optional[List[int]] = None,
+    use_p6p7_extra_levels: bool = False,
 ) -> object:
     """Create a ResNet+FPN backbone or a minimal fallback if torchvision is missing.
 
@@ -34,6 +35,8 @@ def build_resnet_fpn_backbone(
         returned_layers: ResNet stage indices to use for FPN (1–4). Default None
             uses torchvision default [1,2,3,4] (C2–C5, 5 levels with P6).
             Use [2,3,4] for MMRotate-style FPN (C3–C5 only, 4 levels with P6).
+        use_p6p7_extra_levels: If True, attach ``LastLevelP6P7`` (MMRotate RetinaNet
+            ``add_extra_convs='on_input'``) instead of ``LastLevelMaxPool``.
     """
     require_torch()
     if tv_resnet_fpn_backbone is None:
@@ -51,6 +54,11 @@ def build_resnet_fpn_backbone(
         kwargs["weights_backbone"] = "DEFAULT" if pretrained else None
     if "returned_layers" in signature.parameters and returned_layers is not None:
         kwargs["returned_layers"] = returned_layers
+    if use_p6p7_extra_levels and "extra_blocks" in signature.parameters:
+        from torchvision.ops.feature_pyramid_network import LastLevelP6P7
+
+        c5_channels = 512 if any(x in backbone_name.lower() for x in ("18", "34")) else 2048
+        kwargs["extra_blocks"] = LastLevelP6P7(c5_channels, 256)
 
     try:
         backbone = tv_resnet_fpn_backbone(backbone_name=backbone_name, **kwargs)

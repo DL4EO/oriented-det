@@ -23,10 +23,16 @@ from .airbus_playground import (
 from .evaluation import (
     APCalculator,
     ClassEvalMetrics,
+    ClassGtBestIouMetrics,
     Detection,
     GroundTruth,
+    GtBestIouAlignmentMetrics,
+    compute_gt_best_iou_alignment_metrics,
     compute_oriented_map,
+    format_gt_best_iou_alignment_table,
+    format_gt_best_iou_alignment_table_from_dict,
     format_mmrotate_class_metrics_table,
+    gt_best_iou_alignment_metrics_to_dict,
 )
 from .tiling import (
     ImageTiler,
@@ -84,6 +90,10 @@ __all__ = [
     "ClassEvalMetrics",
     "Detection",
     "GroundTruth",
-    "compute_oriented_map",
-    "format_mmrotate_class_metrics_table",
+    "ClassGtBestIouMetrics",
+    "GtBestIouAlignmentMetrics",
+    "compute_gt_best_iou_alignment_metrics",
+    "format_gt_best_iou_alignment_table",
+    "format_gt_best_iou_alignment_table_from_dict",
+    "gt_best_iou_alignment_metrics_to_dict",
 ]

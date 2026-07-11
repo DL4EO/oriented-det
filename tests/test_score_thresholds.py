@@ -88,6 +88,10 @@ def test_compute_val_stats_extended_gt_metrics_on():
     )
     assert "log_only_gt_mean_best_iou_any" in stats
     assert stats["log_only_gt_count_zero_best_iou_any"] == 0
+    align = stats.get("log_only_gt_alignment_metrics")
+    assert isinstance(align, dict)
+    assert "a" in align.get("per_class", {})
+    assert align["per_class"]["a"]["mean_best_iou_same_class"] > 0.99
 
 
 def test_compute_val_stats_extended_gt_zero_iou_missed():

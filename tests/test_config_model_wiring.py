@@ -51,6 +51,9 @@ def _minimal_config(model_type: str) -> TrainingExperimentConfig:
             roi_inference_top_class_only=True,
             roi_box_reg_iou_loss_type="kfiou",
             roi_box_reg_kfiou_fun="ln",
+            roi_box_reg_main_loss_type="probiou",
+            roi_box_reg_norm="positives_only",
+            roi_box_reg_smooth_l1_aux_weight=0.15,
             rpn_positive_iou_threshold=0.51,
             rpn_negative_iou_threshold=0.39,
             fpn_returned_layers=[2, 3, 4],
@@ -311,6 +314,9 @@ def test_create_model_rcnn_passes_inference_pre_nms_score_from_config():
     assert call_kw["roi_box_reg_iou_weight"] == pytest.approx(0.2)
     assert call_kw["roi_box_reg_iou_loss_type"] == "kfiou"
     assert call_kw["roi_box_reg_kfiou_fun"] == "ln"
+    assert call_kw["roi_box_reg_main_loss_type"] == "probiou"
+    assert call_kw["roi_box_reg_norm"] == "positives_only"
+    assert call_kw["roi_box_reg_smooth_l1_aux_weight"] == pytest.approx(0.15)
     assert call_kw["roi_min_pos_iou"] == pytest.approx(0.37)
     assert call_kw["use_hbb_for_matching"] is False
     assert call_kw["inference_pre_nms_score_threshold"] == pytest.approx(0.13)
@@ -354,3 +360,33 @@ def test_load_model_from_checkpoint_rotated_faster_rcnn_passes_roi_proj_xy():
 
     assert model is inst
     assert mock_cls.call_args.kwargs["roi_proj_xy"] is True
+    assert "roi_use_hbb_for_matching" not in mock_cls.call_args.kwargs
+
+
+def test_load_model_from_checkpoint_oriented_rcnn_passes_roi_use_hbb_for_matching():
+    from oriented_det.runtime import checkpoint as ckpt_mod
+
+    mock_cls = MagicMock()
+    inst = MagicMock()
+    inst.load_state_dict = MagicMock()
+    inst.to = MagicMock(return_value=inst)
+    inst.eval = MagicMock()
+    mock_cls.return_value = inst
+
+    cfg = _minimal_config("oriented_rcnn")
+    cfg.num_classes = 2
+    cfg.model.roi_use_hbb_for_matching = True
+    fake_state = {
+        "roi_head.fc_cls.weight": torch.zeros(4, 1024),
+        "roi_head.fc_cls.bias": torch.zeros(4),
+    }
+
+    with patch.object(ckpt_mod, "TrainingExperimentConfig") as mock_cfg_cls, patch.object(
+        ckpt_mod, "OrientedRCNN", mock_cls
+    ), patch("oriented_det.pretrained.ensure_checkpoint", side_effect=lambda p: p), patch.object(
+        ckpt_mod.torch, "load", return_value={"model_state_dict": fake_state}
+    ), patch.object(ckpt_mod, "apply_inference_config_to_model"):
+        mock_cfg_cls.load.return_value = cfg
+        ckpt_mod.load_model_from_checkpoint("/tmp/fake.pth", "/tmp/config.json", "cpu")
+
+    assert mock_cls.call_args.kwargs["roi_use_hbb_for_matching"] is True

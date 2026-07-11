@@ -4,6 +4,8 @@
 
 # Personal notebooks and scripts
 notebooks/
+post/
+docs/roadmap-detailed.md
 tools/test_*
 .cursor/
 .python-version
@@ -21,6 +23,9 @@ runs/
 runs.*/
 predictions/
 temp/
+
+# Raw val detections are too large for GitHub (one file can exceed 100 MB)
+docs/eval-reports/**/predictions.json
 
 # Weights files
 **/*.pt

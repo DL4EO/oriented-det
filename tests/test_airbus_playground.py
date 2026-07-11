@@ -192,6 +192,37 @@ def test_loader_val_split_id_rotates_validation_fold(tmp_path: Path):
         assert len(val_ds) == n_csv
 
 
+def test_loader_train_includes_val_trains_on_all_folds(tmp_path: Path):
+    pytest.importorskip("shapely")
+    _build_mock_export(tmp_path)
+    generate_airbus_playground_csvs(tmp_path, num_splits=5, seed=0)
+
+    with (tmp_path / "split.csv").open("r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    total = len(rows)
+    val_count = sum(int(r["split"]) == 0 for r in rows)
+
+    train_ds = AirbusPlaygroundCSVDataset(
+        data_root=tmp_path,
+        split="train",
+        annotations_file="annotations.csv",
+        split_file="split.csv",
+        val_split_id=0,
+        train_includes_val=True,
+    )
+    val_ds = AirbusPlaygroundCSVDataset(
+        data_root=tmp_path,
+        split="val",
+        annotations_file="annotations.csv",
+        split_file="split.csv",
+        val_split_id=0,
+    )
+
+    assert len(train_ds) == total
+    assert len(val_ds) == val_count
+    assert len(train_ds) > len(val_ds)
+
+
 def test_loader_legacy_train_val_split_csv_ignores_val_split_id(tmp_path: Path):
     pytest.importorskip("shapely")
     _build_mock_export(tmp_path)

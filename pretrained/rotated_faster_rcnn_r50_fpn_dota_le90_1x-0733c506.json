@@ -1,19 +1,27 @@
 {
   "model_type": "rotated_faster_rcnn",
-  "experiment_timestamp": "20260604-083242",
+  "experiment_timestamp": "20260709-092028",
+  "source_recipe": "configs/rotated_faster_rcnn/dota_le90_1x.json",
+  "source_code_root": "/home/jeffaudi/oriented-det",
+  "git_commit": "74430e228b3bcbf0063acbece2abdcf3fb0d652a",
+  "git_describe": "74430e2-dirty",
+  "git_dirty": true,
+  "git_branch": "main",
+  "git_commit_date": "2026-07-02T14:42:14+00:00",
+  "package_version": "0.1.0",
   "enable_albumentation": false,
   "enable_profiling": false,
   "dataset": {
-    "data_root": "/home/jeffaudi/data/DOTA-v1.0-tiled",
+    "data_root": "/path/to/data/DOTA-v1.0-tiled",
     "format": "dota",
-    "train_tiles_dir": "/home/jeffaudi/data/DOTA-v1.0-tiled/train",
-    "val_tiles_dir": "/home/jeffaudi/data/DOTA-v1.0-tiled/val",
+    "train_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/train",
+    "val_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/val",
     "train_tiles_dirs": [
-      "/home/jeffaudi/data/DOTA-v1.0-tiled/train",
-      "/home/jeffaudi/data/DOTA-v1.0-tiled/val"
+      "/path/to/data/DOTA-v1.0-tiled/train",
+      "/path/to/data/DOTA-v1.0-tiled/val"
     ],
     "val_tiles_dirs": [
-      "/home/jeffaudi/data/DOTA-v1.0-tiled/val"
+      "/path/to/data/DOTA-v1.0-tiled/val"
     ],
     "same_folder": false,
     "overlap": 200,
@@ -80,6 +88,7 @@
       32,
       64
     ],
+    "fpn_extra_level": false,
     "anchor_scales": [
       8
     ],
@@ -88,6 +97,8 @@
       1.0,
       2.0
     ],
+    "anchor_octave_base_scale": null,
+    "anchor_scales_per_octave": null,
     "target_means": [
       0,
       0,
@@ -107,9 +118,11 @@
     "roi_focal_gamma": 2,
     "roi_norm_factor": 2,
     "roi_edge_swap": true,
-    "roi_proj_xy": false,
+    "roi_proj_xy": true,
     "roi_box_reg_angle_weight": 1.0,
-    "roi_box_reg_iou_weight": 0.1,
+    "roi_box_reg_angle_schedule_epochs": null,
+    "roi_box_reg_angle_schedule_values": null,
+    "roi_box_reg_iou_weight": 0.0,
     "roi_box_reg_iou_schedule_epochs": null,
     "roi_box_reg_iou_schedule_values": null,
     "roi_batch_size_per_image": 512,
@@ -117,9 +130,15 @@
     "roi_negative_iou_threshold": 0.5,
     "roi_match_low_quality": false,
     "roi_min_pos_iou": 0.5,
-    "roi_box_reg_iou_loss_type": "probiou",
+    "roi_box_reg_iou_loss_type": "riou",
     "roi_box_reg_kfiou_fun": null,
     "roi_box_reg_probiou_mode": "l1",
+    "roi_box_reg_main_loss_type": "probiou",
+    "roi_box_reg_norm": "positives_only",
+    "roi_box_reg_smooth_l1_aux_weight": 0.1,
+    "retinanet_stacked_convs": 4,
+    "box_reg_loss_type": "smooth_l1",
+    "box_reg_weight": 1.0,
     "rpn_min_size": 0,
     "rpn_pre_nms_top_n": 2000,
     "rpn_post_nms_top_n": 2000,
@@ -130,6 +149,7 @@
     "rpn_min_pos_iou": 0.3,
     "rpn_match_low_quality": true,
     "use_hbb_for_matching": true,
+    "roi_use_hbb_for_matching": false,
     "add_gt_as_proposals": true,
     "final_nms_iou_threshold": 0.3,
     "nms_class_agnostic": false,
@@ -144,8 +164,8 @@
     "lr_scheduler_type": null,
     "lr_scheduler_step_epochs": 8,
     "lr_scheduler_milestones": [
-      24,
-      33
+      8,
+      11
     ],
     "lr_scheduler_gamma": 0.1,
     "lr_scheduler_plateau_metric": "total_loss",
@@ -168,7 +188,7 @@
     "lr_mult_roi": 2.0,
     "lr_mult_other": 1.0,
     "lr_mult_head": null,
-    "num_epochs": 36,
+    "num_epochs": 12,
     "learning_rate": 0.005,
     "momentum": 0.9,
     "weight_decay": 0.0001,
@@ -189,7 +209,9 @@
     "iou_threshold": 0.5,
     "compute_map_final": false,
     "compute_map_every_n_epochs": 4,
-    "extended_gt_metrics": true
+    "extended_gt_metrics": true,
+    "use_exact_rotated_iou": true,
+    "use_exact_rotated_iou_for_final_map": null
   },
   "production": {
     "score_threshold": 0.05,
@@ -300,6 +322,5 @@
     "swimming-pool",
     "tennis-court"
   ],
-  "num_classes": 15,
-  "source_recipe": "configs/rotated_faster_rcnn/dota_le90_3x.json"
+  "num_classes": 15
 }

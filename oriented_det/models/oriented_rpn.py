@@ -1974,7 +1974,12 @@ def compute_midpoint_rpn_loss(
                 else:
                     loss_obj_i = (logits_i[0:1] * 0.0).sum()
                 if sampled_fg.numel() > 0:
-                    loss_reg_i = F.smooth_l1_loss(pred_i[sampled_fg].clone(), targets_i[sampled_fg], beta=beta, reduction="mean")
+                    loss_reg_i = F.smooth_l1_loss(
+                        pred_i[sampled_fg].clone(),
+                        targets_i[sampled_fg],
+                        beta=beta,
+                        reduction="sum",
+                    ) / float(max(1, len(sampled)))
                 else:
                     loss_reg_i = (pred_i[0:1] * 0.0).sum()
             else:

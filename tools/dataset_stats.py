@@ -59,6 +59,9 @@ def build_dataset_from_config(config: TrainingExperimentConfig, split: str):
             annotations_file=config.dataset.annotations_file,
             split_file=config.dataset.split_file,
             val_split_id=config.dataset.val_split_id,
+            train_includes_val=(
+                getattr(config.dataset, "train_includes_val", False) if split == "train" else False
+            ),
             difficult_strategy=config.dataset.difficult_strategy,
             allowed_classes=config.dataset.allowed_classes,
             ignore_labels=config.dataset.ignore_labels,

@@ -912,6 +912,44 @@ class TestMidpointRPN:
         total.backward()
         assert head.rpn_conv.weight.grad is not None
 
+    def test_midpoint_rpn_reg_loss_sampled_all_avg_factor(self, dummy_features):
+        """Regression loss divides by len(sampled), not num positives (MMDet avg_factor)."""
+        torch.manual_seed(0)
+        head = OrientedRPNHead(
+            in_channels=256,
+            num_anchors=3,
+            cls_out_channels=1,
+            reg_out_channels=6,
+        )
+        anchors = generate_oriented_anchors(
+            image_size=(128, 128),
+            feature_map_sizes=[(32, 32)],
+            anchor_scales=[8],
+            anchor_ratios=[0.5, 1.0, 2.0],
+            anchor_angles=[0.0],
+            stride_per_level=[4],
+        )
+        objectness_logits, bbox_regression = head([dummy_features[0]])
+        gt_boxes = [torch.tensor([[64.0, 64.0, 30.0, 15.0, 0.0]])]
+        losses_small = compute_midpoint_rpn_loss(
+            objectness_logits=objectness_logits,
+            bbox_regression=bbox_regression,
+            anchors=anchors,
+            gt_boxes=gt_boxes,
+            image_sizes=[(128, 128)],
+            batch_size_per_image=8,
+        )
+        torch.manual_seed(0)
+        losses_large = compute_midpoint_rpn_loss(
+            objectness_logits=objectness_logits,
+            bbox_regression=bbox_regression,
+            anchors=anchors,
+            gt_boxes=gt_boxes,
+            image_sizes=[(128, 128)],
+            batch_size_per_image=16,
+        )
+        assert losses_small["loss_rpn_box_reg"].item() > losses_large["loss_rpn_box_reg"].item()
+
     def test_generate_midpoint_proposals(self, dummy_features):
         head = OrientedRPNHead(
             in_channels=256,

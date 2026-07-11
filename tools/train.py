@@ -87,6 +87,7 @@ from oriented_det.data import (
 from oriented_det.train import train, CheckpointManager, WarmupScheduler, OneCycleWrapper, get_best_checkpoint_path
 from oriented_det.train.utils import (
     capped_subset_indices,
+    capture_source_provenance,
     create_cosine_with_tail_lr_scheduler,
     create_pytorch_cosine_lr_scheduler,
     format_cosine_with_tail_scheduler_description,
@@ -619,6 +620,13 @@ def create_model_from_config(
             roi_box_reg_iou_loss_type=getattr(config.model, "roi_box_reg_iou_loss_type", "riou"),
             roi_box_reg_kfiou_fun=getattr(config.model, "roi_box_reg_kfiou_fun", None),
             roi_box_reg_probiou_mode=getattr(config.model, "roi_box_reg_probiou_mode", None),
+            roi_box_reg_main_loss_type=getattr(
+                config.model, "roi_box_reg_main_loss_type", "smooth_l1"
+            ),
+            roi_box_reg_norm=getattr(config.model, "roi_box_reg_norm", "sampled_all"),
+            roi_box_reg_smooth_l1_aux_weight=getattr(
+                config.model, "roi_box_reg_smooth_l1_aux_weight", 0.0
+            ),
             use_hbb_for_matching=use_hbb,
             inference_pre_nms_score_threshold=inference_pre_nms_score_threshold,
             rpn_min_size=getattr(config.model, "rpn_min_size", 0.0),
@@ -680,6 +688,8 @@ def create_model_from_config(
             roi_box_reg_kfiou_fun=getattr(config.model, "roi_box_reg_kfiou_fun", None),
             roi_box_reg_probiou_mode=getattr(config.model, "roi_box_reg_probiou_mode", None),
             use_hbb_for_matching=use_hbb,
+            roi_use_hbb_for_matching=getattr(config.model, "roi_use_hbb_for_matching", False),
+            roi_box_reg_norm=getattr(config.model, "roi_box_reg_norm", "sampled_all"),
             inference_pre_nms_score_threshold=inference_pre_nms_score_threshold,
             rpn_pre_nms_top_n=getattr(config.model, "rpn_pre_nms_top_n", 2000),
             rpn_post_nms_top_n=getattr(config.model, "rpn_post_nms_top_n", 1000),
@@ -719,7 +729,7 @@ def create_model_from_config(
             anchor_ratios=config.model.anchor_ratios,
             octave_base_scale=getattr(config.model, "anchor_octave_base_scale", None),
             scales_per_octave=getattr(config.model, "anchor_scales_per_octave", None),
-            stacked_convs=getattr(config.model, "retinanet_stacked_convs", 1),
+            stacked_convs=getattr(config.model, "retinanet_stacked_convs", 4),
             positive_iou_threshold=getattr(config.model, "rpn_positive_iou_threshold", 0.5),
             negative_iou_threshold=getattr(config.model, "rpn_negative_iou_threshold", 0.4),
             focal_alpha=roi_focal_alpha,
@@ -984,6 +994,11 @@ def main():
         config.source_recipe = str(config_path.resolve().relative_to(project_root))
     except ValueError:
         config.source_recipe = str(config_path.resolve())
+
+    if not args.wizard:
+        for key, value in capture_source_provenance().items():
+            setattr(config, key, value)
+
     EXPERIMENT_DIR = project_root / "runs" / config.model_type / config.experiment_timestamp
     _log_file = None
     _orig_stdout = _orig_stderr = None
@@ -1029,6 +1044,16 @@ def main():
         print("=" * 80)
         print(f"{config.model_type.upper()} Training")
         print("=" * 80)
+        if config.git_commit:
+            dirty_suffix = " (dirty working tree)" if config.git_dirty else ""
+            git_label = config.git_describe or config.git_commit[:12]
+            print(f"Source git: {git_label}{dirty_suffix}")
+            if config.git_branch:
+                print(f"Source branch: {config.git_branch}")
+            if config.git_commit_date:
+                print(f"Source commit date: {config.git_commit_date}")
+        if config.package_version:
+            print(f"Package: oriented-det {config.package_version}")
         print(f"PyTorch Version: {torch.__version__}")
         print(f"CUDA Available: {torch.cuda.is_available()}")
         mps_available = getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
@@ -1069,6 +1094,7 @@ def main():
             annotations_file=config.dataset.annotations_file,
             split_file=config.dataset.split_file,
             val_split_id=config.dataset.val_split_id,
+            train_includes_val=getattr(config.dataset, "train_includes_val", False),
             difficult_strategy=config.dataset.difficult_strategy,
             allowed_classes=config.dataset.allowed_classes,
             ignore_labels=config.dataset.ignore_labels,
@@ -1101,6 +1127,11 @@ def main():
             print(
                 "  (val_split_id is the split.csv fold id used as validation when the split column is numeric.)"
             )
+            if getattr(config.dataset, "train_includes_val", False):
+                print(
+                    "  train_includes_val: true — training uses all folds; "
+                    f"fold {config.dataset.val_split_id} is still used for validation/monitoring only."
+                )
             print(f"  map_labels: {len(map_labels)} key(s). Raw labels in CSV (train): {len(raw_in_csv)} distinct — {raw_in_csv[:15]}{'...' if len(raw_in_csv) > 15 else ''}")
             if ignore_labels:
                 print(f"  ignore_labels: {len(ignore_labels)} value(s) — entries matching these labels are dropped.")

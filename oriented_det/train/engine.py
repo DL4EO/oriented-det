@@ -8,6 +8,7 @@ import statistics
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 
@@ -66,7 +67,15 @@ except ImportError:
     TrainingProfiler = None  # type: ignore
 
 try:
-    from ..data.evaluation import Detection, GroundTruth, compute_oriented_map
+    from ..data.evaluation import (
+        Detection,
+        GroundTruth,
+        _aggregate_gt_best_iou_samples,
+        compute_oriented_map,
+        detection_matches_ground_truth_class,
+        format_gt_best_iou_alignment_table_from_dict,
+        gt_best_iou_alignment_metrics_to_dict,
+    )
     from ..geometry import RBox
     from ..utils import viz
 except ImportError:
@@ -990,6 +999,8 @@ def _compute_val_stats_from_dicts(
 
     best_iou_any_list: list[float] = []
     best_iou_same_list: list[float] = []
+    best_iou_any_by_class: Dict[str, list[float]] = defaultdict(list)
+    best_iou_same_by_class: Dict[str, list[float]] = defaultdict(list)
     buckets_any = [0, 0, 0, 0]
     buckets_same = [0, 0, 0, 0]
     gt_count_wrong_class_overlap = 0
@@ -1063,10 +1074,13 @@ def _compute_val_stats_from_dicts(
                         iou = raw_iou[det_idx][gt_idx]
                         if iou > best_any:
                             best_any = iou
-                        if det.class_id == gt.class_id and iou > best_same:
+                        if detection_matches_ground_truth_class(det, gt) and iou > best_same:
                             best_same = iou
                     best_iou_any_list.append(best_any)
                     best_iou_same_list.append(best_same)
+                    cname = gt.class_name or "unknown"
+                    best_iou_any_by_class[cname].append(best_any)
+                    best_iou_same_by_class[cname].append(best_same)
                     buckets_any[_iou_hist_bucket(best_any)] += 1
                     buckets_same[_iou_hist_bucket(best_same)] += 1
                     if best_any <= 0.0:
@@ -1147,6 +1161,11 @@ def _compute_val_stats_from_dicts(
         out["log_only_gt_class_agnostic_dup_redundant_boxes"] = int(dup_total_redundant)
         out["log_only_gt_class_agnostic_dup_post_threshold_boxes"] = int(dup_total_post)
         out["log_only_gt_class_agnostic_dup_macro_image_count"] = int(dup_macro_n_images)
+        align = _aggregate_gt_best_iou_samples(
+            best_iou_any_by_class,
+            best_iou_same_by_class,
+        )
+        out["log_only_gt_alignment_metrics"] = gt_best_iou_alignment_metrics_to_dict(align)
 
     return out
 
@@ -2824,6 +2843,13 @@ def _format_validation_metrics(metrics: Dict[str, Any], previous_metrics: Option
             f"    mean best IoU (correct class): {float(metrics['log_only_gt_mean_best_iou_same_class']):.4f}, "
             f"median: {float(metrics.get('log_only_gt_median_best_iou_same_class', 0.0)):.4f}"
         )
+        align_raw = metrics.get("log_only_gt_alignment_metrics")
+        if isinstance(align_raw, dict) and align_raw.get("per_class"):
+            table = format_gt_best_iou_alignment_table_from_dict(align_raw)
+            if table:
+                lines.append("    per-class mean best IoU (raw detections):")
+                for table_line in table.splitlines():
+                    lines.append(f"      {table_line}")
     if "log_only_gt_count_wrong_class_overlap_at_iou" in metrics:
         wco = int(metrics["log_only_gt_count_wrong_class_overlap_at_iou"])
         nhi = int(metrics.get("log_only_gt_count_no_det_iou_above_threshold", 0))

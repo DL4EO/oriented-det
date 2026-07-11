@@ -5,8 +5,11 @@ from oriented_det.data import (
     ClassEvalMetrics,
     Detection,
     GroundTruth,
+    compute_gt_best_iou_alignment_metrics,
     compute_oriented_map,
+    format_gt_best_iou_alignment_table,
     format_mmrotate_class_metrics_table,
+    gt_best_iou_alignment_metrics_to_dict,
 )
 from oriented_det.geometry import RBox
 
@@ -135,4 +138,31 @@ def test_ap_calculator_no_ground_truths():
     # No GTs means AP = 0 (all detections are false positives)
     assert ap == 0.0
     assert metrics.num_gts == 0
+
+
+def test_compute_gt_best_iou_alignment_metrics_per_class():
+    """Per-class mean best IoU separates aligned vs misaligned classes."""
+    rbox_good = RBox(100, 100, 50, 30, 0)
+    rbox_bad = RBox(300, 300, 50, 30, 0.5)
+    detections = {
+        "i1": [
+            Detection(rbox=rbox_good, score=0.9, class_id=0, class_name="plane", image_id="i1"),
+            Detection(rbox=rbox_bad, score=0.8, class_id=1, class_name="ship", image_id="i1"),
+        ],
+    }
+    ground_truths = {
+        "i1": [
+            GroundTruth(rbox=rbox_good, class_id=0, class_name="plane", difficult=0, image_id="i1"),
+            GroundTruth(rbox=rbox_bad, class_id=1, class_name="ship", difficult=0, image_id="i1"),
+        ],
+    }
+    metrics = compute_gt_best_iou_alignment_metrics(detections, ground_truths)
+    assert metrics.num_gts == 2
+    assert metrics.per_class["plane"].mean_best_iou_same_class > 0.99
+    assert metrics.per_class["ship"].mean_best_iou_same_class > 0.99
+    d = gt_best_iou_alignment_metrics_to_dict(metrics)
+    assert d["per_class"]["plane"]["num_gts"] == 1
+    table = format_gt_best_iou_alignment_table(metrics, markdown=True)
+    assert "plane" in table
+    assert "global" in table
 

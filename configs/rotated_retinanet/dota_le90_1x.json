@@ -85,7 +85,7 @@
     "anchor_ratios": [0.5, 1.0, 2.0],
     "retinanet_stacked_convs": 4,
     "box_reg_loss_type": "l1",
-    "use_hbb_for_matching": true,
+    "use_hbb_for_matching": false,
     "final_nms_use_cpu": false,
     "inference_pre_nms_score_threshold": 0.05,
     "final_nms_iou_threshold": 0.1,
