@@ -79,9 +79,10 @@ def _roi_candidates_from_head(
         )
 
     score_threshold = model.inference_pre_nms_score_threshold
+    real_prop = _xyxy_positive_area_mask(img_proposals)
     if model.roi_inference_top_class_only:
         max_scores, argmax_cls = fg_probs.max(dim=1)
-        keep_prop = max_scores > score_threshold
+        keep_prop = (max_scores > score_threshold) & real_prop
         if keep_prop.any():
             proposal_indices = keep_prop.nonzero(as_tuple=True)[0]
             filtered_proposals = img_proposals[proposal_indices]
@@ -92,7 +93,7 @@ def _roi_candidates_from_head(
         else:
             return None
     else:
-        candidate_mask = fg_probs > score_threshold
+        candidate_mask = (fg_probs > score_threshold) & real_prop.unsqueeze(1)
         if candidate_mask.any():
             proposal_indices, class_indices = candidate_mask.nonzero(as_tuple=True)
             filtered_proposals = img_proposals[proposal_indices]
@@ -234,20 +235,31 @@ def _pad_xyxy_proposals(
     max_count: int,
     image_size: Tuple[int, int],
 ) -> Tuple[torch.Tensor, int]:
-    """Pad/truncate proposals to fixed length for traceable ROI align (ONNX export)."""
+    """Pad/truncate proposals to fixed length for traceable ROI align (ONNX export).
+
+    Pad slots use zero-area boxes ``(0,0,0,0)`` so candidates can be dropped with a
+    dynamic positive-area check after the ROI head.
+    """
+    del image_size  # reserved for API parity with callers
     device = proposals.device
     dtype = proposals.dtype
-    img_h, img_w = image_size
     n = min(int(proposals.shape[0]), int(max_count))
-    padded = torch.zeros((max_count, 4), dtype=dtype, device=device)
     if n > 0:
-        padded[:n] = proposals[:n]
-    if n < max_count:
-        # Harmless 1x1 boxes at origin for padded slots (filtered by score later).
-        padded[n:] = torch.tensor(
-            [[0.0, 0.0, 1.0, 1.0]], dtype=dtype, device=device
-        ).expand(max_count - n, 4)
+        head = proposals[:n]
+    else:
+        head = proposals.new_zeros((0, 4))
+    pad_n = int(max_count) - n
+    if pad_n > 0:
+        pad = torch.zeros((pad_n, 4), dtype=dtype, device=device)
+        padded = torch.cat([head, pad], dim=0)
+    else:
+        padded = head
     return padded, n
+
+
+def _xyxy_positive_area_mask(boxes: torch.Tensor) -> torch.Tensor:
+    """Boolean mask for non-pad xyxy boxes (positive width and height)."""
+    return (boxes[:, 2] > boxes[:, 0]) & (boxes[:, 3] > boxes[:, 1])
 
 
 def faster_rcnn_roi_pre_nms(

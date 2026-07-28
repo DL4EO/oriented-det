@@ -1,4 +1,4 @@
-"""Parity: PyTorch full detect vs pre-NMS export + postprocess."""
+"""Parity: PyTorch Oriented R-CNN detect vs pre-NMS export + postprocess."""
 
 from __future__ import annotations
 
@@ -18,21 +18,20 @@ if str(_EXPORT_DIR) not in sys.path:
 
 from export.postprocess import finalize_detections_numpy, meta_to_finalize_kwargs  # noqa: E402
 import wrappers as _wrappers  # noqa: E402
-from oriented_det import RotatedFasterRCNN  # noqa: E402
-from oriented_det.models.faster_rcnn_inference import faster_rcnn_inference  # noqa: E402
+from oriented_det import OrientedRCNN  # noqa: E402
 from oriented_det.models.utils import rboxes_to_tensor  # noqa: E402
 
-RotatedFasterRCNNPreNmsExportWrapper = _wrappers.RotatedFasterRCNNPreNmsExportWrapper
+OrientedRCNNPreNmsExportWrapper = _wrappers.OrientedRCNNPreNmsExportWrapper
 
-_PRETRAINED_CONFIG = _REPO_ROOT / "configs/rotated_faster_rcnn/dota_le90_1x.json"
+_PRETRAINED_CONFIG = _REPO_ROOT / "configs/oriented_rcnn/dota_le90_1x.json"
 _PRETRAINED_CKPT = (
-    _REPO_ROOT / "pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.pth"
+    _REPO_ROOT / "pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.pth"
 )
 
 
 @pytest.fixture
-def tiny_faster_rcnn() -> RotatedFasterRCNN:
-    return RotatedFasterRCNN(
+def tiny_oriented_rcnn() -> OrientedRCNN:
+    return OrientedRCNN(
         num_classes=3,
         backbone_name="resnet18",
         pretrained_backbone=False,
@@ -48,7 +47,7 @@ def tiny_faster_rcnn() -> RotatedFasterRCNN:
     )
 
 
-def _finalize_kwargs_from_model(model: RotatedFasterRCNN) -> dict:
+def _finalize_kwargs_from_model(model: OrientedRCNN) -> dict:
     return {
         "nms_class_agnostic": model.nms_class_agnostic,
         "final_nms_iou_threshold": model.final_nms_iou_threshold,
@@ -62,17 +61,18 @@ def _finalize_kwargs_from_model(model: RotatedFasterRCNN) -> dict:
     }
 
 
-def test_pre_nms_finalize_matches_full_inference(tiny_faster_rcnn: RotatedFasterRCNN) -> None:
-    """Export path + postprocess should match faster_rcnn_inference (deterministic RPN)."""
-    model = tiny_faster_rcnn
+def test_pre_nms_finalize_matches_full_inference(tiny_oriented_rcnn: OrientedRCNN) -> None:
+    """Export path + postprocess should match OrientedRCNN.eval (deterministic RPN)."""
+    model = tiny_oriented_rcnn
     model.eval()
+    model._deterministic_rpn = True
     h, w = 128, 128
     torch.manual_seed(0)
     x = torch.rand(1, 3, h, w, dtype=torch.float32)
 
     with torch.no_grad():
-        full_out = faster_rcnn_inference(model, [x[0]], deterministic_rpn=True)[0]
-        wrap = RotatedFasterRCNNPreNmsExportWrapper(model, height=h, width=w, max_candidates=128)
+        full_out = model([x[0]])[0]
+        wrap = OrientedRCNNPreNmsExportWrapper(model, height=h, width=w, max_candidates=128)
         boxes, scores, labels, count = wrap(x)
         det_np, num = finalize_detections_numpy(
             boxes.cpu().numpy(),
@@ -109,16 +109,16 @@ def test_pre_nms_finalize_matches_full_inference(tiny_faster_rcnn: RotatedFaster
     )
 
 
-def test_faster_rcnn_pre_nms_onnx_checker(tiny_faster_rcnn: RotatedFasterRCNN) -> None:
+def test_oriented_rcnn_pre_nms_onnx_checker(tiny_oriented_rcnn: OrientedRCNN) -> None:
     pytest.importorskip("onnx")
     import io
 
     import onnx
 
-    model = tiny_faster_rcnn
+    model = tiny_oriented_rcnn
     model.eval()
     h, w = 128, 128
-    wrap = RotatedFasterRCNNPreNmsExportWrapper(model, height=h, width=w, max_candidates=64)
+    wrap = OrientedRCNNPreNmsExportWrapper(model, height=h, width=w, max_candidates=64)
     x = torch.randn(1, 3, h, w, dtype=torch.float32)
     buf = io.BytesIO()
     torch.onnx.export(
@@ -134,8 +134,8 @@ def test_faster_rcnn_pre_nms_onnx_checker(tiny_faster_rcnn: RotatedFasterRCNN) -
     onnx.checker.check_model(onnx.load(buf))
 
 
-def test_faster_rcnn_pre_nms_onnx_ort_random_input(tiny_faster_rcnn: RotatedFasterRCNN) -> None:
-    """ORT must run on non-zero images (regression: pad_pre_nms used invalid Expand)."""
+def test_oriented_rcnn_pre_nms_onnx_ort_random_input(tiny_oriented_rcnn: OrientedRCNN) -> None:
+    """ORT must run on non-zero images after oriented ROI ONNX export."""
     pytest.importorskip("onnx")
     pytest.importorskip("onnxruntime")
     import io
@@ -143,10 +143,10 @@ def test_faster_rcnn_pre_nms_onnx_ort_random_input(tiny_faster_rcnn: RotatedFast
     import numpy as np
     import onnxruntime as ort
 
-    model = tiny_faster_rcnn
+    model = tiny_oriented_rcnn
     model.eval()
     h, w = 128, 128
-    wrap = RotatedFasterRCNNPreNmsExportWrapper(model, height=h, width=w, max_candidates=64)
+    wrap = OrientedRCNNPreNmsExportWrapper(model, height=h, width=w, max_candidates=64)
     buf = io.BytesIO()
     torch.onnx.export(
         wrap,
@@ -169,11 +169,11 @@ def test_faster_rcnn_pre_nms_onnx_ort_random_input(tiny_faster_rcnn: RotatedFast
 
 @pytest.mark.skipif(
     not _PRETRAINED_CKPT.is_file() or not _PRETRAINED_CONFIG.is_file(),
-    reason="Hub pretrained Faster R-CNN 1x checkpoint missing "
-    "(odet pretrained download rotated_faster_rcnn_dota_le90_1x)",
+    reason="Hub pretrained Oriented R-CNN 1x checkpoint missing "
+    "(odet pretrained download oriented_rcnn_dota_le90_1x)",
 )
 def test_pretrained_checkpoint_pre_nms_finalize() -> None:
-    """Smoke parity on Hub pretrained Faster R-CNN weights (slow; optional)."""
+    """Smoke parity on Hub pretrained Oriented R-CNN weights (slow; optional)."""
     import json
 
     from oriented_det.runtime.checkpoint import load_model_from_checkpoint
@@ -181,7 +181,7 @@ def test_pretrained_checkpoint_pre_nms_finalize() -> None:
     model, config, class_names = load_model_from_checkpoint(
         str(_PRETRAINED_CKPT), str(_PRETRAINED_CONFIG), device="cpu"
     )
-    assert isinstance(model, RotatedFasterRCNN)
+    assert isinstance(model, OrientedRCNN)
 
     meta = {
         "production": json.loads(_PRETRAINED_CONFIG.read_text()).get("production"),
@@ -189,7 +189,7 @@ def test_pretrained_checkpoint_pre_nms_finalize() -> None:
     }
     kwargs = meta_to_finalize_kwargs(meta)
     h, w = 256, 256
-    wrap = RotatedFasterRCNNPreNmsExportWrapper(
+    wrap = OrientedRCNNPreNmsExportWrapper(
         model, height=h, width=w, max_candidates=model.rpn_post_nms_top_n
     )
     x = torch.rand(1, 3, h, w, dtype=torch.float32)

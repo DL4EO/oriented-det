@@ -21,12 +21,13 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "playground-csv": ("tools.generate_airbus_playground_csv", "odet-playground-csv"),
     "playground-to-dota": ("tools.playground_to_dota", "odet-playground-to-dota"),
     "export-onnx": ("export.scripts.export_onnx", "odet-export-onnx"),
+    "export-tf": ("export.scripts.export_tf", "odet-export-tf"),
+    "export-detect": ("export.scripts.build_faster_rcnn_savedmodel", "odet-export-detect"),
+    "export-preds": ("export.scripts.save_predictions_tf", "odet-export-preds"),
     "labels-to-comma": ("tools.dota_labels_to_comma", "odet-labels-to-comma"),
     "free-gpu": ("tools.free_gpu", "odet-free-gpu"),
     "pretrained": ("tools.pretrained_download", "odet-pretrained"),
 }
-
-_EXPORT_TF_ALIASES = frozenset({"export-tf", "export-detect", "export-preds"})
 
 
 def _print_help() -> None:
@@ -35,36 +36,34 @@ def _print_help() -> None:
     print("Commands:")
     for name in sorted(_COMMANDS):
         print(f"  {name}")
-    print("  pretrained      Download registered checkpoints from Hugging Face Hub")
-    print("  export-tf       Run export/Makefile export-tf (pass MAKE_ARGS='...')")
-    print("  export-onnx     (alias above) ONNX export via export/scripts/export_onnx.py")
     print("")
     print("Examples:")
     print("  odet train --config configs/oriented_rcnn/dota_le90_1x.json")
     print("  odet train-multi-gpu --config configs/oriented_rcnn/dota_le90_1x.json")
     print("  odet preds --experiment-dir runs/oriented_rcnn/<id>")
     print("  odet playground-csv --data-root /path/to/export")
+    print("  odet export-tf --config path/to/config.json --checkpoint path/to/model.pth")
+    print("  odet export-tf --mode oriented_rcnn_pre_nms --config ... --checkpoint ...")
 
 
 def _invoke(module_path: str, prog: str, args: List[str]) -> None:
+    # Editable checkout: repo root on sys.path. Wheel install: packages already importable.
     repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    mod = importlib.import_module(module_path)
+    try:
+        mod = importlib.import_module(module_path)
+    except ImportError as e:
+        if module_path.startswith("export."):
+            raise SystemExit(
+                f"Failed to import {module_path}: {e}\n"
+                'For TF/ONNX export install extras: pip install "oriented-det[export]"'
+            ) from e
+        raise
     if not hasattr(mod, "main"):
         raise SystemExit(f"{module_path} has no main()")
     sys.argv = [prog] + args
     mod.main()
-
-
-def _run_export_tf(args: List[str]) -> None:
-    import subprocess
-    from pathlib import Path
-
-    repo_root = Path(__file__).resolve().parents[2]
-    make_args = " ".join(args) if args else ""
-    cmd = f"make -C {repo_root / 'export'} export-tf {make_args}"
-    raise SystemExit(subprocess.call(cmd, shell=True))
 
 
 def main(argv: Optional[List[str]] = None) -> None:
@@ -75,9 +74,6 @@ def main(argv: Optional[List[str]] = None) -> None:
     cmd, rest = argv[0], argv[1:]
     if cmd in ("-h", "--help"):
         _print_help()
-        return
-    if cmd == "export-tf":
-        _run_export_tf(rest)
         return
     if cmd not in _COMMANDS:
         print(f"Unknown command: {cmd}", file=sys.stderr)

@@ -1134,6 +1134,7 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
             pre_nms_top_n=self.rpn_pre_nms_top_n,
             post_nms_top_n=self.rpn_post_nms_top_n,
             min_size=0.0,
+            deterministic=bool(getattr(self, "_deterministic_rpn", False)),
         )
         return_debug = getattr(self, '_return_anchors_proposals', False)
         if return_debug:

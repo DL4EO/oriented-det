@@ -6,7 +6,7 @@
     "dtype": "float32",
     "layout": "NCHW",
     "value_range": "[0, 1] RGB matching training preprocess (see TrainingExperimentConfig.preprocessing)",
-    "spatial": "Fixed H×W at export time; batch size 1 for faster_rcnn_pre_nms."
+    "spatial": "Fixed H×W at export time; batch size 1 for pre-NMS detect modes."
   },
   "export_modes": {
     "backbone": {
@@ -28,15 +28,25 @@
         "pre_nms_count": "scalar int64 valid count <= P"
       },
       "postprocess": "Exact CPU rotated NMS + production score_threshold in TF/Keras bundle (export/scripts/build_faster_rcnn_savedmodel.py)."
+    },
+    "oriented_rcnn_pre_nms": {
+      "models": ["oriented_rcnn"],
+      "onnx_outputs": {
+        "pre_nms_boxes": "[P, 5] oriented boxes (cx,cy,w,h,angle), P = max_pre_nms_candidates",
+        "pre_nms_scores": "[P]",
+        "pre_nms_labels": "[P] 1-based foreground ids",
+        "pre_nms_count": "scalar int64 valid count <= P"
+      },
+      "postprocess": "Same Keras detect bundle as faster_rcnn_pre_nms (ORT core + exact rotated NMS)."
     }
   },
   "detect_bundle": {
-    "files": ["keras_model.keras", "export_meta.json", "model.onnx (sibling of meta)"],
+    "files": ["keras_model.keras", "model.onnx", "export_meta.json"],
     "outputs": {
       "detections": "[max_detections, 7] as (cx,cy,w,h,angle,score,label)",
       "num_detections": "scalar int32"
     },
-    "load": "tf.keras.models.load_model(..., custom_objects={'FasterRCNNDetectLayer': ...})"
+    "load": "export.tf_serving_model.load_keras_detect_model(bundle_dir_or_keras_path)"
   },
   "nms": {
     "in_onnx": false,
@@ -44,7 +54,8 @@
     "pytorch_reference": "oriented_det.ops.rotated_ops rotated_nms (force_cpu for deploy parity)"
   },
   "notes": [
-    "faster_rcnn_pre_nms pads RPN proposals to fixed P before ROI align for traceable ONNX.",
+    "faster_rcnn_pre_nms and oriented_rcnn_pre_nms pad RPN proposals to fixed P before ROI align for traceable ONNX.",
+    "oriented_rcnn_pre_nms uses midpoint RPN + OrientedROIAlign (masked all-N grid_sample under ONNX export).",
     "onnx2tf SavedModel for this graph may fail on ScatterND; the detect bundle uses ONNX Runtime inside Keras.",
     "TFLite full detect is not supported while NMS remains in Python."
   ]

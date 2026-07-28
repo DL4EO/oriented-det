@@ -2009,8 +2009,13 @@ def generate_midpoint_proposals(
     post_nms_top_n: int = 2000,
     min_size: float = 0.0,
     target_stds: Tuple[float, float, float, float, float, float] = (1.0, 1.0, 1.0, 1.0, 0.5, 0.5),
+    deterministic: bool = False,
 ) -> List[torch.Tensor]:
-    """Generate oriented proposals from 6D midpoint RPN deltas, then prune with HBB NMS."""
+    """Generate oriented proposals from 6D midpoint RPN deltas, then prune with HBB NMS.
+
+    Args:
+        deterministic: If True, use score-only top-k (no random tie-break) for reproducible export.
+    """
     if torch is None or F is None:
         raise RuntimeError("PyTorch is required for proposal generation.")
     from .bbox_coder import MidpointOffsetCoder
@@ -2043,7 +2048,10 @@ def generate_midpoint_proposals(
             valid = scores >= score_threshold
             if valid.sum() > pre_nms_top_n:
                 top_k = min(pre_nms_top_n * 2, int(scores.numel()))
-                scores_for_topk = scores + 1e-5 * (torch.rand_like(scores) * 2 - 1)
+                if deterministic:
+                    scores_for_topk = scores
+                else:
+                    scores_for_topk = scores + 1e-5 * (torch.rand_like(scores) * 2 - 1)
                 _, top_idx = torch.topk(scores_for_topk, top_k)
                 mask = torch.zeros_like(valid)
                 mask[top_idx] = True
@@ -2077,7 +2085,10 @@ def generate_midpoint_proposals(
             continue
 
         if scores.numel() > pre_nms_top_n:
-            scores_for_topk = scores + 1e-5 * (torch.rand_like(scores) * 2 - 1)
+            if deterministic:
+                scores_for_topk = scores
+            else:
+                scores_for_topk = scores + 1e-5 * (torch.rand_like(scores) * 2 - 1)
             top_idx = torch.topk(scores_for_topk, pre_nms_top_n).indices
             props = props[top_idx]
             scores = scores[top_idx]

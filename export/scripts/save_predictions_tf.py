@@ -156,12 +156,15 @@ def run_tf_inference_and_save(
 
     keras_path = detect_dir / "keras_model.keras"
     if not keras_path.is_file():
-        raise FileNotFoundError(f"Missing Keras bundle: {keras_path} (run make export-tf first).")
+        raise FileNotFoundError(
+            f"Missing Keras bundle: {keras_path} "
+            "(run: odet export-tf --config ... --checkpoint ... --output-dir ...)."
+        )
     keras_model = load_keras_detect_model(keras_path)
 
     if output_dir is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = detect_dir.parent / "predictions" / timestamp
+        output_dir = Path("odet_export") / "predictions" / timestamp
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -411,7 +414,12 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Val inference via TF/Keras export bundle.")
     p.add_argument("--config", type=Path, required=True)
     p.add_argument("--detect-dir", type=Path, required=True, help="Directory with keras_model.keras")
-    p.add_argument("--output-dir", type=Path, default=None, help="Default: export/artifacts/predictions/<ts>")
+    p.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Default: ./odet_export/predictions/<timestamp>/",
+    )
     p.add_argument("--data-root", type=Path, default=None)
     p.add_argument("--data-split", default="val", choices=("train", "val", "test"))
     p.add_argument("--val-dir", type=Path, default=None)

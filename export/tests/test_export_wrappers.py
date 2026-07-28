@@ -16,12 +16,13 @@ if str(_EXPORT_DIR) not in sys.path:
     sys.path.insert(0, str(_EXPORT_DIR))
 
 import wrappers as _wrappers  # noqa: E402
-from oriented_det import RotatedFasterRCNN  # noqa: E402
+from oriented_det import OrientedRCNN, RotatedFasterRCNN  # noqa: E402
 from oriented_det.models.rotated_retinanet import RotatedRetinaNet  # noqa: E402
 
 BackboneExportWrapper = _wrappers.BackboneExportWrapper
 RetinaNetBackboneHeadExportWrapper = _wrappers.RetinaNetBackboneHeadExportWrapper
 RotatedFasterRCNNPreNmsExportWrapper = _wrappers.RotatedFasterRCNNPreNmsExportWrapper
+OrientedRCNNPreNmsExportWrapper = _wrappers.OrientedRCNNPreNmsExportWrapper
 
 
 @pytest.fixture
@@ -94,6 +95,34 @@ def tiny_faster_rcnn() -> RotatedFasterRCNN:
 def test_faster_rcnn_pre_nms_wrapper_shapes(tiny_faster_rcnn: RotatedFasterRCNN) -> None:
     h, w = 128, 128
     wwrap = RotatedFasterRCNNPreNmsExportWrapper(tiny_faster_rcnn, height=h, width=w, max_candidates=32)
+    wwrap.eval()
+    x = torch.randn(1, 3, h, w, dtype=torch.float32)
+    with torch.no_grad():
+        boxes, scores, labels, count = wwrap(x)
+    assert boxes.shape == (32, 5)
+    assert scores.shape == (32,)
+    assert labels.shape == (32,)
+    assert count.ndim == 0
+    assert int(count.item()) <= 32
+
+
+@pytest.fixture
+def tiny_oriented_rcnn() -> OrientedRCNN:
+    return OrientedRCNN(
+        num_classes=3,
+        backbone_name="resnet18",
+        pretrained_backbone=False,
+        trainable_layers=5,
+        rpn_post_nms_top_n=64,
+        rpn_pre_nms_top_n=64,
+    )
+
+
+def test_oriented_rcnn_pre_nms_wrapper_shapes(tiny_oriented_rcnn: OrientedRCNN) -> None:
+    h, w = 128, 128
+    wwrap = OrientedRCNNPreNmsExportWrapper(
+        tiny_oriented_rcnn, height=h, width=w, max_candidates=32
+    )
     wwrap.eval()
     x = torch.randn(1, 3, h, w, dtype=torch.float32)
     with torch.no_grad():

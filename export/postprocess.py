@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -11,7 +12,7 @@ try:
 except Exception:  # pragma: no cover
     torch = None  # type: ignore
 
-from export.ort_runtime import get_ort_device, get_ort_session
+from export.ort_runtime import get_ort_session
 from oriented_det.models.faster_rcnn_inference import PreNmsDetections, apply_final_rotated_nms
 from oriented_det.train.utils import effective_score_threshold_for_class_name
 
@@ -33,6 +34,25 @@ class _NmsConfigView:
         self.final_nms_use_cpu = final_nms_use_cpu
 
 
+def normalize_class_id_to_name(
+    class_id_to_name: Optional[Dict[Any, str]],
+) -> Dict[int, str]:
+    """Coerce map keys to int (Keras JSON round-trip stringifies them)."""
+    if not class_id_to_name:
+        return {}
+    out: Dict[int, str] = {}
+    for k, v in class_id_to_name.items():
+        out[int(k)] = str(v)
+    return out
+
+
+def normalize_finalize_kwargs(finalize_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of finalize kwargs safe after Keras save/load."""
+    fk = dict(finalize_kwargs)
+    fk["class_id_to_name"] = normalize_class_id_to_name(fk.get("class_id_to_name"))
+    return fk
+
+
 def finalize_detections_numpy(
     pre_nms_boxes: np.ndarray,
     pre_nms_scores: np.ndarray,
@@ -45,12 +65,14 @@ def finalize_detections_numpy(
     final_nms_use_cpu: bool,
     score_threshold: float,
     per_class_score_threshold: Optional[Dict[str, float]],
-    class_id_to_name: Dict[int, str],
+    class_id_to_name: Dict[Union[int, str], str],
     max_output_slots: int,
 ) -> Tuple[np.ndarray, int]:
     """Run rotated NMS + production score filter; return padded ``[max_output_slots, 7]``."""
     if torch is None:
         raise RuntimeError("torch is required for finalize_detections_numpy")
+
+    class_id_to_name_i = normalize_class_id_to_name(class_id_to_name)
 
     out = np.zeros((max_output_slots, 7), dtype=np.float32)
     n = int(pre_nms_count)
@@ -77,7 +99,7 @@ def finalize_detections_numpy(
         keep_list = []
         for i in range(int(final.scores.shape[0])):
             lid = int(final.labels[i].item())
-            cname = class_id_to_name.get(lid, f"class_{lid}")
+            cname = class_id_to_name_i.get(lid, f"class_{lid}")
             thr = effective_score_threshold_for_class_name(
                 cname, score_threshold, per_class_score_threshold
             )
@@ -117,19 +139,31 @@ def ort_pre_nms_to_detections(
     """ONNX Runtime forward + finalize (for TF ``numpy_function`` / Keras bundle)."""
     import numpy as np
 
+    if not ort_output_names:
+        raise ValueError("ort_output_names is empty; export meta output_names is required.")
+    onnx_file = Path(onnx_path)
+    if not onnx_file.is_file():
+        raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
+
     img = np.asarray(images, dtype=np.float32)
     if img.ndim == 3:
         img = img[np.newaxis, ...]
-    sess = get_ort_session(onnx_path)
+    sess = get_ort_session(str(onnx_file))
     input_name = sess.get_inputs()[0].name
     outs = sess.run(ort_output_names, {input_name: img})
     name_to_val = dict(zip(ort_output_names, outs))
+    for required in ("pre_nms_boxes", "pre_nms_scores", "pre_nms_labels", "pre_nms_count"):
+        if required not in name_to_val:
+            raise KeyError(
+                f"Missing ONNX output {required!r}; got {sorted(name_to_val)}. "
+                "Re-export with faster_rcnn_pre_nms or oriented_rcnn_pre_nms."
+            )
     detections, num = finalize_detections_numpy(
         name_to_val["pre_nms_boxes"],
         name_to_val["pre_nms_scores"],
         name_to_val["pre_nms_labels"],
         int(np.asarray(name_to_val["pre_nms_count"]).reshape(-1)[0]),
-        **finalize_kwargs,
+        **normalize_finalize_kwargs(finalize_kwargs),
     )
     return detections, int(num)
 
@@ -139,13 +173,15 @@ def meta_to_finalize_kwargs(meta: Dict[str, Any]) -> Dict[str, Any]:
     prod = meta.get("production") or {}
     class_names: List[str] = list(meta.get("class_names") or [])
     max_det = int(prod.get("max_detections_per_image") or meta.get("max_detections_per_image") or 3000)
-    return {
-        "nms_class_agnostic": bool(prod.get("nms_class_agnostic", False)),
-        "final_nms_iou_threshold": float(prod.get("final_nms_iou_threshold", 0.1)),
-        "max_detections_per_image": max_det,
-        "final_nms_use_cpu": bool(prod.get("final_nms_use_cpu", True)),
-        "score_threshold": float(prod.get("score_threshold", 0.05)),
-        "per_class_score_threshold": prod.get("per_class_score_threshold"),
-        "class_id_to_name": build_class_id_to_name(class_names),
-        "max_output_slots": max_det,
-    }
+    return normalize_finalize_kwargs(
+        {
+            "nms_class_agnostic": bool(prod.get("nms_class_agnostic", False)),
+            "final_nms_iou_threshold": float(prod.get("final_nms_iou_threshold", 0.1)),
+            "max_detections_per_image": max_det,
+            "final_nms_use_cpu": bool(prod.get("final_nms_use_cpu", True)),
+            "score_threshold": float(prod.get("score_threshold", 0.05)),
+            "per_class_score_threshold": prod.get("per_class_score_threshold"),
+            "class_id_to_name": build_class_id_to_name(class_names),
+            "max_output_slots": max_det,
+        }
+    )

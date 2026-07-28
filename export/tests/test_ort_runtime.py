@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("onnxruntime")
+
 from export.ort_runtime import (
     clear_ort_session_cache,
     configure_ort_device,

@@ -11,14 +11,18 @@ Training JSON / `ModelConfig` does **not** expose `anchor_angles` (horizontal RP
 | Mode | Code path | Notes |
 |------|-----------|--------|
 | **Training** (`model.train()`) | `RotatedFasterRCNN.forward` → `self.roi_align` → eager `horizontal_roi_align` (per-FPN loop) | Never calls `faster_rcnn_inference.py`. `torch.onnx.is_in_onnx_export()` is false. |
-| **Eval / deploy** | `faster_rcnn_inference.faster_rcnn_inference()` | Shared with PyTorch inference and export wrappers. |
-| **ONNX export** | Same as eval + `horizontal_roi_align` **masked** branch when `is_in_onnx_export()` | Fixed-shape RoIAlign for traceability; numerically equivalent to eager path (see `tests/test_roi.py::test_horizontal_roi_align_eager_matches_onnx_export_path`). |
+| **Eval / deploy (Faster)** | `faster_rcnn_inference.faster_rcnn_inference()` | Shared with PyTorch inference and export wrappers. |
+| **ONNX export (Faster)** | Same as eval + `horizontal_roi_align` **masked** branch when `is_in_onnx_export()` | Fixed-shape RoIAlign for traceability; numerically equivalent to eager path (see `tests/test_roi.py::test_horizontal_roi_align_eager_matches_onnx_export_path`). |
+| **Eval (Oriented R-CNN)** | Inline in `OrientedRCNN.forward` (midpoint RPN + `OrientedROIAlign`) | Set `model._deterministic_rpn = True` for export-parity comparisons. |
+| **ONNX export (Oriented)** | `oriented_rcnn_inference_pre_nms_padded` + `oriented_roi_align` **masked** branch | `export/wrappers.OrientedRCNNPreNmsExportWrapper`; same Keras detect bundle as Faster. |
 
-Regression guards: `tests/test_roi.py` (eager vs export RoIAlign), `tests/test_models.py::TestRotatedFasterRCNN::test_full_training_forward_and_backward`, `export/tests/test_faster_rcnn_export_parity.py`.
+Regression guards: `tests/test_roi.py` (eager vs export RoIAlign), `tests/test_models.py::TestRotatedFasterRCNN::test_full_training_forward_and_backward`, `export/tests/test_faster_rcnn_export_parity.py`, `export/tests/test_oriented_rcnn_export_parity.py`.
 
-## Shared inference (`faster_rcnn_inference.py`)
+## Shared inference (`faster_rcnn_inference.py` / `oriented_rcnn_inference.py`)
 
 `RotatedFasterRCNN` eval forwards through `faster_rcnn_inference()` (decode + rotated NMS). The same module powers ONNX export (`export/wrappers.RotatedFasterRCNNPreNmsExportWrapper`) with deterministic RPN top-k and padded proposals for traceable ROI align.
+
+`OrientedRCNN` export uses `oriented_rcnn_inference_pre_nms_padded` (`export/wrappers.OrientedRCNNPreNmsExportWrapper`) with deterministic midpoint RPN and padded oriented proposals.
 
 ## Rotated Faster R-CNN Proposal Filtering
 

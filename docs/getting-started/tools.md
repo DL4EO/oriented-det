@@ -21,8 +21,10 @@ After `uv pip install -e .`, use the **`odet`** CLI (`odet --help`). Script impl
 | `viewer` | Gradio app for browsing predictions |
 | `playground-csv` | Build Airbus Playground split CSV |
 | `playground-to-dota` | Export Playground annotations to DOTA layout |
-| `export-onnx` | ONNX export (`export/scripts/export_onnx.py`) |
-| `export-tf` | TensorFlow SavedModel via `make -C export export-tf` |
+| `export-onnx` | ONNX export (`export.scripts.export_onnx`) |
+| `export-tf` | ONNX + Keras detect bundle (`export.scripts.export_tf`; needs `[export]`) |
+| `export-detect` | Keras bundle from existing ONNX (`export.scripts.build_faster_rcnn_savedmodel`) |
+| `export-preds` | Val inference via Keras bundle (`export.scripts.save_predictions_tf`) |
 | `pretrained` | `list` / `download` Hub checkpoints (`hf://` slugs) |
 | `labels-to-comma` | Convert DOTA label files to comma-separated format |
 | `free-gpu` | Kill GPU processes (dev utility) |

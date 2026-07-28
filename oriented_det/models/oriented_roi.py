@@ -9,7 +9,6 @@ This module implements ROI head components that work with oriented bounding boxe
 
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 RegNorm = Literal["sampled_all", "positives_only"]
@@ -99,39 +98,51 @@ def _create_rotated_grid(
     Returns:
         Sampling grid of shape [1, grid_h, grid_w, 2] in normalized [-1, 1] coords
     """
-    grid_h, grid_w = grid_local.shape[:2]
-    cx, cy, w, h, angle = box.tolist()
-    
-    # Convert box dimensions from image coordinates to feature map coordinates
-    cx_feat = cx * spatial_scale
-    cy_feat = cy * spatial_scale
-    w_feat = w * spatial_scale
-    h_feat = h * spatial_scale
-    
-    # Scale grid to box dimensions (now in feature map coordinates)
-    grid_scaled = grid_local.clone()
-    grid_scaled[..., 0] *= w_feat / 2.0  # x: scale to box width (feature map coords)
-    grid_scaled[..., 1] *= h_feat / 2.0  # y: scale to box height (feature map coords)
-    
-    # Rotate grid around origin
-    cos_a = math.cos(angle)
-    sin_a = math.sin(angle)
-    rotation_matrix = torch.tensor(
-        [[cos_a, -sin_a], [sin_a, cos_a]],
-        device=device,
-        dtype=torch.float32
+    return _create_rotated_grids(
+        box.unsqueeze(0), grid_local, spatial_scale, H, W
     )
-    
-    # Apply rotation
-    grid_rotated = grid_scaled.view(-1, 2) @ rotation_matrix.T
-    grid_rotated = grid_rotated.view(grid_h, grid_w, 2)
-    
-    # Normalize to [-1, 1] range for grid_sample
-    grid_x_feat = (grid_rotated[..., 0] + cx_feat) / (W / 2.0) - 1.0
-    grid_y_feat = (grid_rotated[..., 1] + cy_feat) / (H / 2.0) - 1.0
-    
-    grid_feat = torch.stack([grid_x_feat, grid_y_feat], dim=-1)
-    return grid_feat.unsqueeze(0)  # [1, grid_h, grid_w, 2]
+
+
+def _create_rotated_grids(
+    boxes: torch.Tensor,
+    grid_local: torch.Tensor,
+    spatial_scale: float,
+    H: int,
+    W: int,
+) -> torch.Tensor:
+    """Batched rotated sampling grids for ``grid_sample``.
+
+    Args:
+        boxes: ``[N, 5]`` oriented boxes ``(cx, cy, w, h, angle)`` in image coords.
+        grid_local: Base grid in box-local coords ``[grid_h, grid_w, 2]``.
+        spatial_scale: Image → feature scale.
+        H, W: Feature map spatial size.
+
+    Returns:
+        ``[N, grid_h, grid_w, 2]`` normalized ``[-1, 1]`` grids.
+    """
+    grid_h, grid_w = grid_local.shape[:2]
+    dtype = boxes.dtype
+    device = boxes.device
+    cx = boxes[:, 0] * spatial_scale
+    cy = boxes[:, 1] * spatial_scale
+    w = boxes[:, 2] * spatial_scale
+    h = boxes[:, 3] * spatial_scale
+    angle = boxes[:, 4]
+
+    gx = grid_local[..., 0].to(dtype=dtype, device=device).view(1, grid_h, grid_w) * (
+        w * 0.5
+    ).view(-1, 1, 1)
+    gy = grid_local[..., 1].to(dtype=dtype, device=device).view(1, grid_h, grid_w) * (
+        h * 0.5
+    ).view(-1, 1, 1)
+    cos_a = torch.cos(angle).view(-1, 1, 1)
+    sin_a = torch.sin(angle).view(-1, 1, 1)
+    rx = gx * cos_a - gy * sin_a
+    ry = gx * sin_a + gy * cos_a
+    grid_x = (rx + cx.view(-1, 1, 1)) / (float(W) * 0.5) - 1.0
+    grid_y = (ry + cy.view(-1, 1, 1)) / (float(H) * 0.5) - 1.0
+    return torch.stack([grid_x, grid_y], dim=-1)
 
 
 def _checkpointable_grid_sample(
@@ -264,8 +275,45 @@ def oriented_roi_align(
     # Shape: [grid_h, grid_w, 2] where last dim is [x, y] in box-local coords
     grid_local = torch.stack([grid_x, grid_y], dim=-1)  # [grid_h, grid_w, 2]
     
+    dtype = roi_feature_maps[0].dtype
+    _onnx_export = bool(
+        torch.onnx.is_in_onnx_export() if hasattr(torch.onnx, "is_in_onnx_export") else False
+    )
+
+    if _onnx_export:
+        # All-N grid_sample per level with masks (avoids ScatterND from indexed writes).
+        out = torch.zeros(
+            (num_boxes, C, grid_h, grid_w), device=device, dtype=dtype
+        )
+        for feat_idx in range(len(roi_feature_maps)):
+            feature_map = roi_feature_maps[feat_idx]
+            _, _, H, W = feature_map.shape
+            spatial_scale = spatial_scales[min(feat_idx, len(spatial_scales) - 1)]
+            level_mask = (feature_map_indices == feat_idx).to(dtype=dtype).view(
+                num_boxes, 1, 1, 1
+            )
+            grids = _create_rotated_grids(
+                boxes, grid_local, spatial_scale, H, W
+            )
+            for img_idx in range(B):
+                img_mask = (box_to_image == img_idx).to(dtype=dtype).view(
+                    num_boxes, 1, 1, 1
+                )
+                feature_input = feature_map[img_idx : img_idx + 1].expand(
+                    num_boxes, -1, -1, -1
+                )
+                sampled = F.grid_sample(
+                    feature_input,
+                    grids,
+                    mode="bilinear",
+                    padding_mode="zeros",
+                    align_corners=False,
+                )
+                out = out + sampled * level_mask * img_mask
+        return out
+
     # Pre-allocate output tensor for efficiency
-    output_features = torch.zeros((num_boxes, C, grid_h, grid_w), device=device, dtype=roi_feature_maps[0].dtype)
+    output_features = torch.zeros((num_boxes, C, grid_h, grid_w), device=device, dtype=dtype)
     
     # Process boxes by feature map level and image
     # MEMORY-EFFICIENT: Process boxes sequentially to avoid expand() memory explosion
@@ -308,15 +356,9 @@ def oriented_roi_align(
                 num_chunk_boxes = len(chunk_boxes)
                 
                 # Create grids for this chunk of boxes
-                chunk_grids = []
-                for i in range(num_chunk_boxes):
-                    grid = _create_rotated_grid(
-                        chunk_boxes[i], grid_local, spatial_scale, H, W, device
-                    )
-                    chunk_grids.append(grid)
-                
-                # Stack grids: [num_chunk_boxes, grid_h, grid_w, 2]
-                chunk_grids = torch.cat(chunk_grids, dim=0)
+                chunk_grids = _create_rotated_grids(
+                    chunk_boxes, grid_local, spatial_scale, H, W
+                )
                 
                 # Sample features - expand only for small chunk to limit memory
                 feature_input = feature_map_img

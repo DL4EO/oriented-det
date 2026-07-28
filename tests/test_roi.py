@@ -1000,6 +1000,47 @@ def test_horizontal_roi_align_eager_matches_onnx_export_path():
     assert torch.allclose(eager, masked, atol=1e-5, rtol=1e-5)
 
 
+def test_oriented_roi_align_eager_matches_onnx_export_path():
+    """Eager path must match masked grid_sample used during ONNX export."""
+    torch.manual_seed(0)
+    feature_maps = [
+        torch.randn(1, 8, 64, 64),
+        torch.randn(1, 8, 32, 32),
+        torch.randn(1, 8, 16, 16),
+        torch.randn(1, 8, 8, 8),
+    ]
+    boxes = torch.tensor(
+        [
+            [64.0, 64.0, 40.0, 20.0, 0.0],
+            [120.0, 120.0, 50.0, 30.0, 0.3],
+            [200.0, 180.0, 36.0, 24.0, -0.2],
+            [40.0, 160.0, 28.0, 28.0, 0.1],
+            [180.0, 40.0, 48.0, 16.0, 0.5],
+        ],
+        dtype=torch.float32,
+    )
+    box_to_image = torch.zeros((boxes.shape[0],), dtype=torch.long)
+    kwargs = dict(
+        feature_maps=feature_maps,
+        boxes=boxes,
+        image_sizes=[(256, 256)],
+        box_to_image=box_to_image,
+        output_size=(7, 7),
+        spatial_scales=None,
+        fpn_strides=[4, 8, 16, 32],
+        chunk_size=32,
+        use_checkpoint=False,
+        finest_scale=56.0,
+    )
+    eager = oriented_roi_align(**kwargs)
+    with mock.patch(
+        "oriented_det.models.oriented_roi.torch.onnx.is_in_onnx_export",
+        return_value=True,
+    ):
+        masked = oriented_roi_align(**kwargs)
+    assert torch.allclose(eager, masked, atol=1e-5, rtol=1e-5)
+
+
 class TestFocalLoss:
     """Tests for focal loss."""
     

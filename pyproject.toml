@@ -96,7 +96,8 @@ DL4EO = "https://dl4eo.com"
 odet = "oriented_det.cli:main"
 
 [tool.setuptools]
-# Only ship the core library; export/ is in-repo tooling (not an installable top-level "export" package).
+# Ship oriented_det, tools, and export (Python TF/ONNX export). Makefile/docs under export/
+# are checkout-only; pip users run `odet export-tf` (no Make).
 [tool.setuptools.packages.find]
 include = ["oriented_det*", "tools*", "export*"]
 
@@ -106,3 +107,4 @@ include = ["oriented_det*", "tools*", "export*"]
 oriented_det = ["py.typed"]
 "oriented_det.pretrained" = ["manifest.json"]
 "oriented_det.configs" = ["**/*.json"]
+export = ["contract.json"]

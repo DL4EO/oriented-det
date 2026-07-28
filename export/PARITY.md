@@ -21,13 +21,24 @@ This document records what **matches** PyTorch full inference and what is **inte
 | Aspect | Parity |
 |--------|--------|
 | Backbone, RPN, ROI align, decode (pre-NMS tensors) | Same weights and logic as `RotatedFasterRCNN` via `oriented_det.models.faster_rcnn_inference`; deterministic RPN top-k for export. |
-| RPN proposals before ROI | Padded to `max_pre_nms_candidates` (= `rpn_post_nms_top_n` on the loaded model, including `production.*` overrides) so ONNX ROI align traces with fixed shapes. |
+| RPN proposals before ROI | Padded to `max_pre_nms_candidates` with **zero-area** xyxy pads; ROI candidates keep only positive-area boxes (dynamic mask). |
 | Pre-NMS output padding | `pad_pre_nms_detections` uses `torch.cat` zero-padding (not slice assignment), which avoids invalid ONNX `Expand` when the dynamic candidate count is not exactly 0, 1, or `max_candidates`. |
+| Detect bundle layout | `keras_model.keras` + **`model.onnx`** + `export_meta.json` (relative ONNX name; resolve via `load_keras_detect_model`). |
 | Final rotated NMS | **Exact** match with deploy when `production.final_nms_use_cpu: true` (polygon CPU path in `rotated_nms`). |
 | `production.score_threshold` / per-class floors | Applied in Keras bundle after NMS (`export/postprocess.py`). |
 | Sliding-window tiling, margin filter, GeoJSON | **Out of scope** — same as deploy API (see `oriented_det.runtime.inference`). |
 | TF SavedModel reload of `tf.py_function` | **Not used**; load `keras_model.keras` with `FasterRCNNDetectLayer` custom object. |
 | onnx2tf full graph | May fail on `ScatterND`; bundle uses **ONNX Runtime** for the core graph instead. |
+
+## `oriented_rcnn_pre_nms` + detect bundle (Oriented R-CNN)
+
+| Aspect | Parity |
+|--------|--------|
+| Backbone, midpoint RPN, OrientedROIAlign, decode | Same weights/logic as `OrientedRCNN` eval via `oriented_det.models.oriented_rcnn_inference`; deterministic midpoint RPN top-k for export. |
+| RPN proposals before ROI | Padded oriented proposals with **zero-size** OBBs; ROI candidates keep only `w>0` and `h>0` (pads are not min-clamped to 1). |
+| OrientedROIAlign under ONNX | Masked all-N `grid_sample` per FPN level (no indexed ScatterND writes); eager path stays chunked. |
+| Final NMS / score floors / Keras bundle | **Same** as Faster R-CNN detect bundle (`export/postprocess.py`). |
+| onnx2tf full graph | Same ORT-inside-Keras mitigation; pure TF conversion remains experimental. |
 
 ## ONNX → TensorFlow
 
@@ -45,4 +56,4 @@ This document records what **matches** PyTorch full inference and what is **inte
 
 ## Regression tests
 
-`export/tests/test_export_wrappers.py` checks **wrapper forward shapes** against PyTorch without requiring ONNX or TensorFlow. Golden numeric `.npz` dumps are optional and not required for CI.
+`export/tests/test_export_wrappers.py` checks **wrapper forward shapes** against PyTorch without requiring ONNX or TensorFlow. Golden numeric `.npz` dumps are optional and not required for CI. Pre-NMS parity: `test_faster_rcnn_export_parity.py`, `test_oriented_rcnn_export_parity.py`.
