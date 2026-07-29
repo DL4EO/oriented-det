@@ -1001,7 +1001,7 @@ def test_horizontal_roi_align_eager_matches_onnx_export_path():
 
 
 def test_oriented_roi_align_eager_matches_onnx_export_path():
-    """Eager path must match masked grid_sample used during ONNX export."""
+    """Eager path must match masked packed grid_sample used during ONNX export."""
     torch.manual_seed(0)
     feature_maps = [
         torch.randn(1, 8, 64, 64),
@@ -1039,6 +1039,39 @@ def test_oriented_roi_align_eager_matches_onnx_export_path():
     ):
         masked = oriented_roi_align(**kwargs)
     assert torch.allclose(eager, masked, atol=1e-5, rtol=1e-5)
+
+
+def test_grid_sample_rois_no_feature_expand_matches_expand_path():
+    """Packed grid_sample must match naive feature.expand(N) sampling."""
+    from oriented_det.models.oriented_roi import (
+        _create_rotated_grids,
+        _grid_sample_rois_no_feature_expand,
+    )
+
+    torch.manual_seed(0)
+    n, c, h, w = 12, 8, 32, 32
+    feat = torch.randn(1, c, h, w)
+    boxes = torch.rand(n, 5)
+    boxes[:, 0] *= float(w * 4)
+    boxes[:, 1] *= float(h * 4)
+    boxes[:, 2] = boxes[:, 2] * 40 + 8
+    boxes[:, 3] = boxes[:, 3] * 40 + 8
+    boxes[:, 4] = (boxes[:, 4] - 0.5) * 1.5
+    grid_h = grid_w = 7
+    y_coords = torch.linspace(-1, 1, grid_h)
+    x_coords = torch.linspace(-1, 1, grid_w)
+    grid_y, grid_x = torch.meshgrid(y_coords, x_coords, indexing="ij")
+    grid_local = torch.stack([grid_x, grid_y], dim=-1)
+    grids = _create_rotated_grids(boxes, grid_local, spatial_scale=0.25, H=h, W=w)
+    packed = _grid_sample_rois_no_feature_expand(feat, grids)
+    expanded = torch.nn.functional.grid_sample(
+        feat.expand(n, -1, -1, -1),
+        grids,
+        mode="bilinear",
+        padding_mode="zeros",
+        align_corners=False,
+    )
+    assert torch.allclose(packed, expanded, atol=1e-5, rtol=1e-5)
 
 
 class TestFocalLoss:

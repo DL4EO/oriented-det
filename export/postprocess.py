@@ -68,7 +68,12 @@ def finalize_detections_numpy(
     class_id_to_name: Dict[Union[int, str], str],
     max_output_slots: int,
 ) -> Tuple[np.ndarray, int]:
-    """Run rotated NMS + production score filter; return padded ``[max_output_slots, 7]``."""
+    """Run rotated NMS + production score filter; return padded ``[max_output_slots, 7]``.
+
+    Candidates below the production score floor are dropped **before** NMS. For greedy
+    score-ordered NMS this matches filtering after NMS, and avoids O(n²) exact CPU NMS
+    on thousands of sub-threshold boxes (the dominant cost when ORT CUDA is ~tens of ms).
+    """
     if torch is None:
         raise RuntimeError("torch is required for finalize_detections_numpy")
 
@@ -79,9 +84,24 @@ def finalize_detections_numpy(
     if n <= 0:
         return out, 0
 
-    boxes_t = torch.from_numpy(np.asarray(pre_nms_boxes[:n], dtype=np.float32))
-    scores_t = torch.from_numpy(np.asarray(pre_nms_scores[:n], dtype=np.float32))
-    labels_t = torch.from_numpy(np.asarray(pre_nms_labels[:n], dtype=np.int64))
+    boxes_t = torch.from_numpy(np.asarray(pre_nms_boxes[:n], dtype=np.float32).copy())
+    scores_t = torch.from_numpy(np.asarray(pre_nms_scores[:n], dtype=np.float32).copy())
+    labels_t = torch.from_numpy(np.asarray(pre_nms_labels[:n], dtype=np.int64).copy())
+
+    keep_pre = _score_keep_mask(
+        scores_t, labels_t, score_threshold, per_class_score_threshold, class_id_to_name_i
+    )
+    if not bool(keep_pre.any()):
+        return out, 0
+    boxes_t = boxes_t[keep_pre]
+    scores_t = scores_t[keep_pre]
+    labels_t = labels_t[keep_pre]
+
+    # GPU NMS when allowed — ORT CUDA is wasted if we always stay on CPU here.
+    if (not final_nms_use_cpu) and torch.cuda.is_available():
+        boxes_t = boxes_t.cuda(non_blocking=True)
+        scores_t = scores_t.cuda(non_blocking=True)
+        labels_t = labels_t.cuda(non_blocking=True)
 
     nms_view = _NmsConfigView(
         nms_class_agnostic=nms_class_agnostic,
@@ -94,18 +114,14 @@ def finalize_detections_numpy(
     if final.boxes.numel() == 0:
         return out, 0
 
-    keep_mask = torch.ones(final.scores.shape[0], dtype=torch.bool)
-    if per_class_score_threshold or score_threshold is not None:
-        keep_list = []
-        for i in range(int(final.scores.shape[0])):
-            lid = int(final.labels[i].item())
-            cname = class_id_to_name_i.get(lid, f"class_{lid}")
-            thr = effective_score_threshold_for_class_name(
-                cname, score_threshold, per_class_score_threshold
-            )
-            keep_list.append(float(final.scores[i].item()) >= thr)
-        keep_mask = torch.tensor(keep_list, dtype=torch.bool)
-
+    # Scores already pre-filtered; keep a cheap post-pass for API stability / per-class.
+    keep_mask = _score_keep_mask(
+        final.scores,
+        final.labels,
+        score_threshold,
+        per_class_score_threshold,
+        class_id_to_name_i,
+    )
     final_boxes = final.boxes[keep_mask]
     final_scores = final.scores[keep_mask]
     final_labels = final.labels[keep_mask]
@@ -116,13 +132,38 @@ def finalize_detections_numpy(
 
     det = np.column_stack(
         [
-            final_boxes[:m].cpu().numpy(),
-            final_scores[:m].cpu().numpy().reshape(-1, 1),
-            final_labels[:m].cpu().numpy().astype(np.float32).reshape(-1, 1),
+            final_boxes[:m].detach().cpu().numpy(),
+            final_scores[:m].detach().cpu().numpy().reshape(-1, 1),
+            final_labels[:m].detach().cpu().numpy().astype(np.float32).reshape(-1, 1),
         ]
     )
     out[:m] = det
     return out, m
+
+
+def _score_keep_mask(
+    scores: "torch.Tensor",
+    labels: "torch.Tensor",
+    score_threshold: float,
+    per_class_score_threshold: Optional[Dict[str, float]],
+    class_id_to_name: Dict[int, str],
+) -> "torch.Tensor":
+    """Boolean mask of boxes that meet the production score floor."""
+    if torch is None:
+        raise RuntimeError("torch is required")
+    if not per_class_score_threshold and (score_threshold is None or float(score_threshold) <= 0.0):
+        return torch.ones(scores.shape[0], dtype=torch.bool, device=scores.device)
+    if not per_class_score_threshold:
+        return scores >= float(score_threshold)
+    keep = torch.zeros(scores.shape[0], dtype=torch.bool, device=scores.device)
+    for i in range(int(scores.shape[0])):
+        lid = int(labels[i].item())
+        cname = class_id_to_name.get(lid, f"class_{lid}")
+        thr = effective_score_threshold_for_class_name(
+            cname, score_threshold, per_class_score_threshold
+        )
+        keep[i] = float(scores[i].item()) >= thr
+    return keep
 
 
 def build_class_id_to_name(class_names: List[str]) -> Dict[int, str]:

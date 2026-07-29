@@ -14,13 +14,15 @@ if str(_REPO_ROOT) not in sys.path:
 
 
 def _run_keras_bundle(bundle_dir: Path, height: int, width: int, ort_device: str | None) -> None:
-    import tensorflow as tf
-
+    # ORT device + hide TF GPUs *before* importing tensorflow / keras.
     from export.ort_runtime import configure_ort_device, get_ort_device
-    from export.tf_serving_model import load_keras_detect_model
 
     providers = configure_ort_device(ort_device)
     print(f"  ort_device: {get_ort_device()}  providers: {providers}")
+
+    import tensorflow as tf
+
+    from export.tf_serving_model import load_keras_detect_model
 
     keras_path = bundle_dir / "keras_model.keras"
     if not keras_path.is_file():
@@ -77,17 +79,20 @@ def main() -> None:
     )
     args = p.parse_args()
 
-    try:
-        import tensorflow as tf  # noqa: F401
-    except ImportError as e:
-        print("Install TensorFlow: pip install -r export/requirements-export.txt", file=sys.stderr)
-        raise SystemExit(1) from e
-
     bundle = args.saved_model
-    if (bundle / "keras_model.keras").is_file():
-        _run_keras_bundle(bundle, args.height, args.width, args.ort_device)
-    else:
-        _run_saved_model(bundle, args.height, args.width)
+    try:
+        if (bundle / "keras_model.keras").is_file():
+            _run_keras_bundle(bundle, args.height, args.width, args.ort_device)
+        else:
+            _run_saved_model(bundle, args.height, args.width)
+    except ImportError as e:
+        if "tensorflow" in str(e).lower() or getattr(e, "name", "") == "tensorflow":
+            print(
+                "Install TensorFlow: pip install -r export/requirements-export.txt",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from e
+        raise
 
 
 if __name__ == "__main__":

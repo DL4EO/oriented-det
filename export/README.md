@@ -45,7 +45,7 @@ uv pip install -e ".[export]"
 # or: uv pip install -e . && uv pip install -r export/requirements-export.txt
 ```
 
-TensorFlow wheels are large; keep this environment separate from minimal CPU-only dev envs if you prefer.
+TensorFlow and `onnxruntime-gpu[cuda,cudnn]` wheels are large; keep this environment separate from minimal CPU-only dev envs if you prefer. ORT still supports CPU (`CPUExecutionProvider`); use `ORIENTED_DET_ORT_DEVICE=cuda` / `--ort-device cuda` for GPU.
 
 Download Hub weights if needed:
 
@@ -167,14 +167,44 @@ Images larger than the model canvas are not tiled in the TF preds path (use pre-
 **ONNX Runtime device** (exported ONNX core only; post-NMS stays CPU/PyTorch):
 
 ```bash
-cd export
+# Recommended CUDA eval: ORT owns the GPU(s); TensorFlow is forced onto CPU.
+odet export-preds --ort-device cuda --config … --detect-dir ./odet_export/detect …
+# or:
+cd export && make preds ORT_DEVICE=cuda
 make predict ORT_DEVICE=cuda
-make preds ORT_DEVICE=auto    # CUDA if onnxruntime-gpu is installed, else CPU
+make preds ORT_DEVICE=auto    # CUDA EP if available, else CPU
 ```
 
 CLI: `--ort-device cpu|cuda|auto` on `save_predictions_tf.py` / `predict_savedmodel.py`.  
-Env fallback: `ORIENTED_DET_ORT_DEVICE=cuda`. Requires `onnxruntime-gpu` for CUDA.
+Env: `ORIENTED_DET_ORT_DEVICE=cuda` (fallback). The `[export]` extra installs `onnxruntime-gpu[cuda,cudnn]` (CPU EP still works).
 
+When `ort-device` resolves to CUDA, oriented-det calls `tf.config.set_visible_devices([], "GPU")` **before** loading the Keras bundle so TF does not claim A100s and starve ORT (symptoms: `/roi_align/Transpose_*` BFC OOM ~287 MB that should fit). Do not import `tensorflow` / `export.tf_serving_model` before `configure_ort_device(...)`.
+
+**Realistic CUDA vs CPU expectations (Oriented / Faster R-CNN detect bundle):**
+
+| Stage | Typical cost (1024², P≈6000) | Device |
+|-------|------------------------------|--------|
+| ORT pre-NMS graph (backbone→ROI→decode) | ~40–80 ms on A100; ~1–1.5 s on CPU | ORT CUDA EP / CPU EP |
+| Final rotated NMS + score filter | Dominates wall clock if `production.final_nms_use_cpu: true` and thousands of pre-NMS boxes | PyTorch CPU (exact polygon) or CUDA if `final_nms_use_cpu: false` |
+
+So **`nvidia-smi` at ~0% util with ~5 GB resident is expected** when exact CPU NMS runs for seconds after a short ORT CUDA burst — the session lives on GPU, but compute is idle during NMS. The “18 Memcpy nodes” warning is from a few `Atan` angle-wrap nodes (no CUDA `Atan` in opset 17); **GridSample / Conv / ScatterND still run on CUDA**. Those copies are negligible vs NMS.
+
+Wall-clock tips:
+
+- Keep `ORT_DEVICE=cuda` for the ORT core (large win vs CPU ORT alone).
+- Production score floor is applied **before** NMS (parity-safe for greedy NMS) so exact CPU NMS is not O(n²) on every sub-threshold candidate.
+- For max throughput (approximate IoU NMS): set `production.final_nms_use_cpu: false` and re-export / use a bundle with that meta — NMS can run on CUDA via `oriented_nms_gpu`.
+- Use `ORT_DEVICE=cpu` only when debugging or when CUDA EP is unavailable; it will not fix NMS cost.
+
+Optional CUDA knobs:
+
+| Env | Meaning |
+|-----|---------|
+| `ORIENTED_DET_ORT_CUDA_DEVICE_ID` | ORT GPU index (default `0`) |
+| `ORIENTED_DET_ORT_GPU_MEM_LIMIT` | Soft GPU mem cap in bytes for the CUDA EP |
+| `ORIENTED_DET_ORT_CUDNN_CONV_ALGO` | cuDNN algo search (`HEURISTIC` default; `DEFAULT` / `EXHAUSTIVE`) |
+
+Alternative two-GPU layout (manual): run TF with empty visible devices via the above, or set `CUDA_VISIBLE_DEVICES` only if you understand both TF and ORT see the same mask.
 ## 2) Convert to SavedModel (experimental onnx2tf)
 
 For backbone / RetinaNet heads graphs (full Faster R-CNN detect often fails on ScatterND):
@@ -218,6 +248,14 @@ Full detect TFLite is not supported while NMS remains in Python (see [PARITY.md]
 ## Troubleshooting
 
 **ONNX Runtime `Expand` / `invalid expand shape` on val images:** Older exports padded pre-NMS tensors with slice assignment, which ONNX lowers to `Expand` and fails when the dynamic ROI candidate count is not exactly `0`, `1`, or `max_pre_nms_candidates`. Re-export with current `oriented_det` (`pad_pre_nms_detections` uses `torch.cat` zero-padding). Confirm `max_pre_nms_candidates` in `.export_meta.json` matches `production.rpn_post_nms_top_n` (often 6000 on Hub DOTA configs).
+
+**ONNX Runtime OOM on `/roi_align/Expand` (~hundreds of GB):** Oriented R-CNN’s old ONNX ROI path did `feature.expand(N, …)` before `grid_sample`, which ORT materializes as `N×C×H×W` (e.g. 6000×256×256×256 at 1024²). Current `oriented_roi_align` packs ROI grids and keeps feature batch=1. Re-export; `SKIP_ORT=1` is not a fix.
+
+**ONNX Runtime `/roi_align/Reshape_*` size mismatch on real tiles:** Older exports traced proposal padding with `int(shape[0])` control flow. When the zeros dummy already had exactly `max_pre_nms_candidates` RPN keeps, padding was dropped from the graph; real images with fewer keeps then reshaped a size-`P` constant with dynamic `N<P`. Re-export with current `oriented_det` (always `cat([proposals[:k], zeros(k)])[:k]`). Dummy ORT smoke alone is not enough — validate on a non-zero tile.
+
+**ONNX Runtime CUDA OOM on `/roi_align/Transpose_*` (~287 MB) while CPU works:** TensorFlow eagerly claimed all GPUs in the same process before ORT. Use `--ort-device cuda` / `ORT_DEVICE=cuda` with current oriented-det (hides TF GPUs). Confirm logs no longer show TF creating `GPU:0..N` before inference. Fallback: `--ort-device cpu`.
+
+**ORT_DEVICE=cuda but ~0% GPU util / ~same wall time as CPU:** Usually **not** a full-graph CPU fallback. ORT CUDA runs the detect graph in tens of ms; `production.final_nms_use_cpu: true` then spends seconds on exact polygon NMS. Memcpy logs around `Atan` are small host copies — GridSample stays on CUDA. Compare ORT-only vs full bundle timing; current builds pre-filter by `production.score_threshold` before NMS. For approximate fast NMS set `final_nms_use_cpu: false`.
 
 ## Artifacts directory
 

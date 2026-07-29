@@ -170,6 +170,35 @@ def _checkpointable_grid_sample(
     )
 
 
+def _grid_sample_rois_no_feature_expand(
+    feature_map_img: torch.Tensor,
+    grids: torch.Tensor,
+) -> torch.Tensor:
+    """Sample all ROI grids from one feature map without ``Expand`` to N.
+
+    ``grid_sample`` normally wants matching batch dims, so a naive path does
+    ``feature.expand(N, -1, -1, -1)``. That lowers to ONNX ``Expand`` and ORT
+    materializes ``N×C×H×W`` (hundreds of GB at 1024² / 6000 ROIs). Packing ROI
+    grids along H keeps feature batch=1; only the compact sample tensor is large.
+    """
+    _, grid_h, grid_w, _ = grids.shape
+    c = int(feature_map_img.shape[1])
+    # Use -1 so unpack tracks grids' N (must stay consistent with proposal pad).
+    grids_packed = grids.reshape(1, -1, grid_w, 2)
+    sampled_packed = F.grid_sample(
+        feature_map_img,
+        grids_packed,
+        mode="bilinear",
+        padding_mode="zeros",
+        align_corners=False,
+    )
+    return (
+        sampled_packed.reshape(c, -1, grid_h, grid_w)
+        .permute(1, 0, 2, 3)
+        .contiguous()
+    )
+
+
 def oriented_roi_align(
     feature_maps: List[torch.Tensor],
     boxes: torch.Tensor,
@@ -282,6 +311,9 @@ def oriented_roi_align(
 
     if _onnx_export:
         # All-N grid_sample per level with masks (avoids ScatterND from indexed writes).
+        # Do not Expand features to N — ORT would allocate N×C×H×W (see helper).
+        # Masks use reshape(-1,1,1,1) so size comes from the mask tensor itself, not a
+        # separate Shape(proposals) that can disagree with trace-time constants.
         out = torch.zeros(
             (num_boxes, C, grid_h, grid_w), device=device, dtype=dtype
         )
@@ -289,27 +321,25 @@ def oriented_roi_align(
             feature_map = roi_feature_maps[feat_idx]
             _, _, H, W = feature_map.shape
             spatial_scale = spatial_scales[min(feat_idx, len(spatial_scales) - 1)]
-            level_mask = (feature_map_indices == feat_idx).to(dtype=dtype).view(
-                num_boxes, 1, 1, 1
+            level_mask = (feature_map_indices == feat_idx).to(dtype=dtype).reshape(
+                -1, 1, 1, 1
             )
             grids = _create_rotated_grids(
                 boxes, grid_local, spatial_scale, H, W
             )
-            for img_idx in range(B):
-                img_mask = (box_to_image == img_idx).to(dtype=dtype).view(
-                    num_boxes, 1, 1, 1
-                )
-                feature_input = feature_map[img_idx : img_idx + 1].expand(
-                    num_boxes, -1, -1, -1
-                )
-                sampled = F.grid_sample(
-                    feature_input,
-                    grids,
-                    mode="bilinear",
-                    padding_mode="zeros",
-                    align_corners=False,
-                )
-                out = out + sampled * level_mask * img_mask
+            if B == 1:
+                sampled = _grid_sample_rois_no_feature_expand(feature_map[:1], grids)
+                out = out + sampled * level_mask
+            else:
+                for img_idx in range(B):
+                    img_mask = (box_to_image == img_idx).to(dtype=dtype).reshape(
+                        -1, 1, 1, 1
+                    )
+                    sampled = _grid_sample_rois_no_feature_expand(
+                        feature_map[img_idx : img_idx + 1],
+                        grids,
+                    )
+                    out = out + sampled * level_mask * img_mask
         return out
 
     # Pre-allocate output tensor for efficiency
@@ -472,7 +502,7 @@ def horizontal_roi_align(
         for lev in range(num_roi_levels):
             feat = roi_feature_maps[lev]
             scale = 1.0 / float(roi_strides[lev])
-            level_mask = (level_idx == lev).to(dtype=dtype).view(num_boxes, 1, 1, 1)
+            level_mask = (level_idx == lev).to(dtype=dtype).reshape(-1, 1, 1, 1)
             rois = torch.cat([all_rois[:, :1], boxes_xyxy * scale], dim=1)
             sampled = tv_roi_align(
                 feat,

@@ -62,7 +62,7 @@ viewer = [
 ]
 export = [
     "onnx>=1.14.0",
-    "onnxruntime>=1.16.0",
+    "onnxruntime-gpu[cuda,cudnn]>=1.16.0",
     "onnx2tf>=1.22.0",
     "tensorflow>=2.14.0",
 ]

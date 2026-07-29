@@ -27,21 +27,16 @@ def _pad_obb_proposals(
 
     Pad slots use zero-size OBBs ``(0,0,0,0,0)`` so candidates can be dropped with a
     dynamic positive-size check after the ROI head.
+
+    Always ``cat([proposals[:k], zeros(k)])[:k]`` so ONNX keeps a pad path even when
+    the trace-time RPN count already equals ``k`` (zeros dummy). ``int(shape[0])``
+    control flow that skips padding breaks real images with fewer proposals
+    (``/roi_align/Reshape`` size mismatch).
     """
-    device = proposals.device
-    dtype = proposals.dtype
-    n = min(int(proposals.shape[0]), int(max_count))
-    if n > 0:
-        head = proposals[:n]
-    else:
-        head = proposals.new_zeros((0, 5))
-    pad_n = int(max_count) - n
-    if pad_n > 0:
-        pad = torch.zeros((pad_n, 5), dtype=dtype, device=device)
-        padded = torch.cat([head, pad], dim=0)
-    else:
-        padded = head
-    return padded, n
+    k = int(max_count)
+    pad = proposals.new_zeros((k, 5))
+    padded = torch.cat([proposals[:k], pad], dim=0)[:k]
+    return padded, k
 
 
 def _obb_positive_size_mask(boxes: torch.Tensor) -> torch.Tensor:
@@ -62,9 +57,10 @@ def _roi_candidates_from_head(
     if img_proposals.numel() == 0:
         return None
 
-    num_proposals = len(img_proposals)
-    device = img_proposals.device
-    box_to_image_tensor = torch.full((num_proposals,), img_idx, dtype=torch.long, device=device)
+    # Track proposals' dim0 (do not use len() — freezes trace-time size in ONNX).
+    box_to_image_tensor = torch.zeros_like(img_proposals[:, 0], dtype=torch.long)
+    if img_idx != 0:
+        box_to_image_tensor = box_to_image_tensor + int(img_idx)
     roi_features = model.roi_align(
         feature_maps=feature_list,
         boxes=img_proposals,

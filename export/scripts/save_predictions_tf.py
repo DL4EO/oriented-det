@@ -22,7 +22,6 @@ from PIL import Image
 from tqdm import tqdm
 
 from export.ort_runtime import configure_ort_device, get_ort_device
-from export.tf_serving_model import load_keras_detect_model
 from export.val_dataset import collect_split_images
 from oriented_det.data import Detection, GroundTruth
 from oriented_det.geometry import RBox, normalize_le90
@@ -142,7 +141,10 @@ def run_tf_inference_and_save(
     reference_checkpoint: Optional[Path] = None,
     ort_device: Optional[str] = None,
 ) -> Dict[str, Any]:
+    # Configure ORT (and hide TF GPUs) *before* importing tensorflow / keras bundle.
     ort_providers = configure_ort_device(ort_device)
+    from export.tf_serving_model import load_keras_detect_model
+
     config = TrainingExperimentConfig.load(config_path)
     class_names = list(config.class_names or [])
     preprocessing = get_preprocessing_params(config)

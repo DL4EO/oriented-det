@@ -14,7 +14,7 @@ Training JSON / `ModelConfig` does **not** expose `anchor_angles` (horizontal RP
 | **Eval / deploy (Faster)** | `faster_rcnn_inference.faster_rcnn_inference()` | Shared with PyTorch inference and export wrappers. |
 | **ONNX export (Faster)** | Same as eval + `horizontal_roi_align` **masked** branch when `is_in_onnx_export()` | Fixed-shape RoIAlign for traceability; numerically equivalent to eager path (see `tests/test_roi.py::test_horizontal_roi_align_eager_matches_onnx_export_path`). |
 | **Eval (Oriented R-CNN)** | Inline in `OrientedRCNN.forward` (midpoint RPN + `OrientedROIAlign`) | Set `model._deterministic_rpn = True` for export-parity comparisons. |
-| **ONNX export (Oriented)** | `oriented_rcnn_inference_pre_nms_padded` + `oriented_roi_align` **masked** branch | `export/wrappers.OrientedRCNNPreNmsExportWrapper`; same Keras detect bundle as Faster. |
+| **ONNX export (Oriented)** | `oriented_rcnn_inference_pre_nms_padded` + `oriented_roi_align` **masked** branch | Packed `grid_sample` (no feature `Expand`); always-on proposal `cat` pad; same Keras detect bundle as Faster. |
 
 Regression guards: `tests/test_roi.py` (eager vs export RoIAlign), `tests/test_models.py::TestRotatedFasterRCNN::test_full_training_forward_and_backward`, `export/tests/test_faster_rcnn_export_parity.py`, `export/tests/test_oriented_rcnn_export_parity.py`.
 
