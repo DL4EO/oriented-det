@@ -106,6 +106,9 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     assert call_kw["scales_per_octave"] == 3
     assert call_kw["stacked_convs"] == 4
     assert call_kw["box_reg_loss_type"] == "l1"
+    assert call_kw["box_reg_main_loss_type"] == "probiou"
+    assert call_kw["box_reg_encoded_aux_weight"] == pytest.approx(0.15)
+    assert call_kw["reg_sample_size_per_image"] == 512
     assert call_kw["box_reg_weight"] == pytest.approx(0.9)
     assert call_kw["score_threshold"] == pytest.approx(0.13)
     assert call_kw["final_nms_iou_threshold"] == pytest.approx(0.31)

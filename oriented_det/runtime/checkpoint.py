@@ -343,6 +343,15 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             box_reg_iou_loss_type=getattr(m, "roi_box_reg_iou_loss_type", "riou") if m else "riou",
             box_reg_kfiou_fun=getattr(m, "roi_box_reg_kfiou_fun", None) if m else None,
             box_reg_probiou_mode=getattr(m, "roi_box_reg_probiou_mode", None) if m else None,
+            box_reg_main_loss_type=getattr(
+                m, "roi_box_reg_main_loss_type", "smooth_l1"
+            ) if m else "smooth_l1",
+            box_reg_encoded_aux_weight=getattr(
+                m, "roi_box_reg_smooth_l1_aux_weight", 0.0
+            ) if m else 0.0,
+            reg_sample_size_per_image=getattr(
+                m, "roi_batch_size_per_image", 512
+            ) if m else 512,
             use_hbb_for_matching=getattr(m, "use_hbb_for_matching", False) if m else False,
             score_threshold=model_kwargs.get('inference_pre_nms_score_threshold', 0.05),
             final_nms_iou_threshold=m.final_nms_iou_threshold if m else 0.5,

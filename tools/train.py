@@ -744,6 +744,15 @@ def create_model_from_config(
             box_reg_iou_loss_type=getattr(config.model, "roi_box_reg_iou_loss_type", "riou"),
             box_reg_kfiou_fun=getattr(config.model, "roi_box_reg_kfiou_fun", None),
             box_reg_probiou_mode=getattr(config.model, "roi_box_reg_probiou_mode", None),
+            box_reg_main_loss_type=getattr(
+                config.model, "roi_box_reg_main_loss_type", "smooth_l1"
+            ),
+            box_reg_encoded_aux_weight=getattr(
+                config.model, "roi_box_reg_smooth_l1_aux_weight", 0.0
+            ),
+            reg_sample_size_per_image=getattr(
+                config.model, "roi_batch_size_per_image", 512
+            ),
             use_hbb_for_matching=config.model.use_hbb_for_matching,
             score_threshold=inference_pre_nms_score_threshold,
             final_nms_iou_threshold=config.model.final_nms_iou_threshold,

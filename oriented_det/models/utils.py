@@ -200,6 +200,28 @@ def setup_backbone(
 # Feature Extraction Utility
 # ============================================================================
 
+def _ordered_fpn_feature_keys(keys: Sequence[str]) -> List[str]:
+    """Stable FPN dict key order: numeric levels, fpn* keys, pN extras, then pool."""
+    key_list = list(keys)
+    numeric = sorted((k for k in key_list if k.isdigit()), key=int)
+    fpn_named = sorted(k for k in key_list if k.startswith("fpn"))
+    p_levels = sorted(
+        (k for k in key_list if len(k) > 1 and k[0] == "p" and k[1:].isdigit()),
+        key=lambda k: int(k[1:]),
+    )
+    ordered = numeric + fpn_named + p_levels
+    if "pool" in key_list:
+        ordered.append("pool")
+    return ordered
+
+
+def _is_fpn_feature_key(key: str) -> bool:
+    """True for torchvision FPN outputs we should feed to detection heads."""
+    if key.isdigit() or key.startswith("fpn"):
+        return True
+    return len(key) > 1 and key[0] == "p" and key[1:].isdigit()
+
+
 def extract_backbone_features(
     backbone: nn.Module,
     images: Sequence[torch.Tensor],
@@ -248,17 +270,16 @@ def extract_backbone_features(
     
     # Convert OrderedDict/dict to list (FPN outputs)
     if isinstance(features, dict):
-        # FPN returns OrderedDict with keys like "0", "1", "2", etc.
-        # or sometimes "fpn0", "fpn1", etc.
+        # FPN returns OrderedDict with keys like "0", "1", "2", "p6", "p7", or "pool".
         feature_list = []
-        for key in sorted(features.keys()):
-            if key.isdigit() or key.startswith("fpn"):
+        for key in _ordered_fpn_feature_keys(features.keys()):
+            if key == "pool":
+                if include_pool_level:
+                    feature_list.append(features[key])
+                continue
+            if _is_fpn_feature_key(key):
                 feature_list.append(features[key])
-        # torchvision's LastLevelMaxPool level (key "pool") is the coarsest level;
-        # keep it last when requested (RetinaNet P6).
-        if include_pool_level and "pool" in features:
-            feature_list.append(features["pool"])
-        # If no numeric keys, just use all values
+        # If no recognized keys, just use all values
         if not feature_list:
             feature_list = list(features.values())
     else:

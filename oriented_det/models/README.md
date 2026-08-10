@@ -41,6 +41,8 @@ Encoded Smooth L1 (main or aux) applies **directly to all five encoded channels*
 
 **Oriented R-CNN** uses `compute_oriented_roi_loss` with the same encoded Smooth L1 and MMDet `avg_factor` normalization (`roi_box_reg_norm: sampled_all` by default).
 
+**Rotated RetinaNet** uses `compute_oriented_retinanet_loss`. Set `roi_box_reg_main_loss_type: probiou` (or `riou` / `kfiou`) for a decoded primary loss; add encoded L1/Smooth L1 aux via `roi_box_reg_smooth_l1_aux_weight` (type from `box_reg_loss_type`, default `l1` in DOTA recipes). Decoded regression randomly subsamples at most `roi_batch_size_per_image` (default **512**) **positive anchors per image across all FPN levels** (not per level). `loss_box_reg` normalizes by the number of sampled positives used in regression. Classification still uses every matched anchor. When main is `smooth_l1` (default), optional decoded aux uses `roi_box_reg_iou_weight`.
+
 ### `roi_inference_top_class_only` (two-stage models)
 
 `RotatedFasterRCNN` and `OrientedRCNN` use **`model.roi_inference_top_class_only`** only in **eval / inference** (after the ROI head), not during training loss:

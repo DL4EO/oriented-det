@@ -21,6 +21,12 @@ Hub **`eval_map50`** in the manifest is from **`odet preds`** on val tiles (see 
 python tools/train.py --config configs/rotated_retinanet/dota_le90_1x.json
 ```
 
+### ProbIoU as primary (tried; not a Hub recipe)
+
+We ran a **1× ProbIoU primary** ablation (decoded ProbIoU + encoded L1 aux **0.1**, same loss stack pattern as Rotated Faster R-CNN 1×). In-training mAP was essentially tied with L1 (~63% vs L1 eval-val **64.14%**) with large vehicle-class regressions — **not published**. The code path remains (`roi_box_reg_main_loss_type: probiou`); there is no checked-in recipe config. Prefer the L1 1×/3× Hub recipes above.
+
+**FPN P6/P7:** With `fpn_extra_level: true`, torchvision emits FPN keys `p6`/`p7`. Earlier releases dropped those keys in `extract_backbone_features`, training on 3 levels only and logging a stride mismatch warning — restart after updating to pick up all 5 levels (strides 8–128).
+
 ### 3× from ImageNet
 
 ```bash

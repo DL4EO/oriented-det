@@ -23,12 +23,18 @@ High-level plan for Oriented-Det after **v0.1** (geometry, IoU/NMS, DOTA, three 
 | **Accuracy** | Oriented R-CNN, Rotated Faster R-CNN (probiou) — ResNet50 and Swin-T |
 | **Balanced** | Rotated FCOS |
 | **Speed** | RTMDet-R, native Rotated YOLO-OBB |
+| **Legacy** | Rotated RetinaNet (L1; MMRotate parity) |
 | **Datasets** | DOTA, HRSC2016, FAIR1M |
+
+## Closed ablations (not Hub)
+
+- **RetinaNet ProbIoU 1×** — no zoo-worthy gain vs L1 (~63% vs 64% eval-val); keep L1 RetinaNet only
+- Extra FRCNN angle / rIoU-aux recipes — did not beat the published ProbIoU 1.0 / 0.1 recipe
 
 ## Ongoing
 
 - Hosted MkDocs site and dataset tutorials
-- Optional **fused CUDA** rotated IoU/NMS kernels (after single-stage models land)
+- Optional GPU / fused CUDA rotated IoU/NMS **after** single-stage models land (profiling-driven; not a v0.2 blocker)
 - Export parity for new detectors (ONNX head wrappers + postprocess)
 
 ## Out of scope (for now)
@@ -36,5 +42,6 @@ High-level plan for Oriented-Det after **v0.1** (geometry, IoU/NMS, DOTA, three 
 - Ultralytics wrapper or AGPL dependencies
 - End-to-end DETR-style detectors in core `odet train`
 - MMCV / MMDet as runtime dependencies
+- RetinaNet ProbIoU Hub weights; FRCNN angle-fine-tune Hub twin without a clear eval-val win
 
 See [Contributing](contributing.md) for areas where help is welcome.

@@ -24,6 +24,7 @@ except Exception:  # pragma: no cover
 from ..geometry import RBox
 from ..ops import nms
 from ..ops.kfiou import mean_auxiliary_box_reg_loss
+from .oriented_roi import _normalize_main_reg_loss_type
 from ..ops.rotated_ops import rotated_nms
 from .oriented_rpn import (
     generate_oriented_anchors,
@@ -139,6 +140,104 @@ def sigmoid_focal_loss_sum(
     return loss.sum()
 
 
+def _retinanet_encoded_reg_loss_sum(
+    bbox_pred: torch.Tensor,
+    regression_targets: torch.Tensor,
+    box_reg_loss_type: str,
+) -> torch.Tensor:
+    """Sum of per-element encoded regression loss (L1 or Smooth L1)."""
+    if box_reg_loss_type == "l1":
+        return F.l1_loss(bbox_pred, regression_targets, reduction="none").sum()
+    return F.smooth_l1_loss(
+        bbox_pred,
+        regression_targets,
+        beta=1.0 / 9.0,
+        reduction="none",
+    ).sum()
+
+
+def _sample_positive_indices(
+    num_pos: int,
+    max_positives: Optional[int],
+    device: torch.device,
+) -> torch.Tensor:
+    """Return indices of positive anchors to use for regression (global per-image cap)."""
+    if num_pos <= 0:
+        return torch.zeros((0,), dtype=torch.int64, device=device)
+    if max_positives is None or max_positives <= 0 or num_pos <= max_positives:
+        return torch.arange(num_pos, device=device, dtype=torch.int64)
+    perm = torch.randperm(num_pos, device=device)[:max_positives]
+    return perm.sort().values
+
+
+def _compute_retinanet_reg_loss_from_positives(
+    bbox_pred: torch.Tensor,
+    anchors: torch.Tensor,
+    regression_targets: torch.Tensor,
+    matched_gt: torch.Tensor,
+    *,
+    main_loss_type: str,
+    box_reg_loss_type: str,
+    box_reg_iou_weight: float,
+    box_reg_iou_loss_type: str,
+    box_reg_kfiou_fun: Optional[str],
+    box_reg_probiou_mode: Optional[str],
+    encoded_aux_weight: float,
+    target_means: Optional[Tuple[float, float, float, float, float]],
+    target_stds: Optional[Tuple[float, float, float, float, float]],
+    norm_factor: Optional[float],
+    edge_swap: bool,
+) -> torch.Tensor:
+    """Regression loss on a positive anchor set (already matched to GT)."""
+    main_lt = _normalize_main_reg_loss_type(main_loss_type)
+    encoded_loss = _retinanet_encoded_reg_loss_sum(
+        bbox_pred,
+        regression_targets,
+        box_reg_loss_type,
+    )
+    if main_lt == "smooth_l1":
+        reg_loss = encoded_loss
+        if box_reg_iou_weight > 0.0:
+            decoded_boxes = decode_oriented_boxes(
+                anchors,
+                bbox_pred,
+                target_means=target_means,
+                target_stds=target_stds,
+                normalize_le90=True,
+                norm_factor=norm_factor,
+                edge_swap=edge_swap,
+            )
+            loss_iou = mean_auxiliary_box_reg_loss(
+                decoded_boxes,
+                matched_gt,
+                loss_type=box_reg_iou_loss_type,
+                kfiou_fun=box_reg_kfiou_fun,
+                probiou_mode=box_reg_probiou_mode,
+            )
+            reg_loss = reg_loss + (box_reg_iou_weight * loss_iou)
+        return reg_loss
+
+    decoded_boxes = decode_oriented_boxes(
+        anchors,
+        bbox_pred,
+        target_means=target_means,
+        target_stds=target_stds,
+        normalize_le90=True,
+        norm_factor=norm_factor,
+        edge_swap=edge_swap,
+    )
+    reg_loss = mean_auxiliary_box_reg_loss(
+        decoded_boxes,
+        matched_gt,
+        loss_type=main_lt,
+        kfiou_fun=box_reg_kfiou_fun,
+        probiou_mode=box_reg_probiou_mode,
+    )
+    if encoded_aux_weight > 0.0:
+        reg_loss = reg_loss + (encoded_aux_weight * encoded_loss)
+    return reg_loss
+
+
 def compute_oriented_retinanet_loss(
     classification_logits: List[torch.Tensor],
     bbox_regression: List[torch.Tensor],
@@ -164,6 +263,9 @@ def compute_oriented_retinanet_loss(
     box_reg_probiou_mode: Optional[str] = None,
     use_hbb_for_matching: bool = False,
     box_reg_loss_type: str = "smooth_l1",
+    main_loss_type: str = "smooth_l1",
+    encoded_aux_weight: float = 0.0,
+    reg_sample_size_per_image: Optional[int] = None,
 ) -> Dict[str, torch.Tensor]:
     """Compute Rotated RetinaNet losses for oriented object detection.
     
@@ -194,6 +296,12 @@ def compute_oriented_retinanet_loss(
         box_reg_probiou_mode: ``l1`` (default) or ``l2`` when using ``probiou``.
         use_hbb_for_matching: If True, use HBB (axis-aligned) IoU for anchor-GT matching (recommended for single angle).
         box_reg_loss_type: ``smooth_l1`` (default) or ``l1`` (MMRotate RetinaNet).
+        main_loss_type: ``smooth_l1`` (encoded primary via ``box_reg_loss_type``) or decoded
+            ``probiou`` / ``riou`` / ``kfiou``.
+        encoded_aux_weight: Weight for encoded L1/Smooth L1 aux when ``main_loss_type`` is decoded.
+        reg_sample_size_per_image: Cap positive anchors **per image across all FPN levels** for
+            decoded ProbIoU/rIoU/KFIoU (and encoded aux when main is decoded). ``None`` or ``<= 0``
+            uses all positives. Classification still uses every matched anchor.
     
     Returns:
         Dictionary with loss values:
@@ -207,6 +315,17 @@ def compute_oriented_retinanet_loss(
     device = classification_logits[0].device if classification_logits else torch.device('cpu')
     num_images = len(gt_boxes)
     num_levels = len(classification_logits)
+    main_lt = _normalize_main_reg_loss_type(main_loss_type)
+    need_decoded = main_lt != "smooth_l1" or box_reg_iou_weight > 0.0
+    use_global_reg_sampling = (
+        need_decoded
+        and reg_sample_size_per_image is not None
+        and reg_sample_size_per_image > 0
+    )
+    defer_reg_to_global = use_global_reg_sampling and main_lt != "smooth_l1"
+    defer_decoded_only = (
+        use_global_reg_sampling and main_lt == "smooth_l1" and box_reg_iou_weight > 0.0
+    )
     
     # Process each level independently (memory-efficient approach).
     # Classification follows MMDet/MMRotate: sum of sigmoid focal loss over all levels/images,
@@ -214,6 +333,16 @@ def compute_oriented_retinanet_loss(
     cls_loss_sums = []
     num_pos_total = 0
     reg_loss_sums: List[torch.Tensor] = []
+    reg_loss_decoded_addends: List[torch.Tensor] = []
+    num_reg_pos_total = 0
+    reg_positive_bufs: List[Dict[str, List[torch.Tensor]]] = [
+        {"bbox_pred": [], "anchors": [], "reg_targets": [], "matched_gt": []}
+        for _ in range(num_images)
+    ]
+    decoded_positive_bufs: List[Dict[str, List[torch.Tensor]]] = [
+        {"bbox_pred": [], "anchors": [], "matched_gt": []}
+        for _ in range(num_images)
+    ]
     
     for level_idx in range(num_levels):
         # Get shapes for this level
@@ -352,47 +481,120 @@ def compute_oriented_retinanet_loss(
                 )
             num_pos_total += int((labels == 1).sum())
             
-            # Compute regression loss on positive anchors (encoded space, MMDet avg_factor)
             positive_mask = labels == 1
-            if positive_mask.any():
-                positive_bbox_pred = img_bbox_pred[positive_mask]
-                positive_regression_targets = regression_targets[positive_mask]
-                if box_reg_loss_type == "l1":
-                    reg_elem = F.l1_loss(
-                        positive_bbox_pred,
-                        positive_regression_targets,
-                        reduction="none",
-                    )
-                else:
-                    reg_elem = F.smooth_l1_loss(
-                        positive_bbox_pred,
-                        positive_regression_targets,
-                        beta=1.0 / 9.0,
-                        reduction="none",
-                    )
-                reg_loss = reg_elem.sum()
-                if box_reg_iou_weight > 0.0:
-                    matched_gt = img_gt_boxes[matched_indices[positive_mask]]
-                    decoded_boxes = decode_oriented_boxes(
-                        img_anchors[positive_mask],
-                        positive_bbox_pred,
-                        target_means=target_means,
-                        target_stds=target_stds,
-                        normalize_le90=True,
-                        norm_factor=norm_factor,
-                        edge_swap=edge_swap,
-                    )
-                    loss_iou = mean_auxiliary_box_reg_loss(
-                        decoded_boxes,
-                        matched_gt,
-                        loss_type=box_reg_iou_loss_type,
-                        kfiou_fun=box_reg_kfiou_fun,
-                        probiou_mode=box_reg_probiou_mode,
-                    )
-                    reg_loss = reg_loss + (box_reg_iou_weight * loss_iou)
-                reg_loss_sums.append(reg_loss * box_reg_weight)
+            if not positive_mask.any():
+                continue
+
+            if defer_reg_to_global:
+                pos_idx = positive_mask.nonzero(as_tuple=True)[0]
+                buf = reg_positive_bufs[img_idx]
+                buf["bbox_pred"].append(img_bbox_pred[pos_idx])
+                buf["anchors"].append(img_anchors[pos_idx])
+                buf["reg_targets"].append(regression_targets[pos_idx])
+                buf["matched_gt"].append(img_gt_boxes[matched_indices[pos_idx]])
+                continue
+
+            if defer_decoded_only:
+                pos_idx = positive_mask.nonzero(as_tuple=True)[0]
+                encoded_loss = _retinanet_encoded_reg_loss_sum(
+                    img_bbox_pred[pos_idx],
+                    regression_targets[pos_idx],
+                    box_reg_loss_type,
+                )
+                reg_loss_sums.append(encoded_loss * box_reg_weight)
+                num_reg_pos_total += int(pos_idx.numel())
+                dec_buf = decoded_positive_bufs[img_idx]
+                dec_buf["bbox_pred"].append(img_bbox_pred[pos_idx])
+                dec_buf["anchors"].append(img_anchors[pos_idx])
+                dec_buf["matched_gt"].append(img_gt_boxes[matched_indices[pos_idx]])
+                continue
+
+            reg_loss = _compute_retinanet_reg_loss_from_positives(
+                img_bbox_pred[positive_mask],
+                img_anchors[positive_mask],
+                regression_targets[positive_mask],
+                img_gt_boxes[matched_indices[positive_mask]],
+                main_loss_type=main_loss_type,
+                box_reg_loss_type=box_reg_loss_type,
+                box_reg_iou_weight=box_reg_iou_weight,
+                box_reg_iou_loss_type=box_reg_iou_loss_type,
+                box_reg_kfiou_fun=box_reg_kfiou_fun,
+                box_reg_probiou_mode=box_reg_probiou_mode,
+                encoded_aux_weight=encoded_aux_weight,
+                target_means=target_means,
+                target_stds=target_stds,
+                norm_factor=norm_factor,
+                edge_swap=edge_swap,
+            )
+            reg_loss_sums.append(reg_loss * box_reg_weight)
+            num_reg_pos_total += int(positive_mask.sum().item())
         
         # Accumulate losses for this level (classification only; reg summed globally below)
+    if defer_reg_to_global:
+        for img_idx in range(num_images):
+            buf = reg_positive_bufs[img_idx]
+            if not buf["bbox_pred"]:
+                continue
+            bbox_pred = torch.cat(buf["bbox_pred"], dim=0)
+            anchors_pos = torch.cat(buf["anchors"], dim=0)
+            reg_targets = torch.cat(buf["reg_targets"], dim=0)
+            matched_gt = torch.cat(buf["matched_gt"], dim=0)
+            sample_idx = _sample_positive_indices(
+                bbox_pred.shape[0],
+                reg_sample_size_per_image,
+                device,
+            )
+            reg_loss = _compute_retinanet_reg_loss_from_positives(
+                bbox_pred[sample_idx],
+                anchors_pos[sample_idx],
+                reg_targets[sample_idx],
+                matched_gt[sample_idx],
+                main_loss_type=main_loss_type,
+                box_reg_loss_type=box_reg_loss_type,
+                box_reg_iou_weight=box_reg_iou_weight,
+                box_reg_iou_loss_type=box_reg_iou_loss_type,
+                box_reg_kfiou_fun=box_reg_kfiou_fun,
+                box_reg_probiou_mode=box_reg_probiou_mode,
+                encoded_aux_weight=encoded_aux_weight,
+                target_means=target_means,
+                target_stds=target_stds,
+                norm_factor=norm_factor,
+                edge_swap=edge_swap,
+            )
+            reg_loss_sums.append(reg_loss * box_reg_weight)
+            num_reg_pos_total += int(sample_idx.numel())
+
+    if defer_decoded_only:
+        for img_idx in range(num_images):
+            dec_buf = decoded_positive_bufs[img_idx]
+            if not dec_buf["bbox_pred"]:
+                continue
+            bbox_pred = torch.cat(dec_buf["bbox_pred"], dim=0)
+            anchors_pos = torch.cat(dec_buf["anchors"], dim=0)
+            matched_gt = torch.cat(dec_buf["matched_gt"], dim=0)
+            sample_idx = _sample_positive_indices(
+                bbox_pred.shape[0],
+                reg_sample_size_per_image,
+                device,
+            )
+            decoded_boxes = decode_oriented_boxes(
+                anchors_pos[sample_idx],
+                bbox_pred[sample_idx],
+                target_means=target_means,
+                target_stds=target_stds,
+                normalize_le90=True,
+                norm_factor=norm_factor,
+                edge_swap=edge_swap,
+            )
+            loss_iou = mean_auxiliary_box_reg_loss(
+                decoded_boxes,
+                matched_gt[sample_idx],
+                loss_type=box_reg_iou_loss_type,
+                kfiou_fun=box_reg_kfiou_fun,
+                probiou_mode=box_reg_probiou_mode,
+            )
+            reg_loss_decoded_addends.append(box_reg_iou_weight * loss_iou * box_reg_weight)
+
     # Aggregate losses across all levels.
     # Classification: total focal sum / num positive anchors (MMDet avg_factor, clamped to >= 1).
     if cls_loss_sums:
@@ -407,7 +609,10 @@ def compute_oriented_retinanet_loss(
             loss_classification = torch.tensor(0.0, device=device, requires_grad=True)
     
     if reg_loss_sums:
-        loss_box_reg = torch.stack(reg_loss_sums).sum() / max(num_pos_total, 1)
+        reg_denominator = num_reg_pos_total if num_reg_pos_total > 0 else num_pos_total
+        loss_box_reg = torch.stack(reg_loss_sums).sum() / max(reg_denominator, 1)
+        if reg_loss_decoded_addends:
+            loss_box_reg = loss_box_reg + torch.stack(reg_loss_decoded_addends).sum()
     else:
         # Maintain gradient flow: compute zero loss from model outputs
         # Use first level's bbox regression to maintain connection
@@ -508,6 +713,9 @@ class RotatedRetinaNet(nn.Module):
         scales_per_octave: Optional[int] = None,
         stacked_convs: int = 1,
         box_reg_loss_type: str = "smooth_l1",
+        box_reg_main_loss_type: str = "smooth_l1",
+        box_reg_encoded_aux_weight: float = 0.0,
+        reg_sample_size_per_image: Optional[int] = None,
     ) -> None:
         from .backbones.utils import require_torch
         require_torch()
@@ -526,6 +734,9 @@ class RotatedRetinaNet(nn.Module):
         self.octave_base_scale = octave_base_scale
         self.scales_per_octave = scales_per_octave
         self.box_reg_loss_type = box_reg_loss_type
+        self.box_reg_main_loss_type = box_reg_main_loss_type
+        self.box_reg_encoded_aux_weight = float(box_reg_encoded_aux_weight)
+        self.reg_sample_size_per_image = reg_sample_size_per_image
         
         # Setup backbone (P6/P7 convs on C5 when fpn_extra_level, MMRotate on_input)
         self.backbone, backbone_channels = setup_backbone(
@@ -706,6 +917,9 @@ class RotatedRetinaNet(nn.Module):
                 box_reg_probiou_mode=self.box_reg_probiou_mode,
                 use_hbb_for_matching=self.use_hbb_for_matching,
                 box_reg_loss_type=self.box_reg_loss_type,
+                main_loss_type=self.box_reg_main_loss_type,
+                encoded_aux_weight=self.box_reg_encoded_aux_weight,
+                reg_sample_size_per_image=self.reg_sample_size_per_image,
             )
             
             return losses

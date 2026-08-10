@@ -40,7 +40,7 @@ https://dl4eo.github.io/oriented-det/
 ## Structure
 
 - **docs/** — Source Markdown (this folder)
-- **roadmap.md** — Public release plan (v0.2–v1.0)
+- **roadmap.md** — Public release plan (next: v0.2 FCOS; v0.1.1 ProbIoU FRCNN shipped)
 - **user-guide/configuration.md** — Canonical JSON training config reference
 - **eval-reports/** — Published eval-val reports per Hub slug (markdown + analysis JSON); see [eval-reports/README.md](eval-reports/README.md). Raw `predictions.json` lives in gitignored `predictions/`.
 - **code-analysis-report.md** — Deep code/doc analysis (2026-06-15): inventory, validation, findings

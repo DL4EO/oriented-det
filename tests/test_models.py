@@ -569,6 +569,101 @@ class TestRotatedRetinaNet:
         assert model_custom.num_anchors == 6
         assert len(model_custom.anchor_angles) == 2
     
+    def test_rotated_retinanet_probiou_main_with_encoded_aux_backward(self):
+        """ProbIoU primary + encoded L1 aux should backprop through bbox head."""
+        model = RotatedRetinaNet(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            box_reg_main_loss_type="probiou",
+            box_reg_probiou_mode="l1",
+            box_reg_encoded_aux_weight=0.1,
+            box_reg_loss_type="l1",
+            reg_sample_size_per_image=512,
+        )
+        image = torch.rand(3, 128, 128)
+        target = {
+            "rboxes": [RBox(64, 64, 32, 16, 0.2)],
+            "labels": torch.tensor([1], dtype=torch.int64),
+        }
+        model.train()
+        losses = model([image], [target])
+        assert losses["loss_box_reg"].requires_grad
+        losses["loss_box_reg"].backward()
+
+    def test_retinanet_global_reg_sampling_caps_per_image(self):
+        """Decoded reg loss should sample positives once per image across FPN levels."""
+        from unittest.mock import patch
+        from oriented_det.models.rotated_retinanet import compute_oriented_retinanet_loss
+
+        device = torch.device("cpu")
+        num_classes = 2
+        num_anchors = 3
+        gt_boxes = [torch.tensor([[64.0, 64.0, 32.0, 16.0, 0.0]], device=device)]
+        gt_labels = [torch.tensor([1], device=device, dtype=torch.int64)]
+        image_sizes = [(128, 128)]
+
+        cls_logits = []
+        bbox_regs = []
+        anchor_levels = []
+        for stride, size in [(8, 16), (16, 8)]:
+            h = w = size
+            cls_logits.append(
+                torch.randn(1, num_anchors * num_classes, h, w, device=device, requires_grad=True)
+            )
+            bbox_regs.append(
+                torch.randn(1, num_anchors * 5, h, w, device=device, requires_grad=True)
+            )
+            yy, xx = torch.meshgrid(
+                torch.arange(h, device=device, dtype=torch.float32),
+                torch.arange(w, device=device, dtype=torch.float32),
+                indexing="ij",
+            )
+            cx = (xx + 0.5) * stride
+            cy = (yy + 0.5) * stride
+            grid_cx = cx.reshape(-1)
+            grid_cy = cy.reshape(-1)
+            n_loc = grid_cx.numel()
+            anchors = torch.stack(
+                [
+                    grid_cx.repeat(num_anchors),
+                    grid_cy.repeat(num_anchors),
+                    torch.full((n_loc * num_anchors,), 32.0, device=device),
+                    torch.full((n_loc * num_anchors,), 16.0, device=device),
+                    torch.zeros(n_loc * num_anchors, device=device),
+                ],
+                dim=1,
+            )
+            anchor_levels.append(anchors)
+
+        seen_sizes = []
+
+        def _capture_reg_loss(bbox_pred, anchors, regression_targets, matched_gt, **kwargs):
+            seen_sizes.append(int(bbox_pred.shape[0]))
+            return bbox_pred.sum() * 0.0 + 1.0
+
+        with patch(
+            "oriented_det.models.rotated_retinanet._compute_retinanet_reg_loss_from_positives",
+            side_effect=_capture_reg_loss,
+        ):
+            losses = compute_oriented_retinanet_loss(
+                classification_logits=cls_logits,
+                bbox_regression=bbox_regs,
+                anchors=anchor_levels,
+                gt_boxes=gt_boxes,
+                gt_labels=gt_labels,
+                image_sizes=image_sizes,
+                num_classes=num_classes,
+                main_loss_type="probiou",
+                box_reg_loss_type="l1",
+                encoded_aux_weight=0.1,
+                reg_sample_size_per_image=512,
+            )
+
+        assert len(seen_sizes) == 1
+        assert seen_sizes[0] <= 512
+        assert losses["loss_box_reg"].requires_grad
+
     def test_rotated_retinanet_loss_computation(self):
         """Test that RotatedRetinaNet computes losses correctly."""
         model = RotatedRetinaNet(
@@ -751,6 +846,26 @@ class TestRotatedFasterRCNN:
 def test_derive_fpn_strides_from_grid():
     assert derive_fpn_strides_from_grid((512, 512), [(128, 128), (64, 64), (32, 32)]) == [4, 8, 16]
     assert derive_fpn_strides_from_grid((800, 800), [(200, 200), (100, 100)]) == [4, 8]
+    assert derive_fpn_strides_from_grid(
+        (1024, 1024),
+        [(128, 128), (64, 64), (32, 32), (16, 16), (8, 8)],
+    ) == [8, 16, 32, 64, 128]
+
+
+def test_extract_backbone_features_includes_p6_p7():
+    from oriented_det.models.backbones.resnet_fpn import build_resnet_fpn_backbone
+    from oriented_det.models.utils import extract_backbone_features
+
+    bb = build_resnet_fpn_backbone(
+        "resnet50",
+        pretrained=False,
+        returned_layers=[2, 3, 4],
+        use_p6p7_extra_levels=True,
+    )
+    x = torch.rand(3, 1024, 1024)
+    feats = extract_backbone_features(bb, [x], include_pool_level=False)
+    assert len(feats) == 5
+    assert [f.shape[-2:] for f in feats] == [(128, 128), (64, 64), (32, 32), (16, 16), (8, 8)]
 
 
 def test_derive_fpn_strides_from_grid_anisotropic_raises():
