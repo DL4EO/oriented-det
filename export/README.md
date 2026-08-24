@@ -2,6 +2,8 @@
 
 This folder contains **PyTorch → ONNX → Keras detect bundle** tooling. The Faster R-CNN path wraps ONNX Runtime + Python rotated NMS inside a Keras model (`keras_model.keras`). It does **not** reimplement training or oriented NMS as a pure TensorFlow graph.
 
+Optional **`--saved-model`** export builds a TensorFlow SavedModel (`tf.saved_model.load`, no oriented-det at inference) by converting the pre-NMS ONNX with **onnx2tf** and running rotated NMS in TF ops. That conversion can fail (ScatterND); the Keras bundle remains the supported full-detect path.
+
 Optional **onnx2tf** conversion (experimental SavedModel / TFLite) is documented below for backbone / RetinaNet heads only.
 
 ## Layout
@@ -15,6 +17,8 @@ Optional **onnx2tf** conversion (experimental SavedModel / TFLite) is documented
 | [wrappers.py](wrappers.py) | `nn.Module` wrappers that expose tensor-only forwards for ONNX. |
 | [postprocess.py](postprocess.py) | Exact rotated NMS + production score filter for the detect bundle. |
 | [tf_serving_model.py](tf_serving_model.py) | Keras `FasterRCNNDetectLayer` (ORT core + NMS). |
+| [tf_nms.py](tf_nms.py) | Pure-TF rotated NMS for SavedModel export. |
+| [tf_savedmodel.py](tf_savedmodel.py) | Compose onnx2tf core + TF NMS → SavedModel. |
 | [Makefile](Makefile) | Thin in-repo wrappers around `odet` (`make export-tf`, …). Not required for pip installs. |
 | [scripts/export_tf.py](scripts/export_tf.py) | `odet export-tf` orchestrator (ONNX + detect bundle → `./odet_export`). |
 | [scripts/save_predictions_tf.py](scripts/save_predictions_tf.py) | Val inference via Keras bundle → `./odet_export/predictions/<ts>/`. |
@@ -36,7 +40,7 @@ odet export-tf \
 # Rotated FCOS:    add --mode rotated_fcos_pre_nms
 ```
 
-No source checkout or `make` required. Artifacts land under `./odet_export/` (`pre_nms.onnx`, `detect/keras_model.keras`, `detect/model.onnx`).
+No source checkout or `make` required. Artifacts land under `./odet_export/` (`pre_nms.onnx`, `detect/keras_model.keras`, `detect/model.onnx`). Add `--saved-model` to also write `./odet_export/saved_model/` when onnx2tf succeeds.
 
 **Editable checkout:**
 
@@ -108,6 +112,32 @@ The ONNX file is copied into the detect bundle as `model.onnx` (relocatable; loa
 from export.tf_serving_model import load_keras_detect_model
 model = load_keras_detect_model("./odet_export/detect")
 ```
+
+**SavedModel** (vanilla TensorFlow at inference — no oriented-det, ORT, or PyTorch):
+
+```bash
+odet export-tf \
+  --config configs/oriented_rcnn/dota_le90_1x.json \
+  --checkpoint path/to/model.pth \
+  --output-dir ./odet_export \
+  --mode oriented_rcnn_pre_nms \
+  --saved-model
+# or, from an existing ONNX + meta:
+odet export-savedmodel \
+  --meta ./odet_export/pre_nms.export_meta.json \
+  --onnx ./odet_export/pre_nms.onnx \
+  --output ./odet_export/saved_model
+```
+
+```python
+import tensorflow as tf
+
+sm = tf.saved_model.load("./odet_export/saved_model")
+out = sm.serve(images)  # images: float32 NCHW RGB in [0, 1], shape [1, 3, H, W]
+detections, num = out["detections"], out["num_detections"]
+```
+
+No oriented-det (or ONNX Runtime / PyTorch) is required at load time. `export.tf_savedmodel.call_saved_model` is an optional helper if signature names differ. onnx2tf must lower the pre-NMS ONNX; if conversion fails, use the Keras detect bundle.
 
 In a git checkout, Makefile targets wrap the same `odet` commands:
 
@@ -266,6 +296,7 @@ Full detect TFLite is not supported while NMS remains in Python (see [PARITY.md]
 - **Fixed H, W** at export unless you pass `--dynamic-batch` (batch axis only; **not** allowed for `faster_rcnn_pre_nms` / `oriented_rcnn_pre_nms` / `rotated_fcos_pre_nms`).
 - **NMS:** not in ONNX; applied in the Keras detect bundle — see [PARITY.md](PARITY.md).
 - **Detect bundle files:** `keras_model.keras`, `model.onnx`, `export_meta.json`.
+- **SavedModel (optional `--saved-model`):** `saved_model.pb` + variables; load with `tf.saved_model.load`. NMS is TF polygon clipping (small float drift vs PyTorch CPU NMS).
 
 ## Troubleshooting
 

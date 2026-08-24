@@ -63,6 +63,7 @@ def run_export_tf(
     device: str = "cpu",
     opset: int = 17,
     skip_ort: bool = False,
+    saved_model: bool = False,
 ) -> Path:
     """Export ONNX then build detect bundle under ``output_dir``. Returns detect dir."""
     if mode not in _PRE_NMS_MODES:
@@ -132,6 +133,21 @@ def run_export_tf(
             "(expected keras_model.keras and model.onnx)."
         )
     print(f"Detect bundle: {keras_path}")
+    if saved_model:
+        sm_dir = output_dir / "saved_model"
+        sm_argv = [
+            "odet-export-savedmodel",
+            "--meta",
+            str(meta_path),
+            "--onnx",
+            str(onnx_path),
+            "--output",
+            str(sm_dir),
+        ]
+        _call_main("export.scripts.build_tf_savedmodel", sm_argv)
+        if not (sm_dir / "saved_model.pb").is_file():
+            raise SystemExit(f"SavedModel incomplete under {sm_dir} (expected saved_model.pb).")
+        print(f"SavedModel: {sm_dir}")
     return detect_dir
 
 
@@ -149,6 +165,15 @@ def main() -> None:
         type=Path,
         default=Path("odet_export"),
         help="Output directory (default: ./odet_export). Writes pre_nms.onnx + detect/.",
+    )
+    p.add_argument(
+        "--saved-model",
+        action="store_true",
+        help=(
+            "Also write a TensorFlow SavedModel under <output-dir>/saved_model "
+            "(onnx2tf + TF rotated NMS). Load with tf.saved_model.load; no oriented-det "
+            "at inference. May fail on graphs onnx2tf cannot convert (e.g. ScatterND)."
+        ),
     )
     p.add_argument(
         "--mode",
@@ -180,6 +205,7 @@ def main() -> None:
         device=args.device,
         opset=args.opset,
         skip_ort=args.skip_ort,
+        saved_model=args.saved_model,
     )
 
 

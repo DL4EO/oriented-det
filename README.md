@@ -100,7 +100,7 @@ Full documentation is in the **docs/** folder and can be built and served with M
 
 | Folder | README | Description |
 |--------|--------|-------------|
-| [export/](export/) | [export/README.md](export/README.md) | Phase 1: PyTorch → ONNX → Keras detect bundle; `cd export && make export-tf` |
+| [export/](export/) | [export/README.md](export/README.md) | Phase 1: PyTorch → ONNX → Keras detect bundle; optional TF SavedModel (`--saved-model`); `cd export && make export-tf` |
 | [demo/](demo/) | [demo/README.md](demo/README.md) | Demo images; `odet image-demo` or `make demo` with the latest `runs/` checkpoint |
 | [pretrained/](pretrained/) | [pretrained/README.md](pretrained/README.md) | Registered checkpoints for fine-tunes; large `.pth` files are usually gitignored |
 | [oriented_det/cli/](oriented_det/cli/) | [oriented_det/cli/README.md](oriented_det/cli/README.md) | **`odet`** entry point and subcommand list |

@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "description": "Inference export contract for oriented-det (ONNX + TensorFlow/Keras detect bundle).",
+  "description": "Inference export contract for oriented-det (ONNX + Keras detect bundle + optional TF SavedModel).",
   "input": {
     "name": "images",
     "dtype": "float32",
@@ -58,9 +58,20 @@
     },
     "load": "export.tf_serving_model.load_keras_detect_model(bundle_dir_or_keras_path)"
   },
+  "saved_model": {
+    "files": ["saved_model.pb", "variables/", "export_meta.json"],
+    "outputs": {
+      "detections": "[max_detections, 7] as (cx,cy,w,h,angle,score,label)",
+      "num_detections": "scalar int32"
+    },
+    "load": "tf.saved_model.load(saved_model_dir)  # no oriented-det at inference",
+    "build": "odet export-tf --saved-model  or  odet export-savedmodel --meta ... --onnx ...",
+    "notes": "Requires onnx2tf to lower pre-NMS ONNX; TF polygon NMS in-graph."
+  },
   "nms": {
     "in_onnx": false,
     "in_keras_bundle": true,
+    "in_savedmodel": true,
     "pytorch_reference": "oriented_det.ops.rotated_ops rotated_nms (force_cpu for deploy parity)"
   },
   "notes": [
@@ -68,6 +79,7 @@
     "oriented_rcnn_pre_nms uses midpoint RPN + OrientedROIAlign (masked all-N grid_sample under ONNX export).",
     "rotated_fcos_pre_nms decodes DistanceAnglePointCoder + per-level topk, then pads to nms_pre × FPN levels. No ROI.",
     "onnx2tf SavedModel for this graph may fail on ScatterND; the detect bundle uses ONNX Runtime inside Keras.",
-    "TFLite full detect is not supported while NMS remains in Python."
+    "Optional portable SavedModel (export-savedmodel) uses onnx2tf + TF rotated NMS; inference needs only TensorFlow.",
+    "TFLite full detect is not supported while NMS remains in Python (Keras bundle) or when onnx2tf fails."
   ]
 }

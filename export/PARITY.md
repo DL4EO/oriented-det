@@ -27,7 +27,8 @@ This document records what **matches** PyTorch full inference and what is **inte
 | Final rotated NMS | **Exact** match with deploy when `production.final_nms_use_cpu: true` (polygon CPU path in `rotated_nms`). Score floor is applied **before** NMS (equivalent for greedy NMS; much faster on dense pre-NMS pads). |
 | `production.score_threshold` / per-class floors | Applied in Keras bundle after NMS (`export/postprocess.py`). |
 | Sliding-window tiling, margin filter, GeoJSON | **Out of scope** — same as deploy API (see `oriented_det.runtime.inference`). |
-| TF SavedModel reload of `tf.py_function` | **Not used**; load `keras_model.keras` with `FasterRCNNDetectLayer` custom object. |
+| TF SavedModel reload of `tf.py_function` | **Not used** for the Keras bundle; load `keras_model.keras` with `FasterRCNNDetectLayer`. |
+| Portable TF SavedModel | Optional `odet export-tf --saved-model` / `odet export-savedmodel`: onnx2tf core + **TF rotated NMS** (`export/tf_nms.py`). Reload with `tf.saved_model.load` (no oriented-det). Conversion may fail on ScatterND. TF NMS IoU can drift slightly vs Shapely/CPU NMS. |
 | onnx2tf full graph | May fail on `ScatterND`; bundle uses **ONNX Runtime** for the core graph instead. |
 
 ## `oriented_rcnn_pre_nms` + detect bundle (Oriented R-CNN)
@@ -38,6 +39,7 @@ This document records what **matches** PyTorch full inference and what is **inte
 | RPN proposals before ROI | Padded oriented proposals with **zero-size** OBBs via always-on `cat([x[:k], zeros(k)])[:k]` (keeps pad in the ONNX graph even when the trace dummy already has `k` keeps); ROI candidates keep only `w>0` and `h>0` (pads are not min-clamped to 1). |
 | OrientedROIAlign under ONNX | Masked all-N `grid_sample` per FPN level (no indexed ScatterND writes); ROI grids packed along H so features stay batch=1 (avoids ORT `Expand` OOM on `N×C×H×W`); masks use `reshape(-1,1,1,1)` (avoids Reshape size mismatch when proposal count varies). Eager path stays chunked. |
 | Final NMS / score floors / Keras bundle | **Same** as Faster R-CNN detect bundle (`export/postprocess.py`). |
+| Portable TF SavedModel | Same optional `--saved-model` path as Faster R-CNN (onnx2tf + TF NMS). |
 | onnx2tf full graph | Same ORT-inside-Keras mitigation; pure TF conversion remains experimental. |
 
 ## `rotated_fcos_pre_nms` + detect bundle (Rotated FCOS)
@@ -48,6 +50,7 @@ This document records what **matches** PyTorch full inference and what is **inte
 | Per-level pre-NMS cap | Always `topk(min(nms_pre, H×W))` **then** score / size / finite filters (equivalent to the old filter-then-topk eager path; keeps `k` in the ONNX graph). Invalid top-k rows are zeroed (`score=0`, `w=h=0`) and left in the padded tensor so ONNX does not need `argsort`/`nonzero`. |
 | Pre-NMS output padding | Same `pad_pre_nms_detections` as two-stage. Default `P = nms_pre ×` FPN levels. `pre_nms_count` is the live top-k length (includes zeroed slots). Keras score floor + `w,h>=1` drop junk. |
 | Final NMS / score floors / Keras bundle | **Same** as Faster R-CNN detect bundle. FCOS eval NMS is class-aware (`nms_class_agnostic: false`). The shared bundle also drops `w<1` or `h<1` after NMS; FCOS eval keeps those (default `min_bbox_size=0`). |
+| Portable TF SavedModel | Same optional `--saved-model` path as Faster R-CNN (onnx2tf + TF NMS). |
 | onnx2tf full graph | Same ORT-inside-Keras mitigation. |
 
 ## ONNX → TensorFlow

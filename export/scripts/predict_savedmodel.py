@@ -41,24 +41,37 @@ def _run_keras_bundle(bundle_dir: Path, height: int, width: int, ort_device: str
 def _run_saved_model(sm_dir: Path, height: int, width: int) -> None:
     import tensorflow as tf
 
-    sm = tf.saved_model.load(str(sm_dir))
-    sigs = list(getattr(sm, "signatures", {}).keys())
-    print("Signatures:", sigs)
-    name = "serving_default" if "serving_default" in sigs else sigs[0]
-    fn = sm.signatures[name]
+    from export.tf_savedmodel import call_saved_model
 
-    kwargs = {}
-    _pos, kw = fn.structured_input_signature
-    if kw:
-        for key, spec in kw.items():
-            if spec.dtype.is_floating and spec.shape.rank == 4:
-                shape = [1, 3, height, width]
-                kwargs[key] = tf.zeros(shape, dtype=spec.dtype)
-    if not kwargs:
-        raise SystemExit("Could not infer image input from SavedModel signature.")
-    out = fn(**kwargs)
-    for k, v in out.items():
-        print(f"  {k}: shape={v.shape} dtype={v.dtype}")
+    sm = tf.saved_model.load(str(sm_dir))
+    x = tf.zeros([1, 3, height, width], dtype=tf.float32)
+    try:
+        detections, num_detections = call_saved_model(sm, x)
+        print(f"  detections: shape={detections.shape} dtype={detections.dtype}")
+        print(f"  num_detections: {int(num_detections.numpy())}")
+        return
+    except Exception as first:
+        # Legacy onnx2tf multi-output signatures (pre-NMS tensors, no postprocess).
+        sigs = list(getattr(sm, "signatures", {}).keys())
+        if not sigs:
+            raise
+        print("Signatures:", sigs)
+        name = "serving_default" if "serving_default" in sigs else sigs[0]
+        fn = sm.signatures[name]
+        kwargs = {}
+        _pos, kw = fn.structured_input_signature
+        if kw:
+            for key, spec in kw.items():
+                if spec.dtype.is_floating and spec.shape.rank == 4:
+                    shape = [1, 3, height, width]
+                    if spec.shape.rank == 4 and spec.shape[-1] == 3:
+                        shape = [1, height, width, 3]
+                    kwargs[key] = tf.zeros(shape, dtype=spec.dtype)
+        if not kwargs:
+            raise SystemExit("Could not infer image input from SavedModel signature.") from first
+        out = fn(**kwargs)
+        for k, v in out.items():
+            print(f"  {k}: shape={v.shape} dtype={v.dtype}")
 
 
 def main() -> None:

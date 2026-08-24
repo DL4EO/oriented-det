@@ -24,6 +24,7 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "export-onnx": ("export.scripts.export_onnx", "odet-export-onnx"),
     "export-tf": ("export.scripts.export_tf", "odet-export-tf"),
     "export-detect": ("export.scripts.build_faster_rcnn_savedmodel", "odet-export-detect"),
+    "export-savedmodel": ("export.scripts.build_tf_savedmodel", "odet-export-savedmodel"),
     "export-preds": ("export.scripts.save_predictions_tf", "odet-export-preds"),
     "labels-to-comma": ("tools.dota_labels_to_comma", "odet-labels-to-comma"),
     "free-gpu": ("tools.free_gpu", "odet-free-gpu"),
@@ -44,6 +45,7 @@ def _print_help() -> None:
     print("  odet preds --experiment-dir runs/oriented_rcnn/<id>")
     print("  odet playground-csv --data-root /path/to/export")
     print("  odet export-tf --config path/to/config.json --checkpoint path/to/model.pth")
+    print("  odet export-tf --saved-model --config ... --checkpoint ...")
     print("  odet export-tf --mode oriented_rcnn_pre_nms --config ... --checkpoint ...")
     print("  odet export-tf --mode rotated_fcos_pre_nms --config ... --checkpoint ...")
 

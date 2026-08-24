@@ -20,6 +20,8 @@ DEVICE ?= cpu
 OPSET ?= 17
 # Set SKIP_ORT=1 to skip ORT validation after ONNX export
 SKIP_ORT ?= 0
+# Set SAVED_MODEL=1 to also write a TF SavedModel (onnx2tf + TF NMS)
+SAVED_MODEL ?= 0
 # ONNX Runtime EP for TF inference (preds / predict): cpu | cuda | auto
 ORT_DEVICE ?= auto
 # Val preds / metrics (TF export); compare with repo-root make preds / make metrics (PyTorch)
@@ -29,7 +31,7 @@ VAL_DIR ?=
 PREDICTIONS_DIR ?= $(ARTIFACTS)/predictions
 METRICS_PRED_DIR ?=
 
-.PHONY: help export-tf export-onnx export-detect predict test preds metrics eval-tf
+.PHONY: help export-tf export-onnx export-detect export-savedmodel predict test preds metrics eval-tf
 
 ## help: Show export Makefile targets (thin wrappers around odet)
 help:
@@ -39,6 +41,7 @@ help:
 	@echo "  make export-tf     - odet export-tf (ONNX + Keras detect bundle)"
 	@echo "  make export-onnx   - odet export-onnx"
 	@echo "  make export-detect - odet export-detect"
+	@echo "  make export-savedmodel - odet export-savedmodel (onnx2tf + TF NMS)"
 	@echo "  make predict       - Smoke-test detect bundle (DETECT_DIR, HEIGHT, WIDTH)"
 	@echo "  make preds         - odet export-preds → $(PREDICTIONS_DIR)/<ts>/"
 	@echo "  make metrics       - Offline mAP/PR on METRICS_PRED_DIR or newest TF predictions/"
@@ -50,7 +53,7 @@ help:
 	@echo "  CKPT=$(CKPT)"
 	@echo "  MODE=$(MODE)  (export-tf: pre-NMS modes only)"
 	@echo "  HEIGHT=$(HEIGHT)  WIDTH=$(WIDTH)"
-	@echo "  DEVICE=$(DEVICE)  OPSET=$(OPSET)  SKIP_ORT=$(SKIP_ORT)"
+	@echo "  DEVICE=$(DEVICE)  OPSET=$(OPSET)  SKIP_ORT=$(SKIP_ORT)  SAVED_MODEL=$(SAVED_MODEL)"
 	@echo "  ORT_DEVICE=$(ORT_DEVICE)"
 	@echo "  ARTIFACTS=$(ARTIFACTS)"
 	@echo "  REPO_ROOT=$(REPO_ROOT)"
@@ -79,7 +82,8 @@ export-tf:
 	  --height $(HEIGHT) --width $(WIDTH) \
 	  --device "$(DEVICE)" \
 	  --opset $(OPSET) \
-	  $(if $(filter 1 true TRUE yes YES,$(SKIP_ORT)),--skip-ort,)
+	  $(if $(filter 1 true TRUE yes YES,$(SKIP_ORT)),--skip-ort,) \
+	  $(if $(filter 1 true TRUE yes YES,$(SAVED_MODEL)),--saved-model,)
 
 ## export-onnx: PyTorch → ONNX only
 export-onnx:
@@ -100,6 +104,13 @@ export-detect:
 	  --meta "$(ONNX_OUT:.onnx=.export_meta.json)" \
 	  --onnx "$(ONNX_OUT)" \
 	  --output "$(DETECT_DIR)"
+
+## export-savedmodel: TF SavedModel from existing ONNX + meta
+export-savedmodel:
+	cd "$(REPO_ROOT)" && odet export-savedmodel \
+	  --meta "$(ONNX_OUT:.onnx=.export_meta.json)" \
+	  --onnx "$(ONNX_OUT)" \
+	  --output "$(ARTIFACTS)/saved_model"
 
 ## predict: Smoke-test keras detect bundle
 predict:

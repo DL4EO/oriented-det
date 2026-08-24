@@ -19,6 +19,7 @@ def test_cli_export_commands_map_to_python_modules() -> None:
     for name, module in (
         ("export-tf", "export.scripts.export_tf"),
         ("export-detect", "export.scripts.build_faster_rcnn_savedmodel"),
+        ("export-savedmodel", "export.scripts.build_tf_savedmodel"),
         ("export-preds", "export.scripts.save_predictions_tf"),
         ("export-onnx", "export.scripts.export_onnx"),
     ):
@@ -30,6 +31,7 @@ def test_cli_export_commands_map_to_python_modules() -> None:
     [
         ["export-tf", "--help"],
         ["export-detect", "--help"],
+        ["export-savedmodel", "--help"],
         ["export-preds", "--help"],
     ],
 )
@@ -131,6 +133,58 @@ def test_export_tf_accepts_fcos_pre_nms_mode(
         skip_ort=True,
     )
     assert "rotated_fcos_pre_nms" in calls[0][1]
+
+
+def test_export_tf_saved_model_flag_runs_savedmodel_builder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from export.scripts import export_tf
+
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_call(module_path: str, argv: list[str]) -> None:
+        calls.append((module_path, list(argv)))
+        if module_path == "export.scripts.export_onnx":
+            out = Path(argv[argv.index("--output") + 1])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"onnx-stub")
+            out.with_suffix(".export_meta.json").write_text("{}", encoding="utf-8")
+        elif module_path == "export.scripts.build_faster_rcnn_savedmodel":
+            detect = Path(argv[argv.index("--output") + 1])
+            detect.mkdir(parents=True, exist_ok=True)
+            (detect / "keras_model.keras").write_text("stub", encoding="utf-8")
+            (detect / "model.onnx").write_bytes(b"onnx-stub")
+        elif module_path == "export.scripts.build_tf_savedmodel":
+            sm = Path(argv[argv.index("--output") + 1])
+            sm.mkdir(parents=True, exist_ok=True)
+            (sm / "saved_model.pb").write_bytes(b"pb-stub")
+
+    monkeypatch.setattr(export_tf, "_require_export_extras", lambda **kwargs: None)
+    monkeypatch.setattr(export_tf, "_call_main", fake_call)
+
+    cfg = tmp_path / "cfg.json"
+    ckpt = tmp_path / "model.pth"
+    cfg.write_text("{}", encoding="utf-8")
+    ckpt.write_bytes(b"x")
+    out = tmp_path / "odet_export"
+
+    export_tf.run_export_tf(
+        config=cfg,
+        checkpoint=ckpt,
+        output_dir=out,
+        mode="faster_rcnn_pre_nms",
+        height=64,
+        width=64,
+        skip_ort=True,
+        saved_model=True,
+    )
+
+    assert [c[0] for c in calls] == [
+        "export.scripts.export_onnx",
+        "export.scripts.build_faster_rcnn_savedmodel",
+        "export.scripts.build_tf_savedmodel",
+    ]
+    assert (out / "saved_model" / "saved_model.pb").is_file()
 
 
 def test_export_tf_rejects_non_pre_nms_mode() -> None:

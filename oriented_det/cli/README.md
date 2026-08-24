@@ -13,6 +13,7 @@ Install the package (`uv pip install -e .` or `pip install oriented-det`), then 
 | `export-onnx` | ONNX export (`export.scripts.export_onnx`) |
 | `export-tf` | ONNX + Keras detect bundle (`export.scripts.export_tf`) |
 | `export-detect` | Keras bundle from existing ONNX (`export.scripts.build_faster_rcnn_savedmodel`) |
+| `export-savedmodel` | TF SavedModel from existing ONNX (`export.scripts.build_tf_savedmodel`) |
 | `export-preds` | Val inference via Keras bundle (`export.scripts.save_predictions_tf`) |
 
 TF export commands require `pip install "oriented-det[export]"` (or the export requirements). They call pure Python entrypoints — no Makefile. Default artifacts: `./odet_export/`. See [`export/README.md`](../../export/README.md).
