@@ -1,6 +1,6 @@
 # Models
 
-Detectors: **Oriented R-CNN**, **Rotated Faster R-CNN**, **Rotated RetinaNet**. Config: [Configuration](../../docs/user-guide/configuration.md) (`model_type`). User guide: [Models](../../docs/user-guide/models.md).
+Detectors: **Oriented R-CNN**, **Rotated Faster R-CNN**, **Rotated RetinaNet**, **Rotated FCOS**. Config: [Configuration](../../docs/user-guide/configuration.md) (`model_type`). User guide: [Models](../../docs/user-guide/models.md).
 
 ## RPN anchor angles (Python only)
 
@@ -15,14 +15,18 @@ Training JSON / `ModelConfig` does **not** expose `anchor_angles` (horizontal RP
 | **ONNX export (Faster)** | Same as eval + `horizontal_roi_align` **masked** branch when `is_in_onnx_export()` | Fixed-shape RoIAlign for traceability; numerically equivalent to eager path (see `tests/test_roi.py::test_horizontal_roi_align_eager_matches_onnx_export_path`). |
 | **Eval (Oriented R-CNN)** | Inline in `OrientedRCNN.forward` (midpoint RPN + `OrientedROIAlign`) | Set `model._deterministic_rpn = True` for export-parity comparisons. |
 | **ONNX export (Oriented)** | `oriented_rcnn_inference_pre_nms_padded` + `oriented_roi_align` **masked** branch | Packed `grid_sample` (no feature `Expand`); always-on proposal `cat` pad; same Keras detect bundle as Faster. |
+| **Eval (FCOS)** | `rotated_fcos_decode_pre_nms` + class-aware rotated NMS | Anchor-free decode (`DistanceAnglePointCoder`). |
+| **ONNX / TF export (FCOS)** | `rotated_fcos_inference_pre_nms_padded` | Same pre-NMS tensors as two-stage; Keras detect bundle does NMS. Mode: `rotated_fcos_pre_nms`. |
 
-Regression guards: `tests/test_roi.py` (eager vs export RoIAlign), `tests/test_models.py::TestRotatedFasterRCNN::test_full_training_forward_and_backward`, `export/tests/test_faster_rcnn_export_parity.py`, `export/tests/test_oriented_rcnn_export_parity.py`.
+Regression guards: `tests/test_roi.py` (eager vs export RoIAlign), `tests/test_models.py::TestRotatedFasterRCNN::test_full_training_forward_and_backward`, `export/tests/test_faster_rcnn_export_parity.py`, `export/tests/test_oriented_rcnn_export_parity.py`, `export/tests/test_rotated_fcos_export_parity.py`.
 
 ## Shared inference (`faster_rcnn_inference.py` / `oriented_rcnn_inference.py`)
 
 `RotatedFasterRCNN` eval forwards through `faster_rcnn_inference()` (decode + rotated NMS). The same module powers ONNX export (`export/wrappers.RotatedFasterRCNNPreNmsExportWrapper`) with deterministic RPN top-k and padded proposals for traceable ROI align.
 
 `OrientedRCNN` export uses `oriented_rcnn_inference_pre_nms_padded` (`export/wrappers.OrientedRCNNPreNmsExportWrapper`) with deterministic midpoint RPN and padded oriented proposals.
+
+`RotatedFCOS` export uses `rotated_fcos_inference_pre_nms_padded` (`export/wrappers.RotatedFCOSPreNmsExportWrapper`): backbone + head + decode, padded to `nms_pre ×` FPN levels. Same Keras detect bundle as the two-stage models.
 
 ## Rotated Faster R-CNN Proposal Filtering
 
@@ -86,7 +90,25 @@ add in-repo CUDA kernels behind the same abstraction after the first release.
 
 This replaced an earlier softmax background+K formulation whose background-bias init plus uniform-alpha focal loss starved the classification head of gradients (cls grad norm ~1000x smaller than bbox), producing 0 detections after 12 epochs.
 
-**Checkpoint break (v0.2+):** RetinaNet now uses MMRotate-style **separate cls/reg 4-conv towers** with **3×3 prediction heads** and **P6/P7 convs on C5** (`LastLevelP6P7`). Pre-change checkpoints (`head.convs`, 1×1 `conv_cls`/`conv_bbox`, `extra_fpn_conv`) are incompatible.
+## Rotated FCOS (anchor-free)
+
+`RotatedFCOS` (`model_type: rotated_fcos`) follows MMRotate’s Rotated FCOS architecture:
+
+- **Coder:** `DistanceAnglePointCoder` — point → `(left, top, right, bottom, angle)` (channel order matches MMRotate code).
+- **Assigner:** center-in-OBB + per-level `regress_ranges` + optional center sampling (radius 1.5×stride).
+- **Head:** GN+ReLU cls/reg towers, `conv_cls` / `conv_bbox`(4) / `conv_angle` / `conv_centerness`; `norm_on_bbox`, `centerness_on_reg`, `scale_angle`.
+- **Losses:** sigmoid focal (cls), centerness BCE, and box reg via **`box_reg_loss_type`**:
+  - **`l1`** (default / L1 recipes): centerness-weighted L1 on encoded ltrb + le90-wrapped angle L1.
+  - **`kfiou`**: decode to absolute OBBs (×stride when `norm_on_bbox`), then centerness-weighted [`kfiou_loss_per_box`](../ops/kfiou.py).
+  - **`riou`**: same decode path, then centerness-weighted [`riou_loss_per_box`](../ops/diff_iou_rotated.py) (`1 -` differentiable polygon IoU). Not sampling `pairwise_rotated_iou`.
+- **Aux:** **`aux_loss_type`** (`kfiou` / `probiou`) + **`aux_loss_weight`** (0 disables). Decoded, centerness-weighted; logged as `loss_box_reg_aux`. Gaussian overlap plus an aspect-gated heading term (`aux_angle_weight`, default 1.0; `aux_angle_lambda` default 1.0). Prefer L1 primary + aux 0.1. Aux `riou` is rejected.
+- **Inference:** `sigmoid(cls) * sigmoid(centerness)` → decode → class-aware rotated NMS. Keep **`production.final_nms_iou_threshold: 0.1`** aligned with `model.*`; 0.3 leaves dense duplicates at eval-val.
+
+Configs: `configs/rotated_fcos/dota_le90_{1x,3x}.json` (L1), `dota_le90_{1x,3x}_kfiou_aux.json` (L1 + KFIoU aux), `dota_le90_{1x,3x}_riou.json` (decoded rIoU primary, lr 2.5e-3). Results: [`configs/rotated_fcos/README.md`](../../configs/rotated_fcos/README.md).
+
+**1× L1 recipe:** `learning_rate=2.5e-4`, `max_detections_per_image=2000`, NMS IoU **0.1**. L1 **3×** eval-val **73.92%** (local baseline). **Hub:** 3× decoded rIoU **81.58%** (`rotated_fcos_dota_le90_3x_riou`, `runs/rotated_fcos/20260822-153943`); report [`docs/eval-reports/rotated_fcos_dota_le90_3x_riou/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x_riou/model_analysis.md). 3× L1 + KFIoU aux **77.18%** remains as `rotated_fcos_dota_le90_3x_kfiou_aux`.
+
+**Checkpoint break (v0.1.1):** RetinaNet now uses MMRotate-style **separate cls/reg 4-conv towers** with **3×3 prediction heads** and **P6/P7 convs on C5** (`LastLevelP6P7`). Pre-change checkpoints (`head.convs`, 1×1 `conv_cls`/`conv_bbox`, `extra_fpn_conv`) are incompatible.
 
 ### Rotated RetinaNet MMRotate alignment
 

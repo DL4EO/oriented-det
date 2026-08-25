@@ -45,7 +45,12 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from oriented_det.data import DOTADataset, AirbusPlaygroundCSVDataset, build_dota_split_dataset
+from oriented_det.data import (
+    DOTADataset,
+    AirbusPlaygroundCSVDataset,
+    build_dota_split_dataset,
+    dota_dataset_class_names,
+)
 from oriented_det.train.config import LossConfig, TrainingExperimentConfig
 from oriented_det.train.utils import capped_subset_indices
 from oriented_det.utils import get_device
@@ -326,7 +331,10 @@ def run_lr_finder(
             map_labels=config.dataset.map_labels,
         )
 
-    class_names = train_dataset.get_class_names()
+    if dataset_format == "dota":
+        class_names = dota_dataset_class_names(train_dataset)
+    else:
+        class_names = train_dataset.get_class_names()
     class_map = {name: i + 1 for i, name in enumerate(class_names)}
     num_classes = len(class_names)
 

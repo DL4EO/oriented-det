@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oriented-det"
-version = "0.1.1"
+version = "0.2.0"
 description = "A lightweight, modern PyTorch library for rotated object detection in aerial and satellite imagery"
 readme = "README.md"
 requires-python = ">=3.10"

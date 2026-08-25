@@ -57,6 +57,22 @@
       "experiment_dir": "runs/oriented_rcnn/20260621-092802",
       "eval_map50": 0.7940,
       "eval_report": "docs/eval-reports/oriented_rcnn_dota_le90_3x/model_analysis.md"
+    },
+    "rotated_fcos_dota_le90_3x_kfiou_aux": {
+      "filename": "rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.pth",
+      "sha256": "83c788638a08106a1b427ead97d21984db194c6e6396f7eee5ad54afd185c4f7",
+      "source_recipe": "configs/rotated_fcos/dota_le90_3x_kfiou_aux.json",
+      "experiment_dir": "runs/rotated_fcos/20260818-100049",
+      "eval_map50": 0.7718,
+      "eval_report": "docs/eval-reports/rotated_fcos_dota_le90_3x_kfiou_aux/model_analysis.md"
+    },
+    "rotated_fcos_dota_le90_3x_riou": {
+      "filename": "rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth",
+      "sha256": "a39c80c16eaae94317e907773c7b0556cb024c9d2baa73b5045e88a2e85865aa",
+      "source_recipe": "configs/rotated_fcos/dota_le90_3x_riou.json",
+      "experiment_dir": "runs/rotated_fcos/20260822-153943",
+      "eval_map50": 0.8158,
+      "eval_report": "docs/eval-reports/rotated_fcos_dota_le90_3x_riou/model_analysis.md"
     }
   }
 }

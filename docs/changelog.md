@@ -4,6 +4,20 @@ All notable changes to OrientedDet will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-25
+
+### Added
+
+- **Rotated FCOS** (`model_type: rotated_fcos`) — anchor-free single-stage detector: DistanceAnglePointCoder, center-in-OBB assigner, centerness, and L1 / KFIoU / decoded rIoU box regression. Recipes under [`configs/rotated_fcos/`](../configs/rotated_fcos/).
+- Differentiable polygon IoU (`oriented_det.ops.diff_iou_rotated`) for FCOS **`box_reg_loss_type: riou`** (`1 - IoU`). Distinct from sampling `pairwise_rotated_iou`. Recipes [`dota_le90_1x_riou.json`](../configs/rotated_fcos/dota_le90_1x_riou.json) / [`dota_le90_3x_riou.json`](../configs/rotated_fcos/dota_le90_3x_riou.json) (lr 2.5e-3).
+- Hub slug **`rotated_fcos_dota_le90_3x_riou`** (81.58% eval-val mAP50) — Rotated FCOS 3× decoded rIoU; report [`docs/eval-reports/rotated_fcos_dota_le90_3x_riou/`](eval-reports/rotated_fcos_dota_le90_3x_riou/model_analysis.md).
+- Hub slug **`rotated_fcos_dota_le90_3x_kfiou_aux`** (77.18% eval-val mAP50) — Rotated FCOS 3× L1 + KFIoU aux; report [`docs/eval-reports/rotated_fcos_dota_le90_3x_kfiou_aux/`](eval-reports/rotated_fcos_dota_le90_3x_kfiou_aux/model_analysis.md).
+- TF/ONNX export mode **`rotated_fcos_pre_nms`** — Rotated FCOS decode + pad uses the same Keras detect bundle as two-stage models (`odet export-tf --mode rotated_fcos_pre_nms`).
+
+### Removed
+
+- FCOS 1× ProbIoU-aux recipe (`dota_le90_1x_probiou_aux.json`). Train-time mAP50 66.8% vs 76.5% for 1× KFIoU aux on the same protocol.
+
 ## [0.1.1] - 2026-07-11
 
 ### Added

@@ -61,8 +61,9 @@ Must be one of the values accepted by `tools/train.py` (also sets `runs/<model_t
 | `oriented_rcnn` | `OrientedRCNN` | Horizontal RPN + midpoint-offset proposals + oriented ROI |
 | `rotated_faster_rcnn` | `RotatedFasterRCNN` | Oriented RPN + oriented ROI (MMRotate-style) |
 | `rotated_retinanet` | `RotatedRetinaNet` | One-stage; focal head; no RPN/ROI |
+| `rotated_fcos` | `RotatedFCOS` | Anchor-free one-stage; centerness; no anchors/RPN/ROI |
 
-Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`.
+Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`, `rotated_fcos_r50.json`.
 
 ## Top-level sections
 
@@ -74,7 +75,7 @@ Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_f
 | `data_loader` | `batch_size`, `num_workers`, `shuffle`, `pin_memory` |
 | `model` | Backbone, FPN, anchors, RPN/ROI/NMS, inference thresholds |
 | `training` | Epochs, LR, schedulers, AMP, grad accum, freeze phases, early stopping |
-| `loss` | ROI loss recipe + class weights (two-stage); RetinaNet uses focal from `loss` / `model` |
+| `loss` | ROI loss recipe + class weights (two-stage); RetinaNet / FCOS use focal from `loss` / `model` |
 | `evaluation` | Score/IoU thresholds, mAP during training |
 | `production` | Deploy/inference overrides (see below) |
 | `checkpoint` | Resume, discover prior run, best-metric selection |
@@ -114,6 +115,8 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 | `roi_focal_*`, `roi_norm_factor`, `roi_edge_swap` | ROI head | ROI head | Reused for **RetinaNet focal cls** (`loss.loss_type: focal` wires these in `train.py`) |
 
 **RetinaNet note:** There is no RPN or ROI module. `tools/train.py` maps `model.rpn_*` to oriented-anchor matching and `model.roi_*` / `loss.focal_*` to the classification head. See [configs/rotated_retinanet/README.md](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_retinanet/README.md).
+
+**FCOS note:** Anchor-free; ignore `anchor_*` / RPN / ROI keys. Box regression is `model.box_reg_loss_type` (`l1`, `kfiou`, `riou`) plus optional `aux_loss_type` / `aux_loss_weight`. Head knobs are `fcos_*`. See [configs/rotated_fcos/README.md](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_fcos/README.md).
 
 `roi_box_reg_angle_weight` scales the angle (5th encoded dim) SmoothL1 term in ROI box regression (two-stage models only). Optional `roi_box_reg_angle_schedule_epochs` / `roi_box_reg_angle_schedule_values` piecewise-schedule that weight by 0-based epoch (`values` length = `len(epochs) + 1`; when either field is null, `roi_box_reg_angle_weight` stays constant). The engine calls `set_roi_box_reg_angle_weight_for_epoch(epoch)` each epoch.
 
@@ -166,6 +169,10 @@ Top-level configs (inherit bases under `configs/_base_/`):
 | `configs/rotated_faster_rcnn/dota_le90_3x.json` | Rotated Faster R-CNN | 3× pretrain (inherits 1×) |
 | `configs/rotated_retinanet/dota_le90_1x.json` | RetinaNet | **1× DOTA pretrain** (full recipe) |
 | `configs/rotated_retinanet/dota_le90_3x.json` | RetinaNet | 3× DOTA pretrain (inherits 1×) |
+| `configs/rotated_fcos/dota_le90_1x.json` | Rotated FCOS | 1× DOTA L1 baseline |
+| `configs/rotated_fcos/dota_le90_3x.json` | Rotated FCOS | 3× DOTA L1 (inherits 1×) |
+| `configs/rotated_fcos/dota_le90_3x_riou.json` | Rotated FCOS | **Hub** 3× decoded rIoU |
+| `configs/rotated_fcos/dota_le90_3x_kfiou_aux.json` | Rotated FCOS | Hub 3× L1 + KFIoU aux |
 
 **Bases (not run directly):** `configs/_base_/datasets/`, `configs/_base_/schedules/{1x,3x,6x}.json`, `fp16`, `preprocessing`, `augmentation`.
 

@@ -160,16 +160,9 @@ Rotated RetinaNet uses a 5-parameter encoding scheme for oriented bounding boxes
 - **Schedule**: 12 epochs, lr 0.0025, milestones [8, 11], batch 2, trainval tiles, diagonal flips
 - **Inference**: score 0.05, NMS IoU **0.1**, max 2000 dets/image
 
-### MS+RR and mAP > 70%
+### MS+RR (future)
 
-Per [MMRotate results](https://github.com/open-mmlab/mmrotate/blob/main/configs/rotated_retinanet/README.md):
-
-| Recipe | Tile format | Aug | mAP |
-|--------|-------------|-----|-----|
-| 1× le90 (this config) | 1024,1024,**200** | H+V+diagonal flip | **~68.4** |
-| MS+RR | 1024,1024,**500** | flips + **PolyRandomRotate** | **~76.5** |
-
-**MS** = multi-scale **tiling** (overlap 500 px), not random input-scale jitter. **RR** = polygon random rotation augmentation. Neither is implemented yet; use `dota_le90_1x.json` for the 1× baseline first.
+Stronger DOTA recipes often use **MS** (multi-scale tiling, e.g. overlap 500 px) and **RR** (`PolyRandomRotate`). Neither is in the current 1×/3× Hub recipes; use `dota_le90_1x.json` / `dota_le90_3x.json` for the flip-only baseline first.
 
 ### Anchor Assignment Strategy
 
@@ -208,11 +201,7 @@ Our implementation processes anchors per-level to avoid memory issues:
 
 ## Performance
 
-Reported results on DOTA dataset (from MMRotate):
-- **ResNet50-FPN**: Typically achieves 70-75% mAP depending on training configuration
-- **ResNet101-FPN**: Slightly higher mAP with increased computational cost
-
-Rotated RetinaNet provides a good balance between speed and accuracy for oriented object detection, making it suitable for applications requiring real-time or near-real-time inference.
+See **Results and models** below for this repo’s eval-val numbers. Rotated RetinaNet is the lighter single-stage baseline in the Hub zoo (vs Oriented R-CNN / Faster R-CNN).
 
 ## Results and models
 
@@ -224,8 +213,6 @@ DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 
 | ResNet50 (1024,1024,200) | 71.52 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log) | `hf://rotated_retinanet_dota_le90_3x` |
 
 Eval reports: [`docs/eval-reports/rotated_retinanet_dota_le90_1x/`](../../docs/eval-reports/rotated_retinanet_dota_le90_1x/model_analysis.md), [`docs/eval-reports/rotated_retinanet_dota_le90_3x/`](../../docs/eval-reports/rotated_retinanet_dota_le90_3x/model_analysis.md).
-
-MMRotate reference (1× le90): **68.42** mAP (different assigner / eval protocol).
 
 ## Usage
 

@@ -5,7 +5,7 @@ CLI utilities. Prefer **`odet`** after `pip install "oriented-det[export]"` (no 
 | Script | `odet` command | Purpose |
 |--------|----------------|---------|
 | [export_tf.py](export_tf.py) | `export-tf` | ONNX pre-NMS + Keras detect bundle → `./odet_export/`. |
-| [export_onnx.py](export_onnx.py) | `export-onnx` | PyTorch → ONNX (`backbone`, `retinanet_heads`, `faster_rcnn_pre_nms`, `oriented_rcnn_pre_nms`). |
+| [export_onnx.py](export_onnx.py) | `export-onnx` | PyTorch → ONNX (`backbone`, `retinanet_heads`, `faster_rcnn_pre_nms`, `oriented_rcnn_pre_nms`, `rotated_fcos_pre_nms`). |
 | [build_faster_rcnn_savedmodel.py](build_faster_rcnn_savedmodel.py) | `export-detect` | ONNX + meta → Keras detect bundle (`keras_model.keras` + `model.onnx`). |
 | [save_predictions_tf.py](save_predictions_tf.py) | `export-preds` | Val split inference via Keras bundle → `./odet_export/predictions/<ts>/`. |
 | [onnx_to_savedmodel.py](onnx_to_savedmodel.py) | — | ONNX → TFLite / optional TF via `onnx2tf` (experimental). |

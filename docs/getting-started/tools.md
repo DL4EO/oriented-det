@@ -45,7 +45,7 @@ Features:
   - Factorize common settings into base configs (`configs/_base_/`)
   - Inherit from multiple base configs (datasets, schedules, models)
   - Override specific fields as needed
-- Supports multiple model types (Rotated Faster R-CNN, Oriented R-CNN, Rotated RetinaNet)
+- Supports multiple model types (Rotated Faster R-CNN, Oriented R-CNN, Rotated RetinaNet, Rotated FCOS)
 - Command-line parameter overrides
 - Dataset loading
 - Model initialization
@@ -223,7 +223,7 @@ odet preds --metrics-from-json predictions/<timestamp>
 **Common flags** (`odet preds --help`):
 
 - `--experiment-dir`, `--checkpoint`, `--config` — resolve model from a training run
-- `--model-type` — `rotated_faster_rcnn`, `oriented_rcnn`, or `rotated_retinanet`
+- `--model-type` — `rotated_faster_rcnn`, `oriented_rcnn`, `rotated_retinanet`, or `rotated_fcos`
 - `--data-root`, `--data-split` — dataset layout
 - `--output-dir` — default: `predictions/<YYYYMMDD_HHMMSS>/`
 - `--no-diagnostics` / `--metrics-from-json` — inference-only vs offline mAP

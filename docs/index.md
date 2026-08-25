@@ -35,6 +35,7 @@ For a quick overview and installation on GitHub, see the [repository README](htt
 - **Oriented R-CNN** — horizontal RPN + MidpointOffset (6-param) proposals + oriented RoIAlign ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html))
 - **Rotated Faster R-CNN** — horizontal RPN + horizontal RoIAlign + rotated ROI head (MMRotate DOTA baseline)
 - **Rotated RetinaNet** (1-stage baseline) — oriented anchors and focal loss head
+- **Rotated FCOS** (anchor-free 1-stage) — distance-angle coder, centerness, L1 / KFIoU / decoded rIoU
 - **True oriented detection**: Predicts rotation angles, not just axis-aligned boxes
 - Standard backbones (ResNet + FPN)
 - **OrientedDet pretrained weights** via Hugging Face Hub (`odet pretrained download`)
@@ -78,17 +79,17 @@ See [Installation](getting-started/installation.md) for CUDA, macOS, and CPU set
 - **[User Guide](user-guide/geometry.md)** - Detailed usage for each module
 - **[API Reference](api/geometry.md)** - Complete API documentation
 - **[Examples](examples/inference.md)** - Ready-to-use inference and training examples
-- **[Roadmap](roadmap.md)** - Planned releases (v0.2–v1.0)
+- **[Roadmap](roadmap.md)** - Planned releases (v0.3–v1.0)
 
 ## Roadmap
 
-**v0.1** is shipped (three ResNet detectors, DOTA, Hub). Upcoming: probiou Faster R-CNN on Hub (v0.2), Rotated FCOS (v0.3), HRSC2016/FAIR1M (v0.4), RTMDet-R + native YOLO-OBB (v0.5), Swin-FPN backbones (v0.6+). Details: **[Roadmap](roadmap.md)**.
+**v0.2** is shipped (four ResNet detectors including Rotated FCOS, DOTA, Hub). Next: HRSC2016/FAIR1M (v0.3), RTMDet-R + native YOLO-OBB (v0.4), Swin-FPN backbones (v0.5+). Details: **[Roadmap](roadmap.md)**.
 
 ## Important Notes
 
 ### True Oriented Detection
 
-✅ **OrientedRCNN**, **RotatedFasterRCNN**, and **RotatedRetinaNet** perform **true oriented object detection**:
+✅ **OrientedRCNN**, **RotatedFasterRCNN**, **RotatedRetinaNet**, and **RotatedFCOS** perform **true oriented object detection**:
 - Predict oriented bounding boxes with 5 parameters (cx, cy, w, h, angle)
 - Preserve angle information throughout training and inference
 - Use oriented IoU for matching and oriented NMS for post-processing

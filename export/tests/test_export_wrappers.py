@@ -16,13 +16,14 @@ if str(_EXPORT_DIR) not in sys.path:
     sys.path.insert(0, str(_EXPORT_DIR))
 
 import wrappers as _wrappers  # noqa: E402
-from oriented_det import OrientedRCNN, RotatedFasterRCNN  # noqa: E402
+from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedFCOS  # noqa: E402
 from oriented_det.models.rotated_retinanet import RotatedRetinaNet  # noqa: E402
 
 BackboneExportWrapper = _wrappers.BackboneExportWrapper
 RetinaNetBackboneHeadExportWrapper = _wrappers.RetinaNetBackboneHeadExportWrapper
 RotatedFasterRCNNPreNmsExportWrapper = _wrappers.RotatedFasterRCNNPreNmsExportWrapper
 OrientedRCNNPreNmsExportWrapper = _wrappers.OrientedRCNNPreNmsExportWrapper
+RotatedFCOSPreNmsExportWrapper = _wrappers.RotatedFCOSPreNmsExportWrapper
 
 
 @pytest.fixture
@@ -123,6 +124,36 @@ def test_oriented_rcnn_pre_nms_wrapper_shapes(tiny_oriented_rcnn: OrientedRCNN) 
     wwrap = OrientedRCNNPreNmsExportWrapper(
         tiny_oriented_rcnn, height=h, width=w, max_candidates=32
     )
+    wwrap.eval()
+    x = torch.randn(1, 3, h, w, dtype=torch.float32)
+    with torch.no_grad():
+        boxes, scores, labels, count = wwrap(x)
+    assert boxes.shape == (32, 5)
+    assert scores.shape == (32,)
+    assert labels.shape == (32,)
+    assert count.ndim == 0
+    assert int(count.item()) <= 32
+
+
+@pytest.fixture
+def tiny_fcos() -> RotatedFCOS:
+    return RotatedFCOS(
+        num_classes=3,
+        backbone_name="resnet18",
+        pretrained_backbone=False,
+        trainable_layers=5,
+        returned_layers=[2, 3, 4],
+        fpn_extra_level=True,
+        fpn_strides=[8, 16, 32, 64, 128],
+        nms_pre=32,
+        score_threshold=0.0,
+        max_detections_per_image=64,
+    )
+
+
+def test_fcos_pre_nms_wrapper_shapes(tiny_fcos: RotatedFCOS) -> None:
+    h, w = 128, 128
+    wwrap = RotatedFCOSPreNmsExportWrapper(tiny_fcos, height=h, width=w, max_candidates=32)
     wwrap.eval()
     x = torch.randn(1, 3, h, w, dtype=torch.float32)
     with torch.no_grad():

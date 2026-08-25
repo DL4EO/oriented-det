@@ -190,7 +190,13 @@ converting oriented proposals to HBB boxes and using `torchvision.ops.nms`.
 This was the dominant cost of per-epoch validation for early-training
 RetinaNet checkpoints (hundreds of weakly-suppressing candidates per class).
 
-## Auxiliary decoded-box losses (`kfiou.py`, `probiou.py`)
+## Differentiable rotated IoU (`diff_iou_rotated.py`)
+
+Train-loss IoU for **matched pairs** (`[N, 5]`), not matching/NMS/mAP.
+
+[`diff_iou_rotated.py`](diff_iou_rotated.py) implements convex polygon intersection (edge crossings + contained corners, shoelace) and **`riou_loss_per_box` = `1 - IoU`**. Runs on CPU or CUDA as batched PyTorch (no custom kernel). Distinct from sampling [`pairwise_rotated_iou`](rotated_ops.py). FCOS **`box_reg_loss_type: riou`** uses this; ROI **`riou`** still uses sampling. No overlap → loss is a flat 1; near-square boxes have a weak ∂/∂θ (same as true IoU).
+
+## Auxiliary decoded-box losses (`kfiou.py`, `probiou.py`, `gaussian_angle.py`)
 
 When **`model.roi_box_reg_iou_weight`** > 0 and **`model.roi_box_reg_main_loss_type`** is `smooth_l1` (default), training adds a scalar decoded-box term on ROI positives. When main is `probiou` / `riou` / `kfiou`, that decoded metric is the **primary** loss instead; use **`model.roi_box_reg_smooth_l1_aux_weight`** for encoded Smooth L1 aux.
 **`model.roi_box_reg_iou_loss_type`**: **`riou`** (default), **`kfiou`**, or
@@ -215,3 +221,15 @@ following the [reference implementation](https://github.com/ProbIOU/probiou-samp
 Use **`model.roi_box_reg_iou_loss_type: "probiou"`**. Optional
 **`model.roi_box_reg_probiou_mode`**: **`l1`** (bounded, default) or **`l2`**
 (`-log(1 - l1²)`).
+
+### Aspect-gated heading (`gaussian_angle.py`)
+
+Gaussian overlap (KFIoU / ProbIoU) is rotation-invariant when \(w \approx h\).
+[`aspect_gated_angle_loss_per_box`](gaussian_angle.py) restores a heading
+gradient with \(\omega \sin^2(2\Delta\theta)\), \(\Delta\theta\) le90-wrapped,
+and \(\omega = \exp(-\log^2(w^\*/h^\*)/\lambda^2)\) from **GT** size so elongated
+boxes stay on the overlap term. Period is **90°** (squares under le90).
+Rotated FCOS decoded aux adds this inside `loss_box_reg_aux`:
+**`model.aux_angle_weight`** (default **1.0**, **0** disables) and
+**`model.aux_angle_lambda`** (default **1.0**; at \(\lambda=1\), AR=2 → \(\omega \approx 0.62\),
+AR=3 → \(\omega \approx 0.30\)).

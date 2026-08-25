@@ -16,6 +16,7 @@ from oriented_det.models.faster_rcnn_inference import faster_rcnn_inference_pre_
 from oriented_det.models.oriented_rcnn import OrientedRCNN, RotatedFasterRCNN
 from oriented_det.models.oriented_rcnn_inference import oriented_rcnn_inference_pre_nms_padded
 from oriented_det.models.oriented_rpn import generate_oriented_anchors
+from oriented_det.models.rotated_fcos import RotatedFCOS, rotated_fcos_inference_pre_nms_padded
 from oriented_det.models.rotated_retinanet import RotatedRetinaNet
 from oriented_det.models.utils import derive_fpn_strides_from_grid, extract_backbone_features
 
@@ -215,10 +216,41 @@ class OrientedRCNNPreNmsExportWrapper(nn.Module):
         )
 
 
+class RotatedFCOSPreNmsExportWrapper(nn.Module):
+    """Rotated FCOS through decode; outputs padded pre-NMS tensors.
+
+    Input: ``images`` ``[1, 3, H, W]`` float32 in [0, 1] RGB.
+    Outputs: ``pre_nms_boxes``, ``pre_nms_scores``, ``pre_nms_labels``, ``pre_nms_count``.
+    Final rotated NMS and production score filters run in the Keras detect bundle.
+    """
+
+    def __init__(
+        self,
+        model: RotatedFCOS,
+        height: int,
+        width: int,
+        max_candidates: int | None = None,
+    ) -> None:
+        super().__init__()
+        self.model = model
+        self.height = int(height)
+        self.width = int(width)
+        n_levels = max(1, len(model.fpn_strides))
+        self.max_candidates = int(max_candidates or (int(model.nms_pre) * n_levels))
+
+    def forward(
+        self, images: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        return rotated_fcos_inference_pre_nms_padded(
+            self.model, images, self.max_candidates
+        )
+
+
 __all__ = [
     "BackboneExportWrapper",
     "RetinaNetBackboneHeadExportWrapper",
     "RotatedFasterRCNNPreNmsExportWrapper",
     "OrientedRCNNPreNmsExportWrapper",
+    "RotatedFCOSPreNmsExportWrapper",
     "_ordered_fpn_values",
 ]

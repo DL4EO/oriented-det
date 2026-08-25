@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - legacy path layout
     import wrappers as _wrappers  # noqa: E402
 
 from oriented_det.models.oriented_rcnn import OrientedRCNN, RotatedFasterRCNN  # noqa: E402
+from oriented_det.models.rotated_fcos import RotatedFCOS  # noqa: E402
 from oriented_det.models.rotated_retinanet import RotatedRetinaNet  # noqa: E402
 from oriented_det.runtime.checkpoint import load_model_from_checkpoint  # noqa: E402
 
@@ -35,6 +36,7 @@ BackboneExportWrapper = _wrappers.BackboneExportWrapper
 RetinaNetBackboneHeadExportWrapper = _wrappers.RetinaNetBackboneHeadExportWrapper
 RotatedFasterRCNNPreNmsExportWrapper = _wrappers.RotatedFasterRCNNPreNmsExportWrapper
 OrientedRCNNPreNmsExportWrapper = _wrappers.OrientedRCNNPreNmsExportWrapper
+RotatedFCOSPreNmsExportWrapper = _wrappers.RotatedFCOSPreNmsExportWrapper
 
 PRE_NMS_OUTPUTS = (
     "pre_nms_boxes",
@@ -43,7 +45,14 @@ PRE_NMS_OUTPUTS = (
     "pre_nms_count",
 )
 FASTER_RCNN_PRE_NMS_OUTPUTS = PRE_NMS_OUTPUTS  # backwards-compatible alias
-_PRE_NMS_MODES = frozenset({"faster_rcnn_pre_nms", "oriented_rcnn_pre_nms"})
+_PRE_NMS_MODES = frozenset(
+    {"faster_rcnn_pre_nms", "oriented_rcnn_pre_nms", "rotated_fcos_pre_nms"}
+)
+_PRE_NMS_WRAPPERS = (
+    RotatedFasterRCNNPreNmsExportWrapper,
+    OrientedRCNNPreNmsExportWrapper,
+    RotatedFCOSPreNmsExportWrapper,
+)
 
 
 def _build_wrapper(
@@ -76,6 +85,12 @@ def _build_wrapper(
                 f"oriented_rcnn_pre_nms requires OrientedRCNN, got {mt}."
             )
         return OrientedRCNNPreNmsExportWrapper(model, height=height, width=width)
+    if mode == "rotated_fcos_pre_nms":
+        if not isinstance(model, RotatedFCOS):
+            raise ValueError(
+                f"rotated_fcos_pre_nms requires RotatedFCOS, got {mt}."
+            )
+        return RotatedFCOSPreNmsExportWrapper(model, height=height, width=width)
     raise ValueError(f"Unknown mode: {mode}")
 
 
@@ -147,11 +162,12 @@ def main() -> None:
             "retinanet_heads",
             "faster_rcnn_pre_nms",
             "oriented_rcnn_pre_nms",
+            "rotated_fcos_pre_nms",
         ),
         default="backbone",
         help=(
             "backbone | retinanet_heads | faster_rcnn_pre_nms | "
-            "oriented_rcnn_pre_nms (two-stage detect pre-NMS)."
+            "oriented_rcnn_pre_nms | rotated_fcos_pre_nms (detect pre-NMS)."
         ),
     )
     p.add_argument("--opset", type=int, default=17)
@@ -218,9 +234,7 @@ def main() -> None:
         "num_classes": int(getattr(config, "num_classes", 0) or 0),
         "production": _production_dict(config),
     }
-    if args.mode in _PRE_NMS_MODES and isinstance(
-        wrapper, (RotatedFasterRCNNPreNmsExportWrapper, OrientedRCNNPreNmsExportWrapper)
-    ):
+    if args.mode in _PRE_NMS_MODES and isinstance(wrapper, _PRE_NMS_WRAPPERS):
         meta["max_pre_nms_candidates"] = wrapper.max_candidates
         prod = meta.get("production") or {}
         meta["max_detections_per_image"] = prod.get("max_detections_per_image")

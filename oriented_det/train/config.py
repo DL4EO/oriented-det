@@ -228,6 +228,20 @@ class ModelConfig:
     retinanet_stacked_convs: int = 4
     box_reg_loss_type: str = "smooth_l1"
     box_reg_weight: float = 1.0
+    # Rotated FCOS
+    fcos_stacked_convs: int = 4
+    fcos_center_sampling: bool = True
+    fcos_center_sample_radius: float = 1.5
+    fcos_norm_on_bbox: bool = True
+    fcos_centerness_on_reg: bool = True
+    fcos_scale_angle: bool = True
+    fcos_regress_ranges: Optional[List[List[float]]] = None
+    fcos_angle_weight: float = 1.0
+    fcos_nms_pre: int = 2000
+    aux_loss_type: Optional[str] = None
+    aux_loss_weight: float = 0.0
+    aux_angle_weight: float = 1.0
+    aux_angle_lambda: float = 1.0
     # RPN
     rpn_min_size: float = 0.0
     rpn_pre_nms_top_n: int = 2000

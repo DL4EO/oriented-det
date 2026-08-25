@@ -4,19 +4,20 @@ The models module provides **true oriented object detection** models that predic
 
 ## Overview
 
-OrientedDet provides three baseline detectors (see [Configuration](configuration.md#model_type)):
+OrientedDet provides four baseline detectors (see [Configuration](configuration.md#model_type)):
 
 - **`OrientedRCNN`** — Two-stage ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html)): horizontal RPN with midpoint-offset (6-param) proposals + oriented RoIAlign + oriented ROI head. Reference: MMRotate `oriented_rcnn_r50_fpn_1x_dota_le90`.
 - **`RotatedFasterRCNN`** — Two-stage (Ren et al., NeurIPS 2015 baseline via [MMRotate](https://github.com/open-mmlab/mmrotate), Zhou et al., ACM MM 2022): horizontal RPN + horizontal RoIAlign + rotated ROI head. Reference: `rotated_faster_rcnn_r50_fpn_1x_dota_le90`.
 - **`RotatedRetinaNet`** — Single-stage ([Lin et al., ICCV 2017](https://openaccess.thecvf.com/content_ICCV_2017/papers/Lin_Focal_Loss_for_ICCV_2017_paper.pdf) focal loss): separate cls/reg subnets, oriented anchors. Reference: `rotated_retinanet_obb_r50_fpn_1x_dota_le90`.
+- **`RotatedFCOS`** — Anchor-free single-stage: distance-angle coder, centerness, L1 / KFIoU / decoded rIoU box loss, optional KFIoU aux. Reference: `rotated_fcos_r50_fpn_1x_dota_le90`.
 
-All three detectors:
+All detectors:
 
 - Predict oriented boxes with five parameters (cx, cy, w, h, angle)
 - Preserve angle information through training and inference
 - Use oriented IoU for matching and oriented NMS for post-processing
 
-Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_3x` (79.40% eval-val mAP50), `oriented_rcnn_dota_le90_1x`, `rotated_faster_rcnn_dota_le90_1x` (77.57%), `rotated_retinanet_dota_le90_1x`, `rotated_retinanet_dota_le90_3x`, and `rotated_faster_rcnn_dota_le90_3x`. See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
+Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_3x` (79.40% eval-val mAP50), `rotated_faster_rcnn_dota_le90_3x` (83.42%), `rotated_fcos_dota_le90_3x_riou` (81.58%), `oriented_rcnn_dota_le90_1x`, `rotated_faster_rcnn_dota_le90_1x` (77.57%), `rotated_retinanet_dota_le90_1x`, and `rotated_retinanet_dota_le90_3x`. See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
 
 ## Training vs inference paths (two-stage models)
 

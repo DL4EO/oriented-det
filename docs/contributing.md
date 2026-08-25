@@ -93,9 +93,9 @@ oriented_det/
 
 Aligned with the [Roadmap](roadmap.md):
 
-- **v0.2–v0.3:** Faster R-CNN probiou Hub publish; Rotated FCOS model and configs
-- **v0.4:** HRSC2016 and FAIR1M dataset loaders
-- **v0.5:** RTMDet-R and native YOLO-OBB (clean-room, no Ultralytics)
+- **v0.3:** HRSC2016 and FAIR1M dataset loaders
+- **v0.4:** RTMDet-R and native YOLO-OBB (clean-room, no Ultralytics)
+- **v0.5+:** Swin-FPN backbone
 - **Docs:** Tutorials, hosted MkDocs, eval reports
 - **Ops:** Fused CUDA rotated IoU/NMS kernels
 - Bug fixes and tool scripts

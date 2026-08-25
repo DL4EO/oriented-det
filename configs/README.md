@@ -22,6 +22,8 @@ OrientedDet publishes **DOTA le90 pretrain** checkpoints on Hugging Face Hub. Se
 | Rotated RetinaNet 3× | [rotated_retinanet/dota_le90_3x.json](rotated_retinanet/dota_le90_3x.json) | `rotated_retinanet_dota_le90_3x` | 71.52% |
 | Rotated Faster R-CNN 1× | [rotated_faster_rcnn/dota_le90_1x.json](rotated_faster_rcnn/dota_le90_1x.json) | `rotated_faster_rcnn_dota_le90_1x` | 77.57% |
 | Rotated Faster R-CNN 3× | [rotated_faster_rcnn/dota_le90_3x.json](rotated_faster_rcnn/dota_le90_3x.json) | `rotated_faster_rcnn_dota_le90_3x` | 83.42% |
+| Rotated FCOS 3× rIoU | [rotated_fcos/dota_le90_3x_riou.json](rotated_fcos/dota_le90_3x_riou.json) | `rotated_fcos_dota_le90_3x_riou` | 81.58% |
+| Rotated FCOS 3× KFIoU aux | [rotated_fcos/dota_le90_3x_kfiou_aux.json](rotated_fcos/dota_le90_3x_kfiou_aux.json) | `rotated_fcos_dota_le90_3x_kfiou_aux` | 77.18% |
 
 Download: `odet pretrained download <slug>` or `"load_from_checkpoint": "hf://<slug>"`. Published eval-val reports: [`docs/eval-reports/`](../docs/eval-reports/) (markdown + analysis JSON; `predictions.json` stays in gitignored [`predictions/`](../predictions/) for the viewer).
 
@@ -52,6 +54,7 @@ Example in an external project that keeps local dataset fragments:
 - **[oriented_rcnn/](oriented_rcnn/)** — Oriented R-CNN (horizontal RPN + midpoint-offset + oriented ROI). See [oriented_rcnn/README.md](oriented_rcnn/README.md).
 - **[rotated_faster_rcnn/](rotated_faster_rcnn/)** — Rotated Faster R-CNN. Standard recipe: ProbIoU main ROI loss, Smooth L1 aux 0.1, angle weight 1.0 (`dota_le90_1x.json`; 3× via `dota_le90_3x.json`). See [rotated_faster_rcnn/README.md](rotated_faster_rcnn/README.md).
 - **[rotated_retinanet/](rotated_retinanet/)** — Rotated RetinaNet (one-stage). See [rotated_retinanet/README.md](rotated_retinanet/README.md).
+- **[rotated_fcos/](rotated_fcos/)** — Rotated FCOS (anchor-free one-stage; L1, optional KFIoU aux, or decoded rIoU primary). See [rotated_fcos/README.md](rotated_fcos/README.md).
 
 ## Muted keys
 
@@ -75,7 +78,7 @@ All options, types, and defaults: **[config.schema.json](config.schema.json)** (
 | Section | Description |
 |--------|-------------|
 | `_base_` | Base config path(s): relative to current file, `@odet:…`, or absolute |
-| `model_type` | `oriented_rcnn`, `rotated_faster_rcnn`, or `rotated_retinanet` |
+| `model_type` | `oriented_rcnn`, `rotated_faster_rcnn`, `rotated_retinanet`, or `rotated_fcos` |
 | `dataset` | data_root, format (dota / airbus_playground), train_tiles_dir, val_tiles_dir, **train_tiles_dirs**, **val_tiles_dirs** (optional lists; union without on-disk merge), **same_folder** (DOTA: images and .txt in same dir), **overlap** (tile overlap px, even; deploy uses margin = overlap/2), annotations_file, split_file, **val_split_id**, **train_includes_val** (Airbus: train on all folds; val fold for monitoring only), difficult_strategy, **filter_empty_gt** (DOTA: drop tiles with no GT after filters; MMRotate parity), max_train_samples, max_val_samples, **max_samples_shuffle_seed** (deterministic spread when capping), allowed_classes, ignore_labels, map_labels |
 | `data_loader` | batch_size, num_workers, shuffle, pin_memory |
 | `model` | backbone, fpn_*, anchor_*, target_means/stds, roi_* (loss, batch, iou, schedule, **roi_proj_xy**), rpn_*, use_hbb_for_matching, add_gt_as_proposals, **rpn_nms_threshold** (proposal NMS), **final_nms_iou_threshold** / **final_nms_iou_schedule_*** (post–ROI-head NMS), **final_nms_use_cpu** (exact polygon final NMS on CPU), nms_class_agnostic, max_detections_per_image, inference_pre_nms_score_threshold |
@@ -91,7 +94,7 @@ All options, types, and defaults: **[config.schema.json](config.schema.json)** (
 
 ## PyPI package (`oriented_det.configs`)
 
-A subset of this tree is copied into **`oriented_det/configs/`** for wheels (see **`oriented_det/configs/vendored_manifest.txt`**), including Rotated RetinaNet and Rotated Faster R-CNN DOTA recipes. After editing files here:
+A subset of this tree is copied into **`oriented_det/configs/`** for wheels (see **`oriented_det/configs/vendored_manifest.txt`**), including Oriented R-CNN, Faster R-CNN, RetinaNet, and Rotated FCOS DOTA recipes. After editing files here:
 
 ```bash
 make sync-configs    # update vendored copy

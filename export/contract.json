@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "description": "Inference export contract for oriented-det (ONNX + TensorFlow/Keras detect bundle).",
   "input": {
     "name": "images",
@@ -10,7 +10,7 @@
   },
   "export_modes": {
     "backbone": {
-      "models": ["rotated_retinanet", "oriented_rcnn", "rotated_faster_rcnn"],
+      "models": ["rotated_retinanet", "oriented_rcnn", "rotated_faster_rcnn", "rotated_fcos"],
       "onnx_outputs": "Tuple of FPN feature maps in stable key order (see BackboneExportWrapper).",
       "postprocess": "None in ONNX; heads and decoding remain PyTorch or separate TF code."
     },
@@ -38,6 +38,16 @@
         "pre_nms_count": "scalar int64 valid count <= P"
       },
       "postprocess": "Same Keras detect bundle as faster_rcnn_pre_nms (ORT core + exact rotated NMS)."
+    },
+    "rotated_fcos_pre_nms": {
+      "models": ["rotated_fcos"],
+      "onnx_outputs": {
+        "pre_nms_boxes": "[P, 5] oriented boxes (cx,cy,w,h,angle), P = max_pre_nms_candidates",
+        "pre_nms_scores": "[P]",
+        "pre_nms_labels": "[P] 1-based foreground ids",
+        "pre_nms_count": "scalar int64 valid count <= P"
+      },
+      "postprocess": "Same Keras detect bundle as faster_rcnn_pre_nms (ORT core + exact rotated NMS)."
     }
   },
   "detect_bundle": {
@@ -56,6 +66,7 @@
   "notes": [
     "faster_rcnn_pre_nms and oriented_rcnn_pre_nms pad RPN proposals to fixed P before ROI align for traceable ONNX.",
     "oriented_rcnn_pre_nms uses midpoint RPN + OrientedROIAlign (masked all-N grid_sample under ONNX export).",
+    "rotated_fcos_pre_nms decodes DistanceAnglePointCoder + per-level topk, then pads to nms_pre × FPN levels. No ROI.",
     "onnx2tf SavedModel for this graph may fail on ScatterND; the detect bundle uses ONNX Runtime inside Keras.",
     "TFLite full detect is not supported while NMS remains in Python."
   ]

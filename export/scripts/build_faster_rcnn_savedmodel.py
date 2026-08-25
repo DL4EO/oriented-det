@@ -14,11 +14,6 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from export.postprocess import meta_to_finalize_kwargs  # noqa: E402
-from export.tf_serving_model import (  # noqa: E402
-    BUNDLED_ONNX_NAME,
-    FasterRCNNDetectLayer,
-    save_keras_detect_bundle,
-)
 
 
 def _load_meta(meta_path: Path) -> dict:
@@ -56,6 +51,12 @@ def build_savedmodel(
     onnx_path: Optional[Path] = None,
 ) -> None:
     import tensorflow as tf
+
+    from export.tf_serving_model import (
+        BUNDLED_ONNX_NAME,
+        FasterRCNNDetectLayer,
+        save_keras_detect_bundle,
+    )
 
     meta = _load_meta(meta_path)
     finalize_kwargs = meta_to_finalize_kwargs(meta)

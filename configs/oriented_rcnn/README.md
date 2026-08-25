@@ -212,15 +212,6 @@ The method achieves state-of-the-art accuracy while maintaining competitive effi
 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log) | 1× (12 ep) | `runs/oriented_rcnn/20260616-030231` | `best_mAP_0.78.pth` | 74.79% | `oriented_rcnn_dota_le90_1x` |
 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log) | 3× (36 ep) | `runs/oriented_rcnn/20260621-092802` | `best_mAP_0.82.pth` | 79.40% | `oriented_rcnn_dota_le90_3x` |
 
-### MMRotate reference
-
-DOTA1.0
-
-|         Backbone         |  mAP  | Angle | lr schd | Mem (GB) | Inf Time (fps) | Aug | Batch Size | MMRotate config name |                                                                                                                                                                              Download                                                                                                                                                                              |
-| :----------------------: | :---: | :---: | :-----: | :------: | :------------: | :-: | :--------: | :-------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| ResNet50 (1024,1024,200) | 75.69 | le90  |   1x    |   8.46   |      16.2      |  -  |     2      | `oriented_rcnn_r50_fpn_1x_dota_le90` |                   [model](https://download.openmmlab.com/mmrotate/v0.1.0/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90/oriented_rcnn_r50_fpn_1x_dota_le90-6d2b2ce0.pth) \| [log](https://download.openmmlab.com/mmrotate/v0.1.0/oriented_rcnn/oriented_rcnn_r50_fpn_1x_dota_le90/oriented_rcnn_r50_fpn_1x_dota_le90_20220127_100150.log.json)                   |
-| ResNet50 (1024,1024,200) | 75.63 | le90  |   1x    |   7.37   |      21.2      |  -  |     2      | `oriented_rcnn_r50_fpn_fp16_1x_dota_le90` |         [model](https://download.openmmlab.com/mmrotate/v0.1.0/oriented_rcnn/oriented_rcnn_r50_fpn_fp16_1x_dota_le90/oriented_rcnn_r50_fpn_fp16_1x_dota_le90-57c88621.pth) \| [log](https://download.openmmlab.com/mmrotate/v0.1.0/oriented_rcnn/oriented_rcnn_r50_fpn_fp16_1x_dota_le90/oriented_rcnn_r50_fpn_fp16_1x_dota_le90_20220303_195049.log.json)         |
-
 ## Usage
 
 ### Training

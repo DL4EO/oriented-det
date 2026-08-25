@@ -44,6 +44,7 @@ def _print_help() -> None:
     print("  odet playground-csv --data-root /path/to/export")
     print("  odet export-tf --config path/to/config.json --checkpoint path/to/model.pth")
     print("  odet export-tf --mode oriented_rcnn_pre_nms --config ... --checkpoint ...")
+    print("  odet export-tf --mode rotated_fcos_pre_nms --config ... --checkpoint ...")
 
 
 def _invoke(module_path: str, prog: str, args: List[str]) -> None:

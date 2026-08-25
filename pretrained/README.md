@@ -83,4 +83,11 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 | `rotated_retinanet_dota_le90_1x` | 1× (12 ep) | 64.14% | [`dota_le90_1x.json`](../configs/rotated_retinanet/dota_le90_1x.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json`](./rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log`](./rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log) |
 | `rotated_retinanet_dota_le90_3x` | 3× (36 ep) | 71.52% | [`dota_le90_3x.json`](../configs/rotated_retinanet/dota_le90_3x.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json`](./rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log`](./rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log) |
 
+### Rotated FCOS R50-FPN
+
+| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
+|------|--------|----------------|--------|--------------|-----------|
+| `rotated_fcos_dota_le90_3x_riou` | 3× decoded rIoU primary | 81.58% | [`dota_le90_3x_riou.json`](../configs/rotated_fcos/dota_le90_3x_riou.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.json`](./rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.log`](./rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.log) |
+| `rotated_fcos_dota_le90_3x_kfiou_aux` | 3× L1 + KFIoU aux 0.1 | 77.18% | [`dota_le90_3x_kfiou_aux.json`](../configs/rotated_fcos/dota_le90_3x_kfiou_aux.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log) |
+
 Per-class AP and eval reports: [`docs/eval-reports/`](../docs/eval-reports/) (tracked reports; raw `predictions.json` under gitignored [`predictions/`](../predictions/) for `odet viewer`).

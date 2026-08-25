@@ -7,7 +7,7 @@
 - **Geometry**: Rotated bounding boxes (rbox: cx, cy, w, h, angle), quadrilateral boxes (qbox), polygon ↔ rbox ↔ hbox conversions, angle normalization (le90, 0–180°), flip/rotate/scale transforms, visualization helpers
 - **IoU & NMS**: Rotated IoU and oriented NMS (CPU with optional GPU kernels when available); AABB pre-filtering; `obb_to_xyxy` / HBB conversion
 - **Datasets**: DOTA polygon loader (pattern, split file, or separate folders), image tiling, label filtering, ignore masks, oriented mAP evaluation
-- **Models**: **Oriented R-CNN** ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html); horizontal RPN + MidpointOffset → oriented RoIAlign + oriented ROI head), **Rotated Faster R-CNN** (Ren et al., NeurIPS 2015 two-stage baseline with horizontal RPN + horizontal RoIAlign + rotated ROI head; MMRotate reference), **Rotated RetinaNet** ([Lin et al., ICCV 2017](https://openaccess.thecvf.com/content_ICCV_2017/papers/Lin_Focal_Loss_for_ICCV_2017_paper.pdf); oriented anchors, sigmoid focal loss); ResNet + FPN backbones; selective loading of external checkpoints where configs wire `checkpoint.load_from_checkpoint`
+- **Models**: **Oriented R-CNN** ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html); horizontal RPN + MidpointOffset → oriented RoIAlign + oriented ROI head), **Rotated Faster R-CNN** (Ren et al., NeurIPS 2015 two-stage baseline with horizontal RPN + horizontal RoIAlign + rotated ROI head; MMRotate reference), **Rotated RetinaNet** ([Lin et al., ICCV 2017](https://openaccess.thecvf.com/content_ICCV_2017/papers/Lin_Focal_Loss_for_ICCV_2017_paper.pdf); oriented anchors, sigmoid focal loss), **Rotated FCOS** (anchor-free single-stage; distance-angle coder, centerness, L1 / KFIoU / decoded rIoU); ResNet + FPN backbones; selective loading of external checkpoints where configs wire `checkpoint.load_from_checkpoint`
 - **Training**: JSON configs + **`odet train`**, mixed precision (AMP), gradient accumulation, checkpointing, best-metric tracking, TensorBoard, optional curriculum learning and profiling
 
 ## Installation
@@ -139,11 +139,11 @@ DOTA configs: per-model `dota_le90_1x.json` / `dota_le90_3x.json` under [configs
 See **[docs/roadmap.md](docs/roadmap.md)** for the full public plan. Summary:
 
 - **v0.1** (shipped): Geometry, IoU/NMS, DOTA, three ResNet-FPN detectors, config training, Hub pretrained weights
-- **v0.2**: probiou Faster R-CNN 3× on Hub
-- **v0.3**: Rotated FCOS (anchor-free single-stage)
-- **v0.4**: HRSC2016 and FAIR1M dataset support
-- **v0.5**: RTMDet-R and native YOLO-OBB (AGPL-free production tier)
-- **v0.6+**: Swin-FPN backbone; optional fused CUDA kernels; hosted docs
+- **v0.1.1** (shipped): ProbIoU Faster R-CNN 1×/3× on Hub
+- **v0.2** (shipped): Rotated FCOS (anchor-free single-stage); Hub `rotated_fcos_dota_le90_3x_riou` (81.58% eval-val mAP50)
+- **v0.3**: HRSC2016 and FAIR1M dataset support
+- **v0.4**: RTMDet-R and native YOLO-OBB (AGPL-free production tier)
+- **v0.5+**: Swin-FPN backbone; optional fused CUDA kernels; hosted docs
 
 ## Contributing
 
@@ -151,7 +151,7 @@ Contributions are welcome. Run tests with `pytest`, format with `black` and `ruf
 
 ## Publishing to PyPI
 
-Version **0.1.1** — tag releases as **`v0.1.1`** (git) matching `version` in `pyproject.toml`.
+Version **0.2.0** — tag releases as **`v0.2.0`** (git) matching `version` in `pyproject.toml`.
 
 Configs: edit **`configs/`** at the repo root, then **`make sync-configs`** so **`oriented_det/configs/`** stays in sync (see **`oriented_det/configs/vendored_manifest.txt`**). CI runs **`make check-configs`**.
 

@@ -3,6 +3,7 @@
 Mapping to MMRotate:
 - DeltaXYWHBBoxCoder: 4 params (dx, dy, dw, dh). Rotated Faster R-CNN RPN.
 - DeltaXYWHAHBBoxCoder: 5 params (dx, dy, dw, dh, da) with norm_factor, edge_swap. ROI head.
+- DistanceAnglePointCoder: 5 params (left, top, right, bottom, angle) from FPN points. Rotated FCOS.
 - MidpointOffsetCoder: 6 params (dx, dy, dw, dh, da, db). Oriented R-CNN RPN (midpoint offset).
   Expects axis-aligned xyxy proposals (x1, y1, x2, y2) because it transforms horizontal boxes
   into oriented boxes; (da, db) are defined relative to the proposal center and size.
@@ -24,6 +25,7 @@ from .oriented_rpn import (
     encode_oriented_boxes,
     decode_oriented_boxes,
     normalize_boxes_to_le90,
+    norm_angle_le90,
 )
 from ..ops import obb_to_xyxy_gpu
 from .oriented_rpn import _obb_to_hbb_obb as obb_to_hbb_obb
@@ -184,6 +186,130 @@ def xyxy_to_obb(xyxy: torch.Tensor) -> torch.Tensor:
     angle = torch.zeros_like(cx)  # Axis-aligned boxes have angle=0
     
     return torch.stack([cx, cy, w, h, angle], dim=1)
+
+
+class DistanceAnglePointCoder:
+    """Encode OBB as distances from a point: (left, top, right, bottom, angle).
+
+    MMRotate ``DistanceAnglePointCoder`` (channel order follows their *code*, not the
+    outdated docstring that said top/bottom/left/right). Used by Rotated FCOS.
+    """
+
+    def __init__(self, angle_version: str = "le90", clip_border: bool = False):
+        if angle_version != "le90":
+            raise ValueError(f"Only angle_version='le90' is supported, got {angle_version!r}")
+        self.angle_version = angle_version
+        self.clip_border = clip_border
+
+    def encode(
+        self,
+        points: torch.Tensor,
+        gt_bboxes: torch.Tensor,
+        max_dis: Optional[float] = None,
+        eps: float = 0.1,
+    ) -> torch.Tensor:
+        """Encode GT OBBs relative to points.
+
+        Args:
+            points: [N, 2] (x, y)
+            gt_bboxes: [N, 5] (cx, cy, w, h, angle)
+            max_dis: optional upper clamp on distances
+            eps: ensure target < max_dis when clamping
+
+        Returns:
+            [N, 5] (left, top, right, bottom, angle)
+        """
+        if torch is None:
+            raise RuntimeError("PyTorch is required.")
+        assert points.size(0) == gt_bboxes.size(0)
+        assert points.size(-1) == 2 and gt_bboxes.size(-1) == 5
+        return _obb2distance(points, gt_bboxes, max_dis=max_dis, eps=eps)
+
+    def decode(
+        self,
+        points: torch.Tensor,
+        pred: torch.Tensor,
+        max_shape: Optional[Tuple[int, ...]] = None,
+    ) -> torch.Tensor:
+        """Decode (left, top, right, bottom, angle) to OBB (cx, cy, w, h, angle) le90.
+
+        Args:
+            points: [N, 2] or [B, N, 2]
+            pred: [N, 5] or [B, N, 5]
+            max_shape: unused unless clip_border (kept for API parity)
+        """
+        if torch is None:
+            raise RuntimeError("PyTorch is required.")
+        if self.clip_border is False:
+            max_shape = None
+        return _distance2obb(points, pred, max_shape=max_shape)
+
+
+def _obb2distance(
+    points: torch.Tensor,
+    gt_bboxes: torch.Tensor,
+    max_dis: Optional[float] = None,
+    eps: float = 0.1,
+) -> torch.Tensor:
+    """Point + OBB → (left, top, right, bottom, angle). Matches MMRotate ``obb2distance``."""
+    ctr, wh, angle = torch.split(gt_bboxes, [2, 2, 1], dim=-1)
+    cos_angle, sin_angle = torch.cos(angle), torch.sin(angle)
+    # Local frame: rotate (point - ctr) by R(θ) = [[c, s], [-s, c]]
+    rot_matrix = torch.cat([cos_angle, sin_angle, -sin_angle, cos_angle], dim=-1).reshape(
+        -1, 2, 2
+    )
+    offset = points - ctr
+    offset = torch.matmul(rot_matrix, offset.unsqueeze(-1)).squeeze(-1)
+    w, h = wh[..., 0], wh[..., 1]
+    offset_x, offset_y = offset[..., 0], offset[..., 1]
+    left = w / 2 + offset_x
+    right = w / 2 - offset_x
+    top = h / 2 + offset_y
+    bottom = h / 2 - offset_y
+    if max_dis is not None:
+        left = left.clamp(min=0, max=max_dis - eps)
+        top = top.clamp(min=0, max=max_dis - eps)
+        right = right.clamp(min=0, max=max_dis - eps)
+        bottom = bottom.clamp(min=0, max=max_dis - eps)
+    return torch.stack((left, top, right, bottom, angle.squeeze(-1)), dim=-1)
+
+
+def _distance2obb(
+    points: torch.Tensor,
+    distance: torch.Tensor,
+    max_shape: Optional[Tuple[int, ...]] = None,
+) -> torch.Tensor:
+    """(left, top, right, bottom, angle) + point → OBB. Matches MMRotate ``distance2obb``."""
+    flat = distance.dim() == 2
+    if flat:
+        points_ = points
+        distance_ = distance
+    else:
+        b, n, _ = distance.shape
+        points_ = points.reshape(b * n, 2)
+        distance_ = distance.reshape(b * n, 5)
+
+    dist4, angle = distance_.split([4, 1], dim=1)
+    cos_angle, sin_angle = torch.cos(angle), torch.sin(angle)
+    # Inverse of encode rotation: R^T = [[c, -s], [s, c]]
+    rot_matrix = torch.cat([cos_angle, -sin_angle, sin_angle, cos_angle], dim=1).reshape(
+        -1, 2, 2
+    )
+    wh = dist4[:, :2] + dist4[:, 2:]
+    offset_t = ((dist4[:, 2:] - dist4[:, :2]) / 2).unsqueeze(2)
+    offset = torch.bmm(rot_matrix, offset_t).squeeze(2)
+    ctr = points_ + offset
+    angle_regular = norm_angle_le90(angle.squeeze(-1)).unsqueeze(-1)
+    obb = torch.cat([ctr, wh, angle_regular], dim=-1)
+    obb = normalize_boxes_to_le90(obb)
+
+    if max_shape is not None:
+        # Optional border clip kept as no-op for API parity (clip_border=False by default).
+        pass
+
+    if flat:
+        return obb
+    return obb.reshape(b, n, 5)
 
 
 class MidpointOffsetCoder:
@@ -348,6 +474,7 @@ def _midpoint_offset_decode(
 __all__ = [
     "DeltaXYWHBBoxCoder",
     "DeltaXYWHAHBBoxCoder",
+    "DistanceAnglePointCoder",
     "MidpointOffsetCoder",
     "obb_to_hbb_obb",
     "obb_to_xyxy",

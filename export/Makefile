@@ -11,7 +11,7 @@ CKPT ?= $(REPO_ROOT)/pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c50
 HEIGHT ?= 1024
 WIDTH ?= 1024
 ARTIFACTS ?= $(CURDIR)/artifacts
-# export-tf / export-detect: faster_rcnn_pre_nms | oriented_rcnn_pre_nms
+# export-tf / export-detect: faster_rcnn_pre_nms | oriented_rcnn_pre_nms | rotated_fcos_pre_nms
 # export-onnx alone also accepts backbone | retinanet_heads
 MODE ?= faster_rcnn_pre_nms
 ONNX_OUT ?= $(ARTIFACTS)/pre_nms.onnx
@@ -62,6 +62,11 @@ help:
 	@echo "  make export-tf MODE=oriented_rcnn_pre_nms \\"
 	@echo "    CONFIG=$(REPO_ROOT)/configs/oriented_rcnn/dota_le90_1x.json \\"
 	@echo "    CKPT=$(REPO_ROOT)/pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.pth"
+	@echo ""
+	@echo "Rotated FCOS example:"
+	@echo "  make export-tf MODE=rotated_fcos_pre_nms \\"
+	@echo "    CONFIG=$(REPO_ROOT)/configs/rotated_fcos/dota_le90_3x_riou.json \\"
+	@echo "    CKPT=$(REPO_ROOT)/pretrained/rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth"
 
 ## export-tf: ONNX + Keras detect bundle via odet
 export-tf:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet
+from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet, RotatedFCOS
 from oriented_det.train.config import TrainingExperimentConfig, apply_inference_config_to_model
 
 
@@ -85,6 +85,20 @@ def _infer_retinanet_num_classes_from_state_dict(state_dict: dict) -> int | None
     return cls_channels // num_anchors
 
 
+def _infer_fcos_num_classes_from_state_dict(state_dict: dict) -> int | None:
+    """FCOS head.conv_cls is [K, C, 3, 3]; head.conv_bbox is [4, ...] (no anchors)."""
+    cls_weight_key = "head.conv_cls.weight"
+    bbox_weight_key = "head.conv_bbox.weight"
+    angle_key = "head.conv_angle.weight"
+    if cls_weight_key not in state_dict or bbox_weight_key not in state_dict:
+        return None
+    if angle_key not in state_dict:
+        return None
+    if state_dict[bbox_weight_key].shape[0] != 4:
+        return None
+    return int(state_dict[cls_weight_key].shape[0])
+
+
 def infer_num_classes_from_checkpoint(checkpoint_path: str, model_type: str) -> int:
     """
     Infer the number of classes from the checkpoint state_dict.
@@ -120,6 +134,10 @@ def infer_num_classes_from_checkpoint(checkpoint_path: str, model_type: str) -> 
     # bbox logits are anchors * 5 oriented box deltas.
     elif 'retinanet' in model_type.lower():
         num_classes = _infer_retinanet_num_classes_from_state_dict(state_dict)
+        if num_classes is not None:
+            return num_classes
+    elif 'fcos' in model_type.lower():
+        num_classes = _infer_fcos_num_classes_from_state_dict(state_dict)
         if num_classes is not None:
             return num_classes
     
@@ -170,6 +188,8 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
         checkpoint_foreground = state_dict[cls_weight_key].shape[0] - 1
     elif 'retinanet' in model_type.lower():
         checkpoint_foreground = _infer_retinanet_num_classes_from_state_dict(state_dict)
+    elif 'fcos' in model_type.lower():
+        checkpoint_foreground = _infer_fcos_num_classes_from_state_dict(state_dict)
 
     if num_classes_config is None:
         if checkpoint_foreground is not None:
@@ -360,6 +380,44 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             final_nms_iou_schedule_values=m.final_nms_iou_schedule_values if m else None,
             roi_box_reg_iou_schedule_epochs=getattr(m, "roi_box_reg_iou_schedule_epochs", None) if m else None,
             roi_box_reg_iou_schedule_values=getattr(m, "roi_box_reg_iou_schedule_values", None) if m else None,
+            final_nms_use_cpu=getattr(m, "final_nms_use_cpu", False) if m else False,
+        )
+    elif 'fcos' in model_type_lower:
+        m = config.model
+        rr = getattr(m, "fcos_regress_ranges", None) if m else None
+        regress_ranges = None
+        if rr is not None:
+            regress_ranges = [tuple(pair) for pair in rr]
+        model = RotatedFCOS(
+            num_classes=num_classes,
+            backbone_name=m.backbone if m else 'resnet50',
+            pretrained_backbone=m.pretrained_backbone if m else False,
+            trainable_layers=model_kwargs.get('trainable_layers', 5),
+            returned_layers=model_kwargs.get('returned_layers', None),
+            fpn_strides=model_kwargs.get('fpn_strides', None),
+            fpn_extra_level=getattr(m, "fpn_extra_level", True) if m else True,
+            stacked_convs=getattr(m, "fcos_stacked_convs", 4) if m else 4,
+            center_sampling=getattr(m, "fcos_center_sampling", True) if m else True,
+            center_sample_radius=getattr(m, "fcos_center_sample_radius", 1.5) if m else 1.5,
+            norm_on_bbox=getattr(m, "fcos_norm_on_bbox", True) if m else True,
+            centerness_on_reg=getattr(m, "fcos_centerness_on_reg", True) if m else True,
+            scale_angle=getattr(m, "fcos_scale_angle", True) if m else True,
+            regress_ranges=regress_ranges,
+            focal_alpha=model_kwargs.get('roi_focal_alpha', 0.25),
+            focal_gamma=model_kwargs.get('roi_focal_gamma', 2.0),
+            box_reg_weight=getattr(m, "box_reg_weight", 1.0) if m else 1.0,
+            box_reg_loss_type=getattr(m, "box_reg_loss_type", "l1") if m else "l1",
+            aux_loss_type=getattr(m, "aux_loss_type", None) if m else None,
+            aux_loss_weight=getattr(m, "aux_loss_weight", 0.0) if m else 0.0,
+            aux_angle_weight=getattr(m, "aux_angle_weight", 1.0) if m else 1.0,
+            aux_angle_lambda=getattr(m, "aux_angle_lambda", 1.0) if m else 1.0,
+            angle_weight=getattr(m, "fcos_angle_weight", 1.0) if m else 1.0,
+            score_threshold=model_kwargs.get('inference_pre_nms_score_threshold', 0.05),
+            final_nms_iou_threshold=m.final_nms_iou_threshold if m else 0.1,
+            max_detections_per_image=getattr(m, "max_detections_per_image", 2000) if m else 2000,
+            nms_pre=getattr(m, "fcos_nms_pre", 2000) if m else 2000,
+            final_nms_iou_schedule_epochs=m.final_nms_iou_schedule_epochs if m else None,
+            final_nms_iou_schedule_values=m.final_nms_iou_schedule_values if m else None,
             final_nms_use_cpu=getattr(m, "final_nms_use_cpu", False) if m else False,
         )
     else:

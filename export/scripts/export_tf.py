@@ -8,7 +8,11 @@ import sys
 from pathlib import Path
 
 
-_PRE_NMS_MODES = ("faster_rcnn_pre_nms", "oriented_rcnn_pre_nms")
+_PRE_NMS_MODES = (
+    "faster_rcnn_pre_nms",
+    "oriented_rcnn_pre_nms",
+    "rotated_fcos_pre_nms",
+)
 
 
 def _require_export_extras(*, require_ort: bool = True) -> None:

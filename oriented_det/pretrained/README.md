@@ -16,6 +16,8 @@ Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 - `rotated_faster_rcnn_dota_le90_3x`
 - `rotated_retinanet_dota_le90_1x`
 - `rotated_retinanet_dota_le90_3x`
+- `rotated_fcos_dota_le90_3x_riou`
+- `rotated_fcos_dota_le90_3x_kfiou_aux`
 
 On-disk / Hub filenames include a **SHA-256[:8]** suffix (see `tools/publish_checkpoint.py`).
 Each published weight can have sidecar artifacts beside it in `pretrained/`: `<weight-stem>.json` for the exact final run config and `<weight-stem>.log` for the training log.

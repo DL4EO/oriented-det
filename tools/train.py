@@ -75,7 +75,7 @@ import sys
 import traceback
 import argparse
 
-from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet
+from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet, RotatedFCOS
 from oriented_det.data import (
     DOTADataset,
     AirbusPlaygroundCSVDataset,
@@ -436,15 +436,21 @@ def print_wizard_recommendations(
         print(f"Angle spread (std, wrapped le90): {float(np.std(angles)):.3f} rad")
 
     print(f"\n[Wizard] Recommendations:")
+    model_type = str(getattr(config, "model_type", "")).lower()
+    is_fcos = model_type == "rotated_fcos"
 
     current_max_det = int(getattr(config.model, "max_detections_per_image", 100))
+    # Dense aerial scenes need headroom above p99 objects/image; DOTA recipes often keep 2000.
     suggested_max_det = int(np.clip(math.ceil(max(20.0, p99_obj) * 3.0), 100, 3000))
+    if is_fcos:
+        # Match MMRotate Rotated FCOS test_cfg.max_per_img=2000 for DOTA-scale density.
+        suggested_max_det = max(suggested_max_det, 2000)
     if current_max_det < int(0.6 * suggested_max_det):
         print(
             f"- max_detections_per_image: {current_max_det} -> ~{suggested_max_det} "
             f"(current is likely tight vs p99 objects/image={p99_obj:.1f})."
         )
-    elif current_max_det > int(2.0 * suggested_max_det):
+    elif current_max_det > int(2.0 * suggested_max_det) and not is_fcos:
         print(
             f"- max_detections_per_image: {current_max_det} is high for this data; try ~{suggested_max_det} "
             "(can reduce false positives and evaluation overhead)."
@@ -452,60 +458,118 @@ def print_wizard_recommendations(
     else:
         print(f"- max_detections_per_image: {current_max_det} looks reasonable for this dataset.")
 
-    current_ratios = [float(r) for r in getattr(config.model, "anchor_ratios", [0.5, 1.0, 2.0]) if float(r) > 0]
-    current_aspects = [max(r, 1.0 / r) for r in current_ratios]
-    if aspects.size > 0:
-        q70 = float(np.percentile(aspects, 70))
-        q90 = float(np.percentile(aspects, 90))
-        q99 = float(np.percentile(aspects, 99))
-        suggested_ratios = sorted(
-            {
-                _round_ratio(1.0 / max(q90, 1.0)),
-                _round_ratio(1.0 / max(q70, 1.0)),
-                1.0,
-                _round_ratio(max(q70, 1.0)),
-                _round_ratio(max(q90, 1.0)),
-            }
-        )
-        current_min_aspect = min(current_aspects) if current_aspects else 1.0
-        current_max_aspect = max(current_aspects) if current_aspects else 1.0
-        coverage = float(
-            ((aspects >= current_min_aspect) & (aspects <= current_max_aspect)).mean()
-        ) if aspects.size > 0 else 1.0
-        if coverage < 0.9 or current_max_aspect < 0.8 * q90:
+    if is_fcos:
+        strides = [int(s) for s in getattr(config.model, "fpn_strides", [8, 16, 32, 64, 128])]
+        min_stride = min(strides) if strides else 8
+        if widths.size > 0:
+            w10 = float(np.percentile(widths, 10))
+            w50 = float(np.percentile(widths, 50))
+            cells_p10 = w10 / float(min_stride)
             print(
-                "- anchor_ratios: current="
-                f"{current_ratios}, suggested~{suggested_ratios} "
-                f"(current covers {coverage:.1%} of GT aspect spread; p90={q90:.2f}, p99={q99:.2f})."
+                f"- fpn_strides: finest={min_stride}px; GT width p10/p50={w10:.1f}/{w50:.1f}px "
+                f"(~{cells_p10:.1f}/{w50 / float(min_stride):.1f} cells on P3). "
+                "Small vehicles near 1–2 cells are hard for encoded L1; keep P3 and "
+                "prefer decoded `kfiou` for overlap."
+            )
+        radius = float(getattr(config.model, "fcos_center_sample_radius", 1.5))
+        if radius < 1.5:
+            print(
+                f"- fcos_center_sample_radius: {radius} -> 1.5 "
+                "(MMRotate default; too-small radius starves positives on dense tiles)."
             )
         else:
+            print(f"- fcos_center_sample_radius: {radius} matches MMRotate (1.5×stride).")
+        box_loss = str(getattr(config.model, "box_reg_loss_type", "l1")).lower()
+        aux_type = getattr(config.model, "aux_loss_type", None)
+        aux_w = float(getattr(config.model, "aux_loss_weight", 0.0) or 0.0)
+        if box_loss in ("l1", "smooth_l1"):
             print(
-                f"- anchor_ratios: current {current_ratios} already covers GT aspect spread well "
-                f"(coverage {coverage:.1%})."
+                f"- box_reg_loss_type: {box_loss} (L1 baseline). Dense small classes "
+                "(ship/small-vehicle/storage-tank) often lag; try L1 + decoded aux "
+                "(configs/rotated_fcos/dota_le90_1x_kfiou_aux.json)."
             )
+        elif box_loss == "kfiou":
+            print("- box_reg_loss_type: kfiou (decoded KFIoU primary). Prefer L1 + aux recipes.")
+        elif box_loss == "riou":
+            print(
+                "- box_reg_loss_type: riou (decoded differentiable polygon IoU, 1-IoU). "
+                "Recipe configs/rotated_fcos/dota_le90_1x_riou.json uses lr 2.5e-3. "
+                "Not sampling pairwise_rotated_iou."
+            )
+        else:
+            print(f"- box_reg_loss_type: {box_loss}")
+        if aux_w > 0.0:
+            ang_w = float(getattr(config.model, "aux_angle_weight", 1.0) or 0.0)
+            ang_lam = float(getattr(config.model, "aux_angle_lambda", 1.0) or 1.0)
+            print(
+                f"- aux_loss_type: {aux_type} weight={aux_w:g} (centerness-weighted decoded "
+                f"+ gated angle weight={ang_w:g} λ={ang_lam:g}). "
+                "Keep L1 primary and lr 2.5e-4."
+            )
+        else:
+            print("- aux_loss_weight: 0 (decoded aux off).")
+        print(
+            "- anchors / target_stds: skipped (anchor-free DistanceAnglePointCoder; "
+            "not DeltaXYWHA)."
+        )
+        print("- tip: run `make lr-finder` to tune learning_rate.")
+    else:
+        current_ratios = [
+            float(r) for r in getattr(config.model, "anchor_ratios", [0.5, 1.0, 2.0]) if float(r) > 0
+        ]
+        current_aspects = [max(r, 1.0 / r) for r in current_ratios]
+        if aspects.size > 0:
+            q70 = float(np.percentile(aspects, 70))
+            q90 = float(np.percentile(aspects, 90))
+            q99 = float(np.percentile(aspects, 99))
+            suggested_ratios = sorted(
+                {
+                    _round_ratio(1.0 / max(q90, 1.0)),
+                    _round_ratio(1.0 / max(q70, 1.0)),
+                    1.0,
+                    _round_ratio(max(q70, 1.0)),
+                    _round_ratio(max(q90, 1.0)),
+                }
+            )
+            current_min_aspect = min(current_aspects) if current_aspects else 1.0
+            current_max_aspect = max(current_aspects) if current_aspects else 1.0
+            coverage = float(
+                ((aspects >= current_min_aspect) & (aspects <= current_max_aspect)).mean()
+            ) if aspects.size > 0 else 1.0
+            if coverage < 0.9 or current_max_aspect < 0.8 * q90:
+                print(
+                    "- anchor_ratios: current="
+                    f"{current_ratios}, suggested~{suggested_ratios} "
+                    f"(current covers {coverage:.1%} of GT aspect spread; p90={q90:.2f}, p99={q99:.2f})."
+                )
+            else:
+                print(
+                    f"- anchor_ratios: current {current_ratios} already covers GT aspect spread well "
+                    f"(coverage {coverage:.1%})."
+                )
 
-    current_target_stds = list(getattr(config.model, "target_stds", (0.1, 0.1, 0.2, 0.2, 0.1)))
-    if widths.size > 0:
-        spread_w = float(np.std(np.log(np.clip(widths, 1e-6, None))))
-        spread_h = float(np.std(np.log(np.clip(heights, 1e-6, None))))
-        spread_wh = 0.5 * (spread_w + spread_h)
-        spread_angle = float(np.std(angles))
-        wh_std = float(np.clip(0.12 + 0.18 * spread_wh, 0.15, 0.4))
-        angle_std = float(np.clip(0.05 + 0.25 * (spread_angle / (math.pi / 2.0)), 0.05, 0.25))
-        suggested_target_stds = [0.1, 0.1, round(wh_std, 3), round(wh_std, 3), round(angle_std, 3)]
-        needs_update = (
-            len(current_target_stds) == 5 and (
+        current_target_stds = list(getattr(config.model, "target_stds", (0.1, 0.1, 0.2, 0.2, 0.1)))
+        if widths.size > 0:
+            spread_w = float(np.std(np.log(np.clip(widths, 1e-6, None))))
+            spread_h = float(np.std(np.log(np.clip(heights, 1e-6, None))))
+            spread_wh = 0.5 * (spread_w + spread_h)
+            spread_angle = float(np.std(angles))
+            wh_std = float(np.clip(0.12 + 0.18 * spread_wh, 0.15, 0.4))
+            angle_std = float(
+                np.clip(0.05 + 0.25 * (spread_angle / (math.pi / 2.0)), 0.05, 0.25)
+            )
+            suggested_target_stds = [0.1, 0.1, round(wh_std, 3), round(wh_std, 3), round(angle_std, 3)]
+            needs_update = len(current_target_stds) == 5 and (
                 abs(float(current_target_stds[2]) - suggested_target_stds[2]) > 0.08
                 or abs(float(current_target_stds[4]) - suggested_target_stds[4]) > 0.05
             )
-        )
-        if needs_update:
-            print(
-                f"- target_stds: current={current_target_stds}, suggested~{suggested_target_stds} "
-                "(derived from GT scale/angle spread; useful when box-reg is unstable)."
-            )
-        else:
-            print(f"- target_stds: current {current_target_stds} looks close to data spread.")
+            if needs_update:
+                print(
+                    f"- target_stds: current={current_target_stds}, suggested~{suggested_target_stds} "
+                    "(derived from GT scale/angle spread; useful when box-reg is unstable)."
+                )
+            else:
+                print(f"- target_stds: current {current_target_stds} looks close to data spread.")
 
     batch_size = int(config.data_loader.batch_size)
     grad_acc = max(1, int(config.training.gradient_accumulation_steps))
@@ -763,8 +827,48 @@ def create_model_from_config(
             roi_box_reg_iou_schedule_values=config.model.roi_box_reg_iou_schedule_values,
             final_nms_use_cpu=getattr(config.model, "final_nms_use_cpu", False),
         )
+    elif model_type == "rotated_fcos":
+        rr = getattr(config.model, "fcos_regress_ranges", None)
+        regress_ranges = None
+        if rr is not None:
+            regress_ranges = [tuple(pair) for pair in rr]
+        model = RotatedFCOS(
+            num_classes=num_classes,
+            backbone_name=config.model.backbone,
+            pretrained_backbone=config.model.pretrained_backbone,
+            trainable_layers=trainable_layers,
+            returned_layers=fpn_returned_layers,
+            fpn_strides=fpn_strides,
+            fpn_extra_level=getattr(config.model, "fpn_extra_level", True),
+            stacked_convs=getattr(config.model, "fcos_stacked_convs", 4),
+            center_sampling=getattr(config.model, "fcos_center_sampling", True),
+            center_sample_radius=getattr(config.model, "fcos_center_sample_radius", 1.5),
+            norm_on_bbox=getattr(config.model, "fcos_norm_on_bbox", True),
+            centerness_on_reg=getattr(config.model, "fcos_centerness_on_reg", True),
+            scale_angle=getattr(config.model, "fcos_scale_angle", True),
+            regress_ranges=regress_ranges,
+            focal_alpha=roi_focal_alpha,
+            focal_gamma=roi_focal_gamma,
+            box_reg_weight=getattr(config.model, "box_reg_weight", 1.0),
+            box_reg_loss_type=getattr(config.model, "box_reg_loss_type", "l1"),
+            aux_loss_type=getattr(config.model, "aux_loss_type", None),
+            aux_loss_weight=getattr(config.model, "aux_loss_weight", 0.0),
+            aux_angle_weight=getattr(config.model, "aux_angle_weight", 1.0),
+            aux_angle_lambda=getattr(config.model, "aux_angle_lambda", 1.0),
+            angle_weight=getattr(config.model, "fcos_angle_weight", 1.0),
+            score_threshold=inference_pre_nms_score_threshold,
+            final_nms_iou_threshold=config.model.final_nms_iou_threshold,
+            max_detections_per_image=getattr(config.model, "max_detections_per_image", 2000),
+            nms_pre=getattr(config.model, "fcos_nms_pre", 2000),
+            final_nms_iou_schedule_epochs=config.model.final_nms_iou_schedule_epochs,
+            final_nms_iou_schedule_values=config.model.final_nms_iou_schedule_values,
+            final_nms_use_cpu=getattr(config.model, "final_nms_use_cpu", False),
+        )
     else:
-        raise ValueError(f"Unknown model_type: {model_type}. Supported: rotated_faster_rcnn, oriented_rcnn, rotated_retinanet")
+        raise ValueError(
+            f"Unknown model_type: {model_type}. Supported: rotated_faster_rcnn, "
+            "oriented_rcnn, rotated_retinanet, rotated_fcos"
+        )
     
     model.to(device)
     return model, roi_loss_type

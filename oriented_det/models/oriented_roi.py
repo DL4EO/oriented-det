@@ -412,8 +412,8 @@ def oriented_roi_align(
                         align_corners=False,
                     )
                 
-                # Store results in pre-allocated output
-                output_features[chunk_indices] = sampled_chunk
+                # grid_sample may promote to float32 under AMP; match feature-map dtype.
+                output_features[chunk_indices] = sampled_chunk.to(dtype=dtype)
     
     return output_features
 

@@ -20,6 +20,8 @@ from .kfiou import (
     xy_wh_r_to_xy_sigma,
 )
 from .probiou import probiou_loss, probiou_loss_per_box
+from .gaussian_angle import aspect_gated_angle_loss_per_box
+from .diff_iou_rotated import diff_iou_rotated_2d, riou_loss_per_box
 
 # Canonical OBB -> xyxy (HBB) conversion; works on CPU and GPU
 obb_to_xyxy = obb_to_xyxy_gpu
@@ -55,4 +57,7 @@ __all__ = [
     "mean_auxiliary_box_reg_loss",
     "probiou_loss_per_box",
     "probiou_loss",
+    "aspect_gated_angle_loss_per_box",
+    "diff_iou_rotated_2d",
+    "riou_loss_per_box",
 ]

@@ -40,6 +40,16 @@ This document records what **matches** PyTorch full inference and what is **inte
 | Final NMS / score floors / Keras bundle | **Same** as Faster R-CNN detect bundle (`export/postprocess.py`). |
 | onnx2tf full graph | Same ORT-inside-Keras mitigation; pure TF conversion remains experimental. |
 
+## `rotated_fcos_pre_nms` + detect bundle (Rotated FCOS)
+
+| Aspect | Parity |
+|--------|--------|
+| Backbone + FCOS head + DistanceAnglePointCoder decode | Same weights/logic as `RotatedFCOS` eval via `rotated_fcos_decode_pre_nms`. |
+| Per-level pre-NMS cap | Always `topk(min(nms_pre, H×W))` **then** score / size / finite filters (equivalent to the old filter-then-topk eager path; keeps `k` in the ONNX graph). Invalid top-k rows are zeroed (`score=0`, `w=h=0`) and left in the padded tensor so ONNX does not need `argsort`/`nonzero`. |
+| Pre-NMS output padding | Same `pad_pre_nms_detections` as two-stage. Default `P = nms_pre ×` FPN levels. `pre_nms_count` is the live top-k length (includes zeroed slots). Keras score floor + `w,h>=1` drop junk. |
+| Final NMS / score floors / Keras bundle | **Same** as Faster R-CNN detect bundle. FCOS eval NMS is class-aware (`nms_class_agnostic: false`). The shared bundle also drops `w<1` or `h<1` after NMS; FCOS eval keeps those (default `min_bbox_size=0`). |
+| onnx2tf full graph | Same ORT-inside-Keras mitigation. |
+
 ## ONNX → TensorFlow
 
 | Risk | Mitigation |
@@ -56,4 +66,4 @@ This document records what **matches** PyTorch full inference and what is **inte
 
 ## Regression tests
 
-`export/tests/test_export_wrappers.py` checks **wrapper forward shapes** against PyTorch without requiring ONNX or TensorFlow. Golden numeric `.npz` dumps are optional and not required for CI. Pre-NMS parity: `test_faster_rcnn_export_parity.py`, `test_oriented_rcnn_export_parity.py`.
+`export/tests/test_export_wrappers.py` checks **wrapper forward shapes** against PyTorch without requiring ONNX or TensorFlow. Golden numeric `.npz` dumps are optional and not required for CI. Pre-NMS parity: `test_faster_rcnn_export_parity.py`, `test_oriented_rcnn_export_parity.py`, `test_rotated_fcos_export_parity.py`.

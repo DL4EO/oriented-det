@@ -400,12 +400,12 @@ def _pad_dim0_to_k(
     """Pad or truncate ``tensor`` along dim 0 to length ``k`` (ONNX-safe ``Concat``, not ``Expand``).
 
     Slice assignment (``out[:n] = x``) lowers to ``Expand`` in ONNX and fails at runtime when
-    the dynamic length is not 1 or ``k``. ``torch.cat`` with zero padding traces correctly.
+    the dynamic length is not 1 or ``k``. Always ``cat([x[:k], zeros(k)])[:k]`` so the pad
+    stays in the graph even when the trace dummy is already empty or length ``k``.
     """
     truncated = tensor[:k]
-    pad_n = k - truncated.shape[0]
-    pad = torch.zeros((pad_n,) + pad_shape_tail, dtype=tensor.dtype, device=tensor.device)
-    return torch.cat([truncated, pad], dim=0)
+    pad = tensor.new_zeros((k,) + pad_shape_tail)
+    return torch.cat([truncated, pad], dim=0)[:k]
 
 
 def pad_pre_nms_detections(
@@ -416,20 +416,24 @@ def pad_pre_nms_detections(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Pad pre-NMS detections to fixed length for ONNX export."""
     k = int(max_candidates)
-    if pre_nms is None or pre_nms.boxes.numel() == 0:
-        boxes = torch.zeros((k, 5), dtype=dtype, device=device)
-        scores = torch.zeros((k,), dtype=dtype, device=device)
-        labels = torch.zeros((k,), dtype=torch.int64, device=device)
-        count = torch.zeros((), dtype=torch.int64, device=device)
-        return boxes, scores, labels, count
+    if pre_nms is None:
+        raw_boxes = torch.zeros((0, 5), dtype=dtype, device=device)
+        raw_scores = torch.zeros((0,), dtype=dtype, device=device)
+        raw_labels = torch.zeros((0,), dtype=torch.int64, device=device)
+    else:
+        raw_boxes = pre_nms.boxes
+        raw_scores = pre_nms.scores
+        raw_labels = pre_nms.labels
 
-    boxes = _pad_dim0_to_k(pre_nms.boxes, k, (5,))
-    scores = _pad_dim0_to_k(pre_nms.scores, k, ())
-    labels = _pad_dim0_to_k(pre_nms.labels, k, ())
-    count = torch.minimum(
-        torch.as_tensor(pre_nms.boxes.shape[0], dtype=torch.int64, device=device),
-        torch.as_tensor(k, dtype=torch.int64, device=device),
-    )
+    boxes = _pad_dim0_to_k(raw_boxes, k, (5,))
+    scores = _pad_dim0_to_k(raw_scores, k, ())
+    labels = _pad_dim0_to_k(raw_labels, k, ())
+    raw_n = raw_boxes.shape[0]
+    if not torch.is_tensor(raw_n):
+        raw_n = torch.as_tensor(raw_n, dtype=torch.int64, device=device)
+    else:
+        raw_n = raw_n.to(dtype=torch.int64)
+    count = torch.minimum(raw_n, torch.as_tensor(k, dtype=torch.int64, device=device))
     return boxes, scores, labels, count
 
 

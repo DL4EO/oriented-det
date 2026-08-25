@@ -214,7 +214,7 @@ From the repo root you can run: `make lr-finder` or `make lr-finder CONFIG=confi
 
 **Features:**
 - Config-based training (all parameters in JSON files)
-- Supports multiple model types (Rotated Faster R-CNN, Oriented R-CNN, Rotated RetinaNet)
+- Supports multiple model types (Rotated Faster R-CNN, Oriented R-CNN, Rotated RetinaNet, Rotated FCOS)
 - Command-line parameter overrides (batch size, AMP, etc.)
 - Load DOTA dataset (automatically discovers classes)
 - Automatic checkpointing and experiment management

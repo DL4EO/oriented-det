@@ -64,6 +64,19 @@ def _minimal_config(model_type: str) -> TrainingExperimentConfig:
             retinanet_stacked_convs=4,
             box_reg_loss_type="l1",
             box_reg_weight=0.9,
+            fcos_stacked_convs=4,
+            fcos_center_sampling=True,
+            fcos_center_sample_radius=1.5,
+            fcos_norm_on_bbox=True,
+            fcos_centerness_on_reg=True,
+            fcos_scale_angle=True,
+            fcos_angle_weight=1.25,
+            fcos_nms_pre=1500,
+            fcos_regress_ranges=[[-1, 64], [64, 128], [128, 256], [256, 512], [512, 1e8]],
+            aux_loss_type="kfiou",
+            aux_loss_weight=0.1,
+            aux_angle_weight=0.5,
+            aux_angle_lambda=1.5,
         ),
         training=TrainingConfig(),
         loss=LossConfig(loss_type="class_weighted"),
@@ -117,6 +130,75 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     assert call_kw["final_nms_iou_schedule_values"] == [0.6, 0.4, 0.2]
     assert call_kw["roi_box_reg_iou_schedule_epochs"] == [10, 20]
     assert call_kw["roi_box_reg_iou_schedule_values"] == [0.2, 0.1, 0.0]
+
+
+def test_create_model_fcos_passes_config_fields():
+    train = _load_train_module()
+    mock_cls = MagicMock()
+    inst = MagicMock()
+    inst.to = MagicMock(return_value=inst)
+    mock_cls.return_value = inst
+
+    cfg = _minimal_config("rotated_fcos")
+    cfg.loss = LossConfig(loss_type="focal", focal_alpha=0.25, focal_gamma=2.0)
+    device = torch.device("cpu")
+    with patch.object(train, "RotatedFCOS", mock_cls):
+        model, _ = train.create_model_from_config(
+            cfg, num_classes=3, device=device, roi_class_weights=None
+        )
+    assert model is inst
+    call_kw = mock_cls.call_args.kwargs
+    assert call_kw["backbone_name"] == "resnet18"
+    assert call_kw["returned_layers"] == [2, 3, 4]
+    assert call_kw["fpn_strides"] == [8, 16, 32, 64, 128]
+    assert call_kw["fpn_extra_level"] is True
+    assert call_kw["stacked_convs"] == 4
+    assert call_kw["center_sampling"] is True
+    assert call_kw["center_sample_radius"] == pytest.approx(1.5)
+    assert call_kw["norm_on_bbox"] is True
+    assert call_kw["centerness_on_reg"] is True
+    assert call_kw["scale_angle"] is True
+    assert call_kw["angle_weight"] == pytest.approx(1.25)
+    assert call_kw["nms_pre"] == 1500
+    assert call_kw["box_reg_loss_type"] == "l1"
+    assert call_kw["aux_loss_type"] == "kfiou"
+    assert call_kw["aux_loss_weight"] == pytest.approx(0.1)
+    assert call_kw["aux_angle_weight"] == pytest.approx(0.5)
+    assert call_kw["aux_angle_lambda"] == pytest.approx(1.5)
+    assert call_kw["box_reg_weight"] == pytest.approx(0.9)
+    assert call_kw["score_threshold"] == pytest.approx(0.13)
+    assert call_kw["final_nms_iou_threshold"] == pytest.approx(0.31)
+    assert call_kw["max_detections_per_image"] == 33
+    assert call_kw["focal_alpha"] == pytest.approx(0.25)
+    assert call_kw["focal_gamma"] == pytest.approx(2.0)
+    assert call_kw["regress_ranges"] == [
+        (-1, 64),
+        (64, 128),
+        (128, 256),
+        (256, 512),
+        (512, 1e8),
+    ]
+
+
+def test_fcos_riou_recipe_loads_lr_and_loss_type():
+    root = Path(__file__).resolve().parents[1]
+    cfg = TrainingExperimentConfig.load(root / "configs" / "rotated_fcos" / "dota_le90_1x_riou.json")
+    assert cfg.model_type == "rotated_fcos"
+    assert cfg.model.box_reg_loss_type == "riou"
+    assert cfg.training.learning_rate == pytest.approx(0.0025)
+    assert float(cfg.model.aux_loss_weight or 0.0) == pytest.approx(0.0)
+
+
+def test_fcos_riou_3x_recipe_keeps_lr_and_extends_schedule():
+    root = Path(__file__).resolve().parents[1]
+    cfg = TrainingExperimentConfig.load(root / "configs" / "rotated_fcos" / "dota_le90_3x_riou.json")
+    assert cfg.model_type == "rotated_fcos"
+    assert cfg.model.box_reg_loss_type == "riou"
+    assert cfg.training.learning_rate == pytest.approx(0.0025)
+    assert cfg.training.num_epochs == 36
+    assert cfg.training.lr_scheduler_milestones == [24, 33]
+    assert cfg.training.lr_warmup_steps == 2000
+    assert float(cfg.model.aux_loss_weight or 0.0) == pytest.approx(0.0)
 
 
 def test_load_model_from_checkpoint_retinanet_passes_fpn_and_anchor_config():

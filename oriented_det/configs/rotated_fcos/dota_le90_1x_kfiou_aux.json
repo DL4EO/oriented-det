@@ -1,0 +1,10 @@
+{
+  "_base_": ["./dota_le90_1x.json"],
+  "model": {
+    "box_reg_loss_type": "l1",
+    "aux_loss_type": "kfiou",
+    "aux_loss_weight": 0.1,
+    "aux_angle_weight": 1.0,
+    "aux_angle_lambda": 1.0
+  }
+}

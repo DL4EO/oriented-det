@@ -881,3 +881,425 @@ def test_warn_if_fpn_strides_mismatch():
         assert len(w) == 0
         warn_if_fpn_strides_mismatch([4, 9], [4, 8])
         assert len(w) == 1
+
+
+class TestDistanceAnglePointCoder:
+    def test_encode_decode_roundtrip(self):
+        from oriented_det.models.bbox_coder import DistanceAnglePointCoder
+
+        coder = DistanceAnglePointCoder(angle_version="le90")
+        gt = torch.tensor(
+            [
+                [64.0, 64.0, 40.0, 20.0, 0.0],
+                [80.0, 50.0, 30.0, 16.0, math.pi / 6],
+            ],
+            dtype=torch.float32,
+        )
+        # Points near GT centers (inside boxes)
+        points = gt[:, :2].clone()
+        encoded = coder.encode(points, gt)
+        assert encoded.shape == (2, 5)
+        assert (encoded[:, :4] > 0).all()
+        decoded = coder.decode(points, encoded)
+        assert torch.allclose(decoded[:, :2], gt[:, :2], atol=1e-4)
+        assert torch.allclose(decoded[:, 2:4], gt[:, 2:4], atol=1e-4)
+        # Angle after le90 normalize
+        from oriented_det.models.oriented_rpn import norm_angle_le90
+
+        assert torch.allclose(
+            norm_angle_le90(decoded[:, 4]), norm_angle_le90(gt[:, 4]), atol=1e-4
+        )
+
+
+class TestFCOSAssignerAndCenterness:
+    def test_centerness_symmetric_and_edge(self):
+        from oriented_det.models.rotated_fcos import centerness_target
+
+        sym = torch.tensor([[10.0, 10.0, 10.0, 10.0]])
+        assert float(centerness_target(sym)) == pytest.approx(1.0, abs=1e-5)
+        edge = torch.tensor([[1.0, 10.0, 19.0, 10.0]])
+        assert float(centerness_target(edge)) < 0.5
+
+    def test_assign_center_positive_correct_level(self):
+        from oriented_det.models.rotated_fcos import (
+            assign_fcos_targets_single,
+            DEFAULT_REGRESS_RANGES,
+            generate_fpn_points,
+        )
+
+        # One GT sized for P3 range (max distance ~20 < 64)
+        gt = torch.tensor([[64.0, 64.0, 32.0, 16.0, 0.0]])
+        labels_1idx = torch.tensor([1], dtype=torch.long)
+        strides = [8, 16, 32, 64, 128]
+        feat_sizes = [(16, 16), (8, 8), (4, 4), (2, 2), (1, 1)]
+        points = generate_fpn_points(feat_sizes, strides, torch.float32, torch.device("cpu"))
+        concat = torch.cat(points, dim=0)
+        n_per = [p.size(0) for p in points]
+        rr = []
+        for i, p in enumerate(points):
+            r = torch.tensor(DEFAULT_REGRESS_RANGES[i], dtype=torch.float32)
+            rr.append(r[None].expand(p.size(0), 2))
+        concat_rr = torch.cat(rr, dim=0)
+        labels, bbox_t, angle_t, pos = assign_fcos_targets_single(
+            concat,
+            gt,
+            labels_1idx,
+            concat_rr,
+            n_per,
+            strides,
+            num_classes=2,
+            center_sampling=True,
+            center_sample_radius=1.5,
+        )
+        assert pos.any()
+        assert (labels[pos] == 0).all()  # 0-indexed class 0
+        # Center point of P3 should be positive
+        p3 = points[0]
+        center_dists = ((p3 - gt[0, :2]) ** 2).sum(dim=1)
+        nearest = int(center_dists.argmin())
+        assert bool(pos[nearest])
+
+
+class TestRotatedFCOS:
+    def test_smooth_l1_maps_to_l1_with_warning(self):
+        from oriented_det.models import RotatedFCOS
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            model = RotatedFCOS(
+                num_classes=2,
+                backbone_name="resnet18",
+                pretrained_backbone=False,
+                returned_layers=[2, 3, 4],
+                fpn_extra_level=True,
+                fpn_strides=[8, 16, 32, 64, 128],
+                box_reg_loss_type="smooth_l1",
+            )
+        assert model.box_reg_loss_type == "l1"
+        assert any(issubclass(x.category, UserWarning) and "smooth_l1" in str(x.message) for x in w)
+
+    def test_scales_features_length_mismatch_raises(self):
+        from oriented_det.models import RotatedFCOS
+
+        model = RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+        )
+        # Drop one Scale so head.forward must fail the assert
+        model.head.scales = model.head.scales[:-1]
+        model.train()
+        image, target = _dummy_inputs()
+        with pytest.raises(ValueError, match="scales length"):
+            model([image], [target])
+
+    def test_train_forward_backward(self):
+        from oriented_det.models import RotatedFCOS
+
+        image, target = _dummy_inputs()
+        model = RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+        )
+        model.train()
+        losses = model([image], [target])
+        assert "loss_classifier" in losses
+        assert "loss_box_reg" in losses
+        assert "loss_centerness" in losses
+        total = sum(losses.values())
+        assert torch.isfinite(total)
+        total.backward()
+
+    def test_kfiou_train_forward_backward_has_bbox_angle_grads(self):
+        from oriented_det.models import RotatedFCOS
+
+        image, target = _dummy_inputs()
+        # norm_on_bbox=False uses exp() so bbox preds stay positive and grads flow at init
+        model = RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+            box_reg_loss_type="kfiou",
+            norm_on_bbox=False,
+        )
+        model.train()
+        losses = model([image], [target])
+        total = sum(losses.values())
+        assert torch.isfinite(total)
+        assert float(losses["loss_box_reg"]) > 0.0
+        total.backward()
+        assert model.head.conv_bbox.weight.grad is not None
+        assert model.head.conv_angle.weight.grad is not None
+        assert float(model.head.conv_bbox.weight.grad.norm()) > 0.0
+        assert float(model.head.conv_angle.weight.grad.norm()) > 0.0
+
+    def test_kfiou_rejects_probiou_primary(self):
+        from oriented_det.models import RotatedFCOS
+
+        with pytest.raises(ValueError, match="probiou"):
+            RotatedFCOS(
+                num_classes=2,
+                backbone_name="resnet18",
+                pretrained_backbone=False,
+                returned_layers=[2, 3, 4],
+                fpn_extra_level=True,
+                fpn_strides=[8, 16, 32, 64, 128],
+                box_reg_loss_type="probiou",
+            )
+
+    def test_riou_train_forward_backward_has_bbox_angle_grads(self):
+        from oriented_det.models import RotatedFCOS
+
+        image, target = _dummy_inputs()
+        model = RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+            box_reg_loss_type="riou",
+            norm_on_bbox=False,
+        )
+        model.train()
+        losses = model([image], [target])
+        total = sum(losses.values())
+        assert torch.isfinite(total)
+        assert float(losses["loss_box_reg"]) > 0.0
+        total.backward()
+        assert model.head.conv_bbox.weight.grad is not None
+        assert model.head.conv_angle.weight.grad is not None
+        assert float(model.head.conv_bbox.weight.grad.norm()) > 0.0
+        assert float(model.head.conv_angle.weight.grad.norm()) > 0.0
+
+    def _fcos_aux_model(self, aux_loss_type: str):
+        from oriented_det.models import RotatedFCOS
+
+        return RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+            box_reg_loss_type="l1",
+            aux_loss_type=aux_loss_type,
+            aux_loss_weight=0.1,
+            norm_on_bbox=False,
+        )
+
+    def test_l1_kfiou_aux_forward_backward(self):
+        image, target = _dummy_inputs()
+        model = self._fcos_aux_model("kfiou")
+        model.train()
+        losses = model([image], [target])
+        assert "loss_box_reg_aux" in losses
+        total = sum(losses.values())
+        assert torch.isfinite(total)
+        assert float(losses["loss_box_reg"]) > 0.0
+        assert float(losses["loss_box_reg_aux"]) > 0.0
+        total.backward()
+        assert float(model.head.conv_bbox.weight.grad.norm()) > 0.0
+        assert float(model.head.conv_angle.weight.grad.norm()) > 0.0
+
+    def test_l1_probiou_aux_forward_backward(self):
+        image, target = _dummy_inputs()
+        model = self._fcos_aux_model("probiou")
+        model.train()
+        losses = model([image], [target])
+        assert "loss_box_reg_aux" in losses
+        total = sum(losses.values())
+        assert torch.isfinite(total)
+        assert float(losses["loss_box_reg_aux"]) > 0.0
+        total.backward()
+        assert float(model.head.conv_bbox.weight.grad.norm()) > 0.0
+        assert float(model.head.conv_angle.weight.grad.norm()) > 0.0
+
+    def test_aux_rejects_sampling_riou(self):
+        from oriented_det.models import RotatedFCOS
+
+        with pytest.raises(ValueError, match="aux_loss_type"):
+            RotatedFCOS(
+                num_classes=2,
+                backbone_name="resnet18",
+                pretrained_backbone=False,
+                returned_layers=[2, 3, 4],
+                fpn_extra_level=True,
+                fpn_strides=[8, 16, 32, 64, 128],
+                box_reg_loss_type="l1",
+                aux_loss_type="riou",
+                aux_loss_weight=0.1,
+            )
+
+    def test_aux_weight_zero_omits_aux_key(self):
+        from oriented_det.models import RotatedFCOS
+
+        image, target = _dummy_inputs()
+        model = RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+            box_reg_loss_type="l1",
+            aux_loss_type="kfiou",
+            aux_loss_weight=0.0,
+            norm_on_bbox=False,
+        )
+        model.train()
+        losses = model([image], [target])
+        assert "loss_box_reg_aux" not in losses
+        assert model.aux_loss_type is None
+
+    def test_aux_rejects_nonpositive_angle_lambda(self):
+        from oriented_det.models import RotatedFCOS
+
+        with pytest.raises(ValueError, match="aux_angle_lambda"):
+            RotatedFCOS(
+                num_classes=2,
+                backbone_name="resnet18",
+                pretrained_backbone=False,
+                returned_layers=[2, 3, 4],
+                fpn_extra_level=True,
+                fpn_strides=[8, 16, 32, 64, 128],
+                box_reg_loss_type="l1",
+                aux_loss_type="kfiou",
+                aux_loss_weight=0.1,
+                aux_angle_weight=1.0,
+                aux_angle_lambda=0.0,
+            )
+
+    def test_kfiou_perfect_match_with_norm_on_bbox_stride_restore(self):
+        """Stride restore: preds = normalized targets decode to GT → identical-box KFIoU loss.
+
+        KFIoU of two equal Gaussians is 1/3 (Kalman fuse), so ``1 - kfiou`` ≈ 2/3,
+        not 0. Encoded L1 on the same tensors is 0.
+        """
+        from oriented_det.models.bbox_coder import DistanceAnglePointCoder
+        from oriented_det.models.rotated_fcos import (
+            assign_fcos_targets_single,
+            compute_rotated_fcos_loss,
+            generate_fpn_points,
+            DEFAULT_REGRESS_RANGES,
+        )
+        from oriented_det.ops.kfiou import kfiou_loss_per_box
+
+        device = torch.device("cpu")
+        num_classes = 2
+        strides = [8.0]
+        h, w = 4, 4
+        points = generate_fpn_points([(h, w)], strides, torch.float32, device)
+        n = points[0].size(0)
+        gt = torch.tensor([[12.0, 12.0, 24.0, 16.0, 0.0]], device=device)
+        labels = torch.tensor([1], dtype=torch.long, device=device)
+        rr = torch.tensor(DEFAULT_REGRESS_RANGES[0], dtype=torch.float32).expand(n, 2)
+        lab, bbox_t, ang_t, pos = assign_fcos_targets_single(
+            points[0],
+            gt,
+            labels,
+            rr,
+            [n],
+            strides,
+            num_classes,
+            center_sampling=True,
+            center_sample_radius=1.5,
+        )
+        assert pos.any()
+        # Normalized targets (as loss does with norm_on_bbox)
+        bbox_t_norm = bbox_t / strides[0]
+
+        cls = torch.zeros(1, num_classes, h, w, device=device)
+        bbox = bbox_t_norm.reshape(h, w, 4).permute(2, 0, 1).unsqueeze(0).contiguous()
+        angle = ang_t.reshape(h, w, 1).permute(2, 0, 1).unsqueeze(0).contiguous()
+        ctr = torch.zeros(1, 1, h, w, device=device)
+        for i in pos.nonzero(as_tuple=False).flatten().tolist():
+            yi, xi = divmod(i, w)
+            cls[0, int(lab[i].item()), yi, xi] = 5.0
+
+        coder = DistanceAnglePointCoder(angle_version="le90")
+        loss_kw = dict(
+            cls_scores=[cls],
+            bbox_preds=[bbox],
+            angle_preds=[angle],
+            centernesses=[ctr],
+            points=points,
+            strides=strides,
+            gt_boxes=[gt],
+            gt_labels=[labels],
+            gt_boxes_ignore=None,
+            num_classes=num_classes,
+            regress_ranges=[DEFAULT_REGRESS_RANGES[0]],
+            center_sampling=True,
+            center_sample_radius=1.5,
+            norm_on_bbox=True,
+            focal_alpha=0.25,
+            focal_gamma=2.0,
+            box_reg_weight=1.0,
+            angle_weight=1.0,
+            bbox_coder=coder,
+        )
+        losses_l1 = compute_rotated_fcos_loss(**loss_kw, box_reg_loss_type="l1")
+        assert float(losses_l1["loss_box_reg"]) < 1e-6
+
+        losses = compute_rotated_fcos_loss(**loss_kw, box_reg_loss_type="kfiou")
+        expected = float(kfiou_loss_per_box(gt, gt).mean())
+        assert abs(float(losses["loss_box_reg"]) - expected) < 1e-4
+        # Without stride restore, decoded sizes would be /8 → much higher loss
+        assert expected < 0.7
+
+        losses_riou = compute_rotated_fcos_loss(**loss_kw, box_reg_loss_type="riou")
+        assert float(losses_riou["loss_box_reg"]) < 2e-3
+        assert torch.isfinite(losses_riou["loss_box_reg"])
+
+    @torch.no_grad()
+    def test_eval_output_format(self):
+        from oriented_det.models import RotatedFCOS
+
+        image, _ = _dummy_inputs()
+        model = RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+            score_threshold=0.0,
+        )
+        model.eval()
+        outs = model([image])
+        assert isinstance(outs, list)
+        assert "rboxes" in outs[0]
+        assert "labels" in outs[0]
+        assert "scores" in outs[0]
+
+    @torch.no_grad()
+    def test_eval_batch_with_detections_does_not_shadow_cls_scores(self):
+        """Regression: NMS loop must not overwrite FPN cls_scores (breaks image 1+)."""
+        from oriented_det.models import RotatedFCOS
+
+        model = RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+            score_threshold=0.0,
+            max_detections_per_image=50,
+        )
+        model.eval()
+        images = [torch.rand(3, 128, 128), torch.rand(3, 128, 128)]
+        outs = model(images)
+        assert len(outs) == 2
+        assert "rboxes" in outs[0] and "rboxes" in outs[1]

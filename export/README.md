@@ -33,6 +33,7 @@ odet export-tf \
   --checkpoint path/to/model.pth \
   --output-dir ./odet_export
 # Oriented R-CNN: add --mode oriented_rcnn_pre_nms
+# Rotated FCOS:    add --mode rotated_fcos_pre_nms
 ```
 
 No source checkout or `make` required. Artifacts land under `./odet_export/` (`pre_nms.onnx`, `detect/keras_model.keras`, `detect/model.onnx`).
@@ -146,6 +147,27 @@ cd export && make export-tf \
 ```
 
 (`make` runs `odet` from the repo root; prefer paths relative to the repo root.)
+
+**Rotated FCOS — full detect (same Keras bundle contract):**
+
+```bash
+# Download weights if needed:
+# odet pretrained download rotated_fcos_dota_le90_3x_riou
+
+odet export-tf \
+  --config configs/rotated_fcos/dota_le90_3x_riou.json \
+  --checkpoint pretrained/rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth \
+  --mode rotated_fcos_pre_nms \
+  --output-dir ./odet_export_fcos
+
+# Or in-repo Makefile:
+cd export && make export-tf \
+  MODE=rotated_fcos_pre_nms \
+  CONFIG=configs/rotated_fcos/dota_le90_3x_riou.json \
+  CKPT=pretrained/rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth \
+  ARTIFACTS=$(pwd)/artifacts/rotated_fcos
+```
+
 ### Compare PyTorch vs TF metrics
 
 Run the same val split with both backends, then compare `predictions.json` metadata / `analysis_*.json`:
@@ -241,7 +263,7 @@ Full detect TFLite is not supported while NMS remains in Python (see [PARITY.md]
 ## Contract summary
 
 - **Input:** `float32` NCHW RGB in **[0, 1]** (same convention as PyTorch training/inference in this repo).
-- **Fixed H, W** at export unless you pass `--dynamic-batch` (batch axis only; **not** allowed for `faster_rcnn_pre_nms` / `oriented_rcnn_pre_nms`).
+- **Fixed H, W** at export unless you pass `--dynamic-batch` (batch axis only; **not** allowed for `faster_rcnn_pre_nms` / `oriented_rcnn_pre_nms` / `rotated_fcos_pre_nms`).
 - **NMS:** not in ONNX; applied in the Keras detect bundle — see [PARITY.md](PARITY.md).
 - **Detect bundle files:** `keras_model.keras`, `model.onnx`, `export_meta.json`.
 

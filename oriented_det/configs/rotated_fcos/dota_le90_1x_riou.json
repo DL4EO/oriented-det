@@ -1,0 +1,11 @@
+{
+  "_base_": ["./dota_le90_1x.json"],
+  "training": {
+    "learning_rate": 0.0025
+  },
+  "model": {
+    "box_reg_loss_type": "riou",
+    "aux_loss_type": null,
+    "aux_loss_weight": 0.0
+  }
+}

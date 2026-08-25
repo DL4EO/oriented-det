@@ -14,7 +14,7 @@ From the repo root you can also use `make train` (same default `CONFIG`).
 ## What happens
 
 1. **Dataset** — paths and augmentations from JSON (`dataset`, `augmentation` sections)
-2. **Model** — `model_type` selects Oriented R-CNN, Rotated Faster R-CNN, or Rotated RetinaNet
+2. **Model** — `model_type` selects Oriented R-CNN, Rotated Faster R-CNN, Rotated RetinaNet, or Rotated FCOS
 3. **Training loop** — AMP, gradient accumulation, checkpointing, TensorBoard (see [Training user guide](../user-guide/training.md))
 4. **Validation** — metrics during training per `evaluation.*` in config
 

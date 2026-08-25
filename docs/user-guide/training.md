@@ -485,7 +485,7 @@ config = TrainingExperimentConfig.load(
 config.print_summary()
 ```
 
-`tools/train.py` builds the model from `config.model_type` (`oriented_rcnn`, `rotated_faster_rcnn`, or `rotated_retinanet`) and writes `runs/<model_type>/<timestamp>/config.json`.
+`tools/train.py` builds the model from `config.model_type` (`oriented_rcnn`, `rotated_faster_rcnn`, `rotated_retinanet`, or `rotated_fcos`) and writes `runs/<model_type>/<timestamp>/config.json`.
 
 ## Understanding Loss Components
 

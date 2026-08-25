@@ -19,9 +19,18 @@ To reconstruct provenance for an old run without stamps, align `train.log` start
 
 Anchor-based detectors (`RotatedFasterRCNN`, `OrientedRCNN`, `RotatedRetinaNet`) default to **horizontal RPN priors** (`theta = 0`), aligned with MMRotate-style generators. **`model.anchor_angles` is not a config field**—if present in JSON, strict loading rejects it as an unknown `model` key. Advanced use: pass **`anchor_angles=...`** only when constructing a model in Python (see `oriented_det/models/README.md`).
 
+`RotatedFCOS` is anchor-free (`model_type: rotated_fcos`) and does not use RPN anchors.
+
+## FCOS box regression (`model.box_reg_loss_type`, `model.aux_loss_type`)
+
+- **`box_reg_loss_type`**: `l1` (default), `kfiou`, or `riou` (decoded differentiable polygon IoU). DOTA Hub FCOS is 3× rIoU ([`dota_le90_3x_riou.json`](../../configs/rotated_fcos/dota_le90_3x_riou.json), lr **2.5e-3**); L1 + KFIoU aux remains published as `rotated_fcos_dota_le90_3x_kfiou_aux`.
+- **`aux_loss_type`** / **`aux_loss_weight`**: decoded `kfiou` or `probiou` on positives (centerness-weighted). Weight **0** disables. Typical **0.1**. Aux `riou` is rejected. Logged as `loss_box_reg_aux`. Aux is Gaussian overlap plus an aspect-gated heading term (`ω sin²(2Δθ)`); **`aux_angle_weight`** (default **1.0**, **0** disables the heading term) and **`aux_angle_lambda`** (default **1.0**) control it.
+
+Recipes: [`configs/rotated_fcos/dota_le90_1x_kfiou_aux.json`](../../configs/rotated_fcos/dota_le90_1x_kfiou_aux.json), [`dota_le90_3x_kfiou_aux.json`](../../configs/rotated_fcos/dota_le90_3x_kfiou_aux.json), [`dota_le90_1x_riou.json`](../../configs/rotated_fcos/dota_le90_1x_riou.json), [`dota_le90_3x_riou.json`](../../configs/rotated_fcos/dota_le90_3x_riou.json).
+
 ## Debug mode (`--debug`)
 
-When training with `--debug` (or `make train DEBUG=1`), extra logs are printed and written to TensorBoard to help diagnose low mAP compared to reference implementations (e.g. MMRotate reaching ~70% mAP in 12 epochs):
+When training with `--debug` (or `make train DEBUG=1`), extra logs are printed and written to TensorBoard to help diagnose training/eval issues (data, losses, matching, mAP):
 
 - **Config summary**: Dataset sizes, eval score/iou thresholds, classes, mAP frequency.
 - **First batch**: GT counts per image (min/max/mean) and per-class counts to spot data/annotation issues.

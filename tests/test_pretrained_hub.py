@@ -37,6 +37,12 @@ def test_list_assets():
     assert assets["rotated_faster_rcnn_dota_le90_3x"] == (
         "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
     )
+    assert assets["rotated_fcos_dota_le90_3x_riou"] == (
+        "rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth"
+    )
+    assert assets["rotated_fcos_dota_le90_3x_kfiou_aux"] == (
+        "rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.pth"
+    )
 
 
 def test_resolve_hf_uri_slug(tmp_path, monkeypatch):
