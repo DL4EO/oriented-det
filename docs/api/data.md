@@ -8,7 +8,7 @@
 
 ## Important Notes
 
-### DOTA Dataset Loading Modes
+### DOTA Polygon Format
 
 The DOTA loader supports three modes for organizing your dataset:
 
@@ -23,13 +23,17 @@ The DOTA loader supports three modes for organizing your dataset:
 - The loader converts polygons to `QBox` (which normalizes point order) and then to `RBox`
 - `QBox` ensures counter-clockwise orientation and orders points starting from top-most
 
+### HRSC2016
+
+`HRSC2016Dataset` reads official XML (`mbox_cx/cy/w/h/ang` in **radians**) and ImageSets. Every object is class `ship`. Angles are converted through `polygon_to_rbox` so training uses le90. Config: `dataset.format: hrsc2016`. See [Data loading](../user-guide/data.md#hrsc2016).
+
 ### Data Augmentation
 
 OrientedDet supports two types of data augmentation:
 
-1. **Geometric Transforms** (Oriented Bounding Box Aware): `HorizontalFlip`, `VerticalFlip`, `Rotate`, `Compose`
-   - These transforms modify both the image and oriented bounding boxes
-   - Angle information is preserved correctly
+1. **Geometric Transforms** (Oriented Bounding Box Aware): `apply_random_train_flips`, `apply_random_train_rotate`, `apply_flip_to_*`, `apply_rotate_to_*`
+   - These modify both the image and oriented bounding boxes, then `normalize_le90`
+   - **Training** applies flips then rotate from collate (config `preprocessing.enable_flip_*` / `enable_random_rotate`)
 
 2. **Albumentations** (Non-Geometric Only): `create_albumentations_augmentation`, `AlbumentationsTransform`
    - Only non-geometric augmentations are supported (color, contrast, blur, noise, etc.)
@@ -120,15 +124,18 @@ visualize_tiles(
 ### Data Augmentation
 
 ```python
-from oriented_det.data import HorizontalFlip, Rotate, Compose, create_albumentations_augmentation
+from oriented_det.data import (
+    apply_random_train_flips,
+    apply_random_train_rotate,
+    create_albumentations_augmentation,
+)
 
-# Geometric transforms (oriented bounding box aware)
-aug = Compose([
-    HorizontalFlip(p=0.5),
-    Rotate(degrees=90, p=0.3),
-])
-
-augmented_image, augmented_boxes = aug(image, rboxes, image_width, image_height)
+image, rboxes = apply_random_train_flips(
+    image, rboxes, image_width=image_width, image_height=image_height,
+)
+image, rboxes = apply_random_train_rotate(
+    image, rboxes, image_width=image_width, image_height=image_height,
+)
 
 # Albumentations (non-geometric only)
 aug = create_albumentations_augmentation(

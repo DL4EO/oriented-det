@@ -12,11 +12,14 @@ Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 
 - `oriented_rcnn_dota_le90_1x`
 - `oriented_rcnn_dota_le90_3x`
+- `oriented_rcnn_hrsc2016_le90_3x`
+- `rotated_faster_rcnn_hrsc2016_le90_3x`
+- `rotated_fcos_hrsc2016_le90_3x`
 - `rotated_faster_rcnn_dota_le90_1x`
 - `rotated_faster_rcnn_dota_le90_3x`
 - `rotated_retinanet_dota_le90_1x`
 - `rotated_retinanet_dota_le90_3x`
-- `rotated_fcos_dota_le90_3x_riou`
+- `rotated_fcos_dota_le90_3x`
 - `rotated_fcos_dota_le90_3x_kfiou_aux`
 
 On-disk / Hub filenames include a **SHA-256[:8]** suffix (see `tools/publish_checkpoint.py`).

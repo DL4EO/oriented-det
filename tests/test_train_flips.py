@@ -2,24 +2,23 @@
 
 import math
 
-import pytest
-
 from oriented_det.data.flips import apply_flip_to_rboxes, apply_random_train_flips
 from oriented_det.geometry import transforms as geom_transforms
 from oriented_det.geometry.rbox import RBox, normalize_le90
 
 
-def test_flip_diagonal_center_and_angle():
+def test_flip_diagonal_center_keeps_angle():
+    """MMRotate diagonal mirrors center only; angle is unchanged."""
     rbox = RBox(100.0, 200.0, 80.0, 40.0, math.radians(20.0))
     w, h = 400.0, 600.0
     flipped = geom_transforms.flip_diagonal(rbox, w, h)
     assert math.isclose(flipped.cx, w - rbox.cx)
     assert math.isclose(flipped.cy, h - rbox.cy)
-    assert math.isclose(flipped.angle, math.pi - rbox.angle, abs_tol=1e-6)
+    assert math.isclose(flipped.angle, rbox.angle, abs_tol=1e-6)
 
 
-def test_flip_diagonal_differs_from_horizontal_then_vertical_angle():
-    """MMRotate diagonal uses π − θ, not compose(H then V) on angle."""
+def test_flip_diagonal_matches_horizontal_then_vertical_le90():
+    """Diagonal equals H then V after le90 (point reflection; angle preserved)."""
     rbox = normalize_le90(RBox(100.0, 200.0, 80.0, 40.0, math.radians(20.0)))
     w, h = 400.0, 600.0
     diag = normalize_le90(geom_transforms.flip_diagonal(rbox, w, h))
@@ -29,9 +28,11 @@ def test_flip_diagonal_differs_from_horizontal_then_vertical_angle():
             h,
         )
     )
-    assert not math.isclose(diag.angle, hv.angle, abs_tol=1e-4) or not math.isclose(
-        diag.cx, hv.cx, abs_tol=1e-4
-    )
+    assert math.isclose(diag.cx, hv.cx, abs_tol=1e-5)
+    assert math.isclose(diag.cy, hv.cy, abs_tol=1e-5)
+    assert math.isclose(diag.angle, hv.angle, abs_tol=1e-5)
+    assert math.isclose(diag.width, hv.width, abs_tol=1e-5)
+    assert math.isclose(diag.height, hv.height, abs_tol=1e-5)
 
 
 def test_apply_flip_to_rboxes_diagonal():
@@ -39,6 +40,7 @@ def test_apply_flip_to_rboxes_diagonal():
     out = apply_flip_to_rboxes([rbox], "diagonal", image_width=200.0, image_height=300.0)
     assert len(out) == 1
     assert out[0].width >= out[0].height
+    assert math.isclose(out[0].angle, normalize_le90(rbox).angle, abs_tol=1e-5)
 
 
 def test_random_flips_three_way_distribution(monkeypatch):

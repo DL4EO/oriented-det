@@ -46,10 +46,9 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from oriented_det.data import (
-    DOTADataset,
-    AirbusPlaygroundCSVDataset,
-    build_dota_split_dataset,
-    dota_dataset_class_names,
+    build_split_dataset,
+    dataset_format_name,
+    split_class_names,
 )
 from oriented_det.train.config import LossConfig, TrainingExperimentConfig
 from oriented_det.train.utils import capped_subset_indices
@@ -65,7 +64,7 @@ from train import (
 
 
 def _get_preprocessing_from_config(config: TrainingExperimentConfig):
-    """Extract preprocessing (resize, norm, pad, flips) from config. Top-level enable_flip_* override preprocessing."""
+    """Extract preprocessing (resize, norm, pad, flips, rotate) from config."""
     prep = getattr(config, "preprocessing", None)
     if prep is not None:
         from oriented_det.data.preprocessing import parse_canvas_size
@@ -79,6 +78,9 @@ def _get_preprocessing_from_config(config: TrainingExperimentConfig):
         flip_h = getattr(prep, "enable_flip_horizontal", True)
         flip_v = getattr(prep, "enable_flip_vertical", True)
         flip_d = getattr(prep, "enable_flip_diagonal", False)
+        rotate_on = getattr(prep, "enable_random_rotate", False)
+        rotate_prob = getattr(prep, "random_rotate_prob", 0.5)
+        rotate_range = getattr(prep, "random_rotate_angle_range", 180.0)
     else:
         resize_mode = "fixed"
         resize_to = (1024, 1024)
@@ -87,7 +89,22 @@ def _get_preprocessing_from_config(config: TrainingExperimentConfig):
         flip_h = True
         flip_v = True
         flip_d = False
-    return resize_mode, resize_to, norm_mean, norm_std, pad_div, flip_h, flip_v, flip_d
+        rotate_on = False
+        rotate_prob = 0.5
+        rotate_range = 180.0
+    return (
+        resize_mode,
+        resize_to,
+        norm_mean,
+        norm_std,
+        pad_div,
+        flip_h,
+        flip_v,
+        flip_d,
+        rotate_on,
+        rotate_prob,
+        rotate_range,
+    )
 
 
 class FastaiSuggestions(TypedDict, total=False):
@@ -292,49 +309,20 @@ def run_lr_finder(
     config.training.use_amp = use_amp
 
     device = get_device()
-    dataset_format = getattr(config.dataset, "format", "dota").lower()
+    dataset_format = dataset_format_name(config.dataset)
 
     if dataset_format == "dota":
         check_directories(
             config.dataset.get_train_tile_roots(),
             config.dataset.get_val_tile_roots(),
         )
-        if not config.dataset.has_dota_tiles_config():
-            raise ValueError(
-                "DOTA format requires dataset.train_tiles_dir(s) and dataset.val_tiles_dir(s)."
-            )
-        same_folder = getattr(config.dataset, "same_folder", False)
-        train_dataset = build_dota_split_dataset(
-            config.dataset.get_train_tile_roots(),
-            split="train",
-            same_folder=same_folder,
-            difficult_strategy=config.dataset.difficult_strategy,
-            allowed_classes=config.dataset.allowed_classes,
-            ignore_labels=config.dataset.ignore_labels,
-            filter_empty_gt=getattr(config.dataset, "filter_empty_gt", False),
-        )
-    else:
-        if not config.dataset.annotations_file or not config.dataset.split_file:
-            raise ValueError(
-                "Airbus Playground format requires dataset.annotations_file and dataset.split_file."
-            )
-        train_dataset = AirbusPlaygroundCSVDataset(
-            data_root=config.dataset.data_root,
-            split="train",
-            annotations_file=config.dataset.annotations_file,
-            split_file=config.dataset.split_file,
-            val_split_id=config.dataset.val_split_id,
-            train_includes_val=getattr(config.dataset, "train_includes_val", False),
-            difficult_strategy=config.dataset.difficult_strategy,
-            allowed_classes=config.dataset.allowed_classes,
-            ignore_labels=config.dataset.ignore_labels,
-            map_labels=config.dataset.map_labels,
-        )
+    train_dataset = build_split_dataset(
+        config.dataset,
+        "train",
+        filter_empty_gt=getattr(config.dataset, "filter_empty_gt", False),
+    )
 
-    if dataset_format == "dota":
-        class_names = dota_dataset_class_names(train_dataset)
-    else:
-        class_names = train_dataset.get_class_names()
+    class_names = split_class_names(train_dataset, config.dataset)
     class_map = {name: i + 1 for i, name in enumerate(class_names)}
     num_classes = len(class_names)
 
@@ -365,9 +353,19 @@ def run_lr_finder(
     config.class_names = class_names
     config.num_classes = num_classes
 
-    resize_mode, resize_to, norm_mean, norm_std, pad_div, flip_h, flip_v, flip_d = _get_preprocessing_from_config(
-        config
-    )
+    (
+        resize_mode,
+        resize_to,
+        norm_mean,
+        norm_std,
+        pad_div,
+        flip_h,
+        flip_v,
+        flip_d,
+        rotate_on,
+        rotate_prob,
+        rotate_range,
+    ) = _get_preprocessing_from_config(config)
 
     if config.enable_albumentation:
         train_aug = create_train_augmentation(
@@ -393,8 +391,13 @@ def run_lr_finder(
             enable_flip_horizontal=flip_h,
             enable_flip_vertical=flip_v,
             enable_flip_diagonal=flip_d,
+            enable_random_rotate=rotate_on,
+            random_rotate_prob=rotate_prob,
+            random_rotate_angle_range=rotate_range,
             normalize_mean=norm_mean,
             normalize_std=norm_std,
+            difficult_strategy=getattr(config.dataset, "difficult_strategy", "drop"),
+            lookalike_labels=getattr(config.dataset, "lookalike_labels", None),
         )
     else:
         collate_fn = create_collate_fn(
@@ -407,8 +410,13 @@ def run_lr_finder(
             enable_flip_horizontal=flip_h,
             enable_flip_vertical=flip_v,
             enable_flip_diagonal=flip_d,
+            enable_random_rotate=rotate_on,
+            random_rotate_prob=rotate_prob,
+            random_rotate_angle_range=rotate_range,
             normalize_mean=norm_mean,
             normalize_std=norm_std,
+            difficult_strategy=getattr(config.dataset, "difficult_strategy", "drop"),
+            lookalike_labels=getattr(config.dataset, "lookalike_labels", None),
         )
 
     train_loader = DataLoader(

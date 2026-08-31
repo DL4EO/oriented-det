@@ -145,19 +145,32 @@ class DOTASample:
         allowed_classes: Optional[Sequence[str]] = None,
         ignore_labels: Optional[Sequence[str]] = None,
         drop_difficult: bool = False,
+        lookalike_labels: Optional[Sequence[str]] = None,
     ) -> "DOTASample":
-        """Return a filtered copy of this sample."""
+        """Return a filtered copy of this sample.
+
+        Lookalike routing names (reserved ``lookalike`` plus optional aliases) are
+        kept even when absent from ``allowed_classes`` and even when listed in
+        ``ignore_labels`` (lookalike wins over ignore).
+        """
+        from .lookalike import resolve_lookalike_label_set
+
         filtered = list(self.annotations)
+        look_set = resolve_lookalike_label_set(lookalike_labels)
 
         if drop_difficult:
             filtered = [ann for ann in filtered if ann.difficult == 0]
 
         if allowed_classes is not None:
             allowed_set = set(allowed_classes)
-            filtered = [ann for ann in filtered if ann.class_name in allowed_set]
+            filtered = [
+                ann
+                for ann in filtered
+                if ann.class_name in allowed_set or ann.class_name in look_set
+            ]
 
         if ignore_labels is not None:
-            ignore_set = set(ignore_labels)
+            ignore_set = set(ignore_labels) - look_set
             filtered = [ann for ann in filtered if ann.class_name not in ignore_set]
 
         return DOTASample(
@@ -182,6 +195,7 @@ class DOTADataset:
         class_map: Optional[Dict[str, int]] = None,
         allowed_classes: Optional[Sequence[str]] = None,
         ignore_labels: Optional[Sequence[str]] = None,
+        lookalike_labels: Optional[Sequence[str]] = None,
         # "drop" -> remove at read-time, "ignore"/"keep" -> keep in sample.annotations.
         difficult_strategy: str = "drop",
         filter_empty_gt: bool = False,
@@ -204,10 +218,15 @@ class DOTADataset:
             class_map: Optional mapping from class names to numeric IDs
             allowed_classes: Optional list of allowed class names (whitelist)
             ignore_labels: Optional list of class names to exclude (blacklist)
+            lookalike_labels: Optional extra aliases treated as hard-negative lookalikes
+                (reserved ``lookalike`` is always included).
             difficult_strategy: How to handle difficult annotations: drop | ignore | keep.
             filter_empty_gt: If True, drop tiles whose effective GT count is zero after
                 difficult_strategy, allowed_classes, and ignore_labels (MMRotate DOTADataset parity).
+                Lookalike boxes count as non-empty GT.
         """
+        from .lookalike import resolve_lookalike_label_set
+
         self.root_dir = Path(root_dir)
         self.filter_empty_gt = bool(filter_empty_gt)
         self.split = split
@@ -215,6 +234,8 @@ class DOTADataset:
         self.class_map = class_map or {}
         self.allowed_classes = allowed_classes
         self.ignore_labels = list(ignore_labels) if ignore_labels else None
+        self.lookalike_labels = list(lookalike_labels) if lookalike_labels else None
+        self._lookalike_set = resolve_lookalike_label_set(self.lookalike_labels)
         # Normalize difficult strategy
         ds = (difficult_strategy or "drop").strip().lower()
         if ds not in {"drop", "ignore", "keep"}:
@@ -365,6 +386,7 @@ class DOTADataset:
                 allowed_classes=self.allowed_classes,
                 ignore_labels=self.ignore_labels,
                 drop_difficult=self._drop_difficult,
+                lookalike_labels=self.lookalike_labels,
             )
             return len(sample.annotations)
         return len(annotations)
@@ -401,6 +423,7 @@ class DOTADataset:
                 allowed_classes=self.allowed_classes,
                 ignore_labels=self.ignore_labels,
                 drop_difficult=self._drop_difficult,
+                lookalike_labels=self.lookalike_labels,
             )
         
         return sample
@@ -429,12 +452,14 @@ class DOTADataset:
                 yield sample
     
     def get_class_names(self) -> List[str]:
-        """Extract unique class names from all annotations."""
+        """Extract unique semantic class names (excludes lookalike routing labels)."""
+        from .lookalike import filter_semantic_class_names
+
         classes = set()
         for sample in self:
             for ann in sample.annotations:
                 classes.add(ann.class_name)
-        return sorted(classes)
+        return filter_semantic_class_names(classes, self._lookalike_set)
 
 
 def resolve_dota_tile_roots(
@@ -501,6 +526,7 @@ def build_dota_split_dataset(
     difficult_strategy: str = "drop",
     allowed_classes: Optional[Sequence[str]] = None,
     ignore_labels: Optional[Sequence[str]] = None,
+    lookalike_labels: Optional[Sequence[str]] = None,
     filter_empty_gt: bool = False,
 ):
     """Build one ``DOTADataset`` or ``ConcatDataset`` over multiple tile roots."""
@@ -519,6 +545,7 @@ def build_dota_split_dataset(
             difficult_strategy=difficult_strategy,
             allowed_classes=allowed_classes,
             ignore_labels=ignore_labels,
+            lookalike_labels=lookalike_labels,
             filter_empty_gt=filter_empty_gt,
         )
         for root, label_dir, image_dir in (
@@ -563,6 +590,7 @@ def collect_dota_split_image_paths(
     difficult_strategy: str = "drop",
     allowed_classes: Optional[Sequence[str]] = None,
     ignore_labels: Optional[Sequence[str]] = None,
+    lookalike_labels: Optional[Sequence[str]] = None,
     filter_empty_gt: bool = False,
     log_filter_empty_gt: bool = False,
 ) -> List[Path]:
@@ -579,6 +607,7 @@ def collect_dota_split_image_paths(
         difficult_strategy=difficult_strategy,
         allowed_classes=allowed_classes,
         ignore_labels=ignore_labels,
+        lookalike_labels=lookalike_labels,
         filter_empty_gt=filter_empty_gt,
     )
     if log_filter_empty_gt and filter_empty_gt:
@@ -647,6 +676,7 @@ def build_dota_loader(
     class_map: Optional[Dict[str, int]] = None,
     allowed_classes: Optional[Sequence[str]] = None,
     ignore_labels: Optional[Sequence[str]] = None,
+    lookalike_labels: Optional[Sequence[str]] = None,
     difficult_strategy: str = "drop",
     filter_empty_gt: bool = False,
     collate_fn: Optional[Callable] = None,
@@ -669,6 +699,7 @@ def build_dota_loader(
         class_map: Optional mapping from class names to numeric IDs
         allowed_classes: Optional list of allowed class names (whitelist)
         ignore_labels: Optional list of class names to exclude (blacklist)
+        lookalike_labels: Optional extra lookalike aliases (reserved ``lookalike`` always included)
         difficult_strategy: drop | ignore | keep (same as DOTADataset)
         filter_empty_gt: Drop tiles with no effective GT (same as DOTADataset)
         collate_fn: Optional custom collate function. If None, uses collate_dota_samples
@@ -693,6 +724,7 @@ def build_dota_loader(
         class_map=class_map,
         allowed_classes=allowed_classes,
         ignore_labels=ignore_labels,
+        lookalike_labels=lookalike_labels,
         difficult_strategy=difficult_strategy,
         filter_empty_gt=filter_empty_gt,
     )

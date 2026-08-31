@@ -1,6 +1,6 @@
-# Published eval-val reports (DOTA le90)
+# Published eval-val reports
 
-Frozen **`make eval-val`** metrics for each Hub pretrained slug: full val split (7,669 tiles, `filter_empty_gt=false`), score ≥ 0.05, production decode, mAP matching IoU 0.50.
+Frozen **`make eval-val`** metrics for each Hub pretrained slug. DOTA le90: full val split (7,669 tiles, `filter_empty_gt=false`). HRSC2016: ImageSets test (453 images, whole-image `keep_ratio`). Score ≥ 0.05, final NMS IoU **0.1** via `evaluation.final_nms_iou_threshold` (MMRotate test parity; deploy recipes ship production NMS **0.3**), mAP matching IoU 0.50.
 
 Each subdirectory is named after the manifest **slug** and is **tracked in git** (reports and analysis only — no `predictions.json`; see below).
 
@@ -22,9 +22,12 @@ Each subdirectory is named after the manifest **slug** and is **tracked in git**
 | `rotated_faster_rcnn_dota_le90_3x_ce` | 75.58% | regenerate (see below) |
 | `rotated_retinanet_dota_le90_3x` | 71.52% | `predictions/20260615_005855/` |
 | `rotated_retinanet_dota_le90_1x` | 64.14% | regenerate (see below) |
-| `rotated_fcos_dota_le90_3x_riou` | 81.58% | `predictions/20260824_212907/` |
+| `rotated_fcos_dota_le90_3x` | 81.58% | `predictions/20260824_212907/` |
 | `rotated_fcos_dota_le90_3x_kfiou_aux` | 77.18% | `predictions/20260820_121343/` |
-| `rotated_fcos_dota_le90_3x` (local L1 baseline; not Hub) | 73.92% | `predictions/20260813_192333/` |
+| `rotated_fcos_dota_le90_3x_l1` (local L1 baseline; not Hub) | 73.92% | `predictions/20260813_192333/` |
+| `oriented_rcnn_hrsc2016_le90_3x` | 90.41% | `predictions/20260831_011151/` |
+| `rotated_faster_rcnn_hrsc2016_le90_3x` | 88.77% | `predictions/20260831_050947/` |
+| `rotated_fcos_hrsc2016_le90_3x` | 88.34% | `predictions/20260831_033939/` |
 
 **Viewer** (needs `predictions.json` in the directory you pass):
 

@@ -5,6 +5,9 @@ Modes (``resize_mode`` in config):
 - **fixed** — stretch to ``target_size`` (H, W); aspect ratio may change.
 - **pad** — uniform zoom/dezoom so the **larger** image side equals ``max(H, W)`` of
   ``target_size``, then zero-pad the remaining canvas; aspect ratio is always preserved.
+- **keep_ratio** — same uniform scale as **pad** (long edge → ``max(H, W)``), but **no**
+  square canvas pad; training/inference then apply ``pad_size_divisor`` (MMRotate
+  ``RResize`` + ``Pad(size_divisor=…)``). Aspect ratio is preserved.
 - **crop** — extract a ``target_size`` window at **native resolution** (no resize):
   pad when the image is too small in one or both dimensions, randomly crop the excess
   when it is too large (center crop when ``random_crop=False``); aspect ratio is always
@@ -129,6 +132,42 @@ def apply_pad_mode(
     return SpatialPreprocessResult(image=image, rboxes=out_boxes, meta=meta)
 
 
+def apply_keep_ratio_mode(
+    image: Image.Image,
+    rboxes: Sequence[RBox],
+    target_size: TargetSize,
+) -> SpatialPreprocessResult:
+    """Scale by large_edge (uniform); leave short edge unpadded (MMRotate RResize).
+
+    ``pad_size_divisor`` is applied afterward in the collate / inference path
+    (bottom-right pad), matching MMRotate ``Pad(size_divisor=…)``.
+    """
+    orig_w, orig_h = image.size
+    ref_h, ref_w = parse_canvas_size("keep_ratio", target_size)
+    large_edge = max(ref_h, ref_w)
+
+    scale = large_edge / max(orig_h, orig_w, 1)
+    scaled_w = max(1, int(round(orig_w * scale)))
+    scaled_h = max(1, int(round(orig_h * scale)))
+
+    if (scaled_w, scaled_h) != (orig_w, orig_h):
+        image = image.resize((scaled_w, scaled_h), Image.BILINEAR)
+
+    out_boxes = [geom_transforms.scale(rb, scale_x=scale, scale_y=scale) for rb in rboxes]
+    meta = SpatialPreprocessMeta(
+        mode="keep_ratio",
+        orig_size=(orig_w, orig_h),
+        canvas_size=(scaled_h, scaled_w),
+        scale=scale,
+        scale_x=scale,
+        scale_y=scale,
+        pad_left=0,
+        pad_top=0,
+        content_size=(scaled_h, scaled_w),
+    )
+    return SpatialPreprocessResult(image=image, rboxes=out_boxes, meta=meta)
+
+
 def apply_crop_mode(
     image: Image.Image,
     rboxes: Sequence[RBox],
@@ -216,12 +255,14 @@ def apply_spatial_preprocess(
     m = (mode or "fixed").strip().lower()
     if m == "pad":
         return apply_pad_mode(image, rboxes, target_size)
+    if m == "keep_ratio":
+        return apply_keep_ratio_mode(image, rboxes, target_size)
     if m == "crop":
         return apply_crop_mode(image, rboxes, target_size, random_crop=random_crop)
     if m == "fixed":
         return apply_fixed_mode(image, rboxes, target_size)
     raise ValueError(
-        f"Unknown resize_mode={mode!r}; expected 'fixed', 'pad', or 'crop'."
+        f"Unknown resize_mode={mode!r}; expected 'fixed', 'pad', 'keep_ratio', or 'crop'."
     )
 
 
@@ -233,7 +274,7 @@ def remap_detections_to_original(
     out: List[dict] = []
     for d in detections:
         r = d["rbox"]
-        if meta.mode == "pad":
+        if meta.mode in {"pad", "keep_ratio"}:
             cx = (r.cx - meta.pad_left) / max(meta.scale, 1e-8)
             cy = (r.cy - meta.pad_top) / max(meta.scale, 1e-8)
             rw = r.width / max(meta.scale, 1e-8)
@@ -285,6 +326,23 @@ def build_spatial_meta_from_dims(
             content_size=content_size,
         )
 
+    if m == "keep_ratio":
+        large_edge = max(canvas_h, canvas_w)
+        scale = large_edge / max(orig_h, orig_w, 1)
+        scaled_w = max(1, int(round(orig_w * scale)))
+        scaled_h = max(1, int(round(orig_h * scale)))
+        return SpatialPreprocessMeta(
+            mode="keep_ratio",
+            orig_size=(orig_w, orig_h),
+            canvas_size=(scaled_h, scaled_w),
+            scale=scale,
+            scale_x=scale,
+            scale_y=scale,
+            pad_left=0,
+            pad_top=0,
+            content_size=(scaled_h, scaled_w),
+        )
+
     if m == "crop":
         if orig_w >= canvas_w:
             crop_left = (orig_w - canvas_w) // 2
@@ -325,6 +383,7 @@ __all__ = [
     "TargetSize",
     "apply_crop_mode",
     "apply_fixed_mode",
+    "apply_keep_ratio_mode",
     "apply_pad_mode",
     "apply_spatial_preprocess",
     "build_spatial_meta_from_dims",

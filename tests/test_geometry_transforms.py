@@ -108,7 +108,7 @@ def test_flip_vertical():
 
 
 def test_flip_diagonal():
-    """Test diagonal flip (MMRotate le90)."""
+    """Test diagonal flip (MMRotate le90: mirror center, keep angle)."""
     rbox = RBox(cx=100, cy=200, width=50, height=30, angle=math.radians(30))
     image_width, image_height = 400, 600
 
@@ -116,7 +116,7 @@ def test_flip_diagonal():
 
     assert math.isclose(flipped.cx, image_width - rbox.cx)
     assert math.isclose(flipped.cy, image_height - rbox.cy)
-    assert math.isclose(flipped.angle, math.pi - rbox.angle, abs_tol=1e-6)
+    assert math.isclose(flipped.angle, rbox.angle, abs_tol=1e-6)
 
 
 def test_rotate_90():

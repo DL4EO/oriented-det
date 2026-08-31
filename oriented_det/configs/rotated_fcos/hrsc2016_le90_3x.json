@@ -1,0 +1,11 @@
+{
+  "_base_": [
+    "hrsc2016_le90_1x.json"
+  ],
+  "training": {
+    "num_epochs": 36,
+    "learning_rate": 0.0025,
+    "lr_scheduler_milestones": [24, 33],
+    "lr_scheduler_gamma": [0.1, 0.5]
+  }
+}

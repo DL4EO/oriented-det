@@ -51,6 +51,7 @@ from .config import (
     LossConfig,
     resolve_inference_score_threshold,
     resolve_inference_sliding_window_overlap_pixels,
+    resolve_preds_final_nms_iou_threshold,
     effective_eval_metric_thresholds,
     apply_inference_config_to_model,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "ProductionConfig",
     "resolve_inference_score_threshold",
     "resolve_inference_sliding_window_overlap_pixels",
+    "resolve_preds_final_nms_iou_threshold",
     "effective_eval_metric_thresholds",
     "apply_inference_config_to_model",
     "CheckpointConfig",

@@ -259,6 +259,22 @@ class TestOrientedRCNNEdgeCases:
         losses = model(images, targets)
         assert isinstance(losses, dict)
     
+    def test_keep_ratio_pad32_p6_canvas(self):
+        """HRSC keep_ratio + Pad(32) can be 576x800; P6 must not raise."""
+        model = OrientedRCNN(
+            num_classes=1,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+        )
+        image = torch.rand(3, 576, 800)
+        target = {
+            "rboxes": [RBox(400.0, 288.0, 80.0, 20.0, 0.0)],
+            "labels": torch.tensor([1]),
+        }
+        model.train()
+        losses = model([image], [target])
+        assert "loss_objectness" in losses
+
     def test_variable_image_sizes(self):
         """Test with variable image sizes."""
         model = OrientedRCNN(
@@ -467,15 +483,16 @@ class TestBackbone:
 class TestRotatedRetinaNet:
     """Tests for RotatedRetinaNet oriented detection."""
 
-    def test_rotated_retinanet_accepts_iou_loss_weight(self):
-        """RetinaNet should accept the optional decoded IoU regression term."""
+    def test_rotated_retinanet_accepts_aux_loss_weight(self):
+        """RetinaNet should accept the optional auxiliary box-reg weight."""
         model = RotatedRetinaNet(
             num_classes=2,
             backbone_name="resnet18",
             pretrained_backbone=False,
-            box_reg_iou_weight=0.25,
+            box_reg_aux_weight=0.25,
+            box_reg_aux_loss_type="probiou",
         )
-        assert model.box_reg_iou_weight == 0.25
+        assert model.box_reg_aux_weight == 0.25
 
     def test_retinanet_head_separate_cls_reg_towers(self):
         """RetinaNet head uses MMRotate-style separate subnets and 3x3 prediction convs."""
@@ -577,7 +594,8 @@ class TestRotatedRetinaNet:
             pretrained_backbone=False,
             box_reg_main_loss_type="probiou",
             box_reg_probiou_mode="l1",
-            box_reg_encoded_aux_weight=0.1,
+            box_reg_aux_weight=0.1,
+            box_reg_aux_loss_type="smooth_l1",
             box_reg_loss_type="l1",
             reg_sample_size_per_image=512,
         )
@@ -656,7 +674,8 @@ class TestRotatedRetinaNet:
                 num_classes=num_classes,
                 main_loss_type="probiou",
                 box_reg_loss_type="l1",
-                encoded_aux_weight=0.1,
+                box_reg_aux_weight=0.1,
+                box_reg_aux_loss_type="smooth_l1",
                 reg_sample_size_per_image=512,
             )
 
@@ -871,6 +890,17 @@ def test_extract_backbone_features_includes_p6_p7():
 def test_derive_fpn_strides_from_grid_anisotropic_raises():
     with pytest.raises(ValueError):
         derive_fpn_strides_from_grid((800, 800), [(100, 50)])
+
+
+def test_derive_fpn_strides_pad32_p6_uses_configured():
+    """keep_ratio + Pad(32) yields 576x800; P6 is 9x13 (anisotropic). Use MMRotate 64."""
+    sizes = [(144, 200), (72, 100), (36, 50), (18, 25), (9, 13)]
+    cfg = [4, 8, 16, 32, 64]
+    assert derive_fpn_strides_from_grid((576, 800), sizes, configured=cfg) == cfg
+    # Square pad-800: P6 13x13 is isotropic but 800/13 is not an integer stride.
+    assert derive_fpn_strides_from_grid(
+        (800, 800), [(200, 200), (100, 100), (50, 50), (25, 25), (13, 13)], configured=cfg
+    ) == cfg
 
 
 def test_warn_if_fpn_strides_mismatch():

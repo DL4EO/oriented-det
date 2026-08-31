@@ -152,10 +152,10 @@ cd export && make export-tf \
 
 ```bash
 # Download weights if needed:
-# odet pretrained download rotated_fcos_dota_le90_3x_riou
+# odet pretrained download rotated_fcos_dota_le90_3x
 
 odet export-tf \
-  --config configs/rotated_fcos/dota_le90_3x_riou.json \
+  --config configs/rotated_fcos/dota_le90_3x.json \
   --checkpoint pretrained/rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth \
   --mode rotated_fcos_pre_nms \
   --output-dir ./odet_export_fcos
@@ -163,7 +163,7 @@ odet export-tf \
 # Or in-repo Makefile:
 cd export && make export-tf \
   MODE=rotated_fcos_pre_nms \
-  CONFIG=configs/rotated_fcos/dota_le90_3x_riou.json \
+  CONFIG=configs/rotated_fcos/dota_le90_3x.json \
   CKPT=pretrained/rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth \
   ARTIFACTS=$(pwd)/artifacts/rotated_fcos
 ```

@@ -21,6 +21,7 @@ from oriented_det.train.config import (
     TrainingConfig,
     resolve_inference_score_threshold,
     resolve_inference_sliding_window_overlap_pixels,
+    resolve_preds_final_nms_iou_threshold,
     effective_eval_metric_thresholds,
     apply_inference_config_to_model,
     _strict_section,
@@ -153,6 +154,38 @@ def test_apply_inference_config_to_model_sets_existing_attrs():
     assert m.inference_pre_nms_score_threshold == 0.12
     assert m.rpn_pre_nms_top_n == 4000
     assert m.final_nms_iou_threshold == 0.35
+
+
+def test_resolve_preds_final_nms_prefers_evaluation_over_production(tmp_path: Path):
+    p = tmp_path / "nms_split.json"
+    p.write_text(
+        json.dumps(
+            {
+                "model_type": "rotated_faster_rcnn",
+                "dataset": {"data_root": str(tmp_path)},
+                "model": {"final_nms_iou_threshold": 0.1},
+                "evaluation": {"final_nms_iou_threshold": 0.1},
+                "production": {"final_nms_iou_threshold": 0.3},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = TrainingExperimentConfig.load(p)
+    nms, src = resolve_preds_final_nms_iou_threshold(cfg, model_nms_threshold=0.3)
+    assert nms == 0.1
+    assert "evaluation" in src
+    nms_cli, src_cli = resolve_preds_final_nms_iou_threshold(
+        cfg, cli_nms_threshold=0.25, model_nms_threshold=0.3
+    )
+    assert nms_cli == 0.25
+    assert "CLI" in src_cli
+    # Deploy path still patches production onto the model.
+    class _M:
+        final_nms_iou_threshold = 0.1
+
+    m = _M()
+    apply_inference_config_to_model(m, cfg.production)
+    assert m.final_nms_iou_threshold == 0.3
 
 
 def test_load_rejects_unknown_root_key(tmp_path: Path):

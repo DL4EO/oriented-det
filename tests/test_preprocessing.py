@@ -1,9 +1,10 @@
-"""Tests for spatial preprocessing (pad / crop / fixed)."""
+"""Tests for spatial preprocessing (pad / keep_ratio / crop / fixed)."""
 
 from PIL import Image
 
 from oriented_det.data.preprocessing import (
     apply_crop_mode,
+    apply_keep_ratio_mode,
     apply_pad_mode,
     build_spatial_meta_from_dims,
     parse_canvas_size,
@@ -72,3 +73,40 @@ def test_remap_pad_detections_roundtrip():
     r = remapped[0]["rbox"]
     assert abs(r.cx - 1000) < 2
     assert abs(r.cy - 500) < 2
+
+
+def test_keep_ratio_scales_without_square_pad():
+    image = Image.new("RGB", (1166, 753), color=(128, 64, 32))
+    rb = RBox(583, 376, 200, 40, 0.0)
+    result = apply_keep_ratio_mode(image, [rb], [800, 800])
+    out_w, out_h = result.image.size
+    assert out_w == 800
+    assert out_h == int(round(753 * (800 / 1166)))
+    assert result.meta.mode == "keep_ratio"
+    assert result.meta.pad_left == 0 and result.meta.pad_top == 0
+    assert abs(result.meta.scale - 800 / 1166) < 1e-5
+
+
+def test_remap_keep_ratio_detections_roundtrip():
+    meta = build_spatial_meta_from_dims("keep_ratio", 1166, 753, [800, 800])
+    scale = 800 / 1166
+    dets = [{"rbox": RBox(583 * scale, 376 * scale, 10, 5, 0.0), "score": 0.9, "label": 1}]
+    remapped = remap_detections_to_original(dets, meta)
+    r = remapped[0]["rbox"]
+    assert abs(r.cx - 583) < 2
+    assert abs(r.cy - 376) < 2
+
+
+def test_pad_image_tensors_to_batch_hw_keep_ratio_shapes():
+    import torch
+    from oriented_det.runtime.collate import pad_image_tensors_to_batch_hw
+
+    short = torch.ones(3, 480, 800)
+    tall = torch.ones(3, 576, 800) * 2
+    out = pad_image_tensors_to_batch_hw([short, tall])
+    assert out[0].shape == (3, 576, 800)
+    assert out[1].shape == (3, 576, 800)
+    assert torch.equal(out[0][:, :480, :], short)
+    assert torch.count_nonzero(out[0][:, 480:, :]) == 0
+    assert torch.equal(out[1], tall)
+    assert pad_image_tensors_to_batch_hw([short])[0].shape == (3, 480, 800)

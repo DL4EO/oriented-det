@@ -49,13 +49,14 @@ from oriented_det.data import (
     format_mmrotate_class_metrics_table,
     gt_best_iou_alignment_metrics_to_dict,
 )
-from oriented_det.data.airbus_playground import AirbusPlaygroundCSVDataset
+from oriented_det.data.build import build_split_dataset, dataset_format_name
 from oriented_det.geometry import RBox, normalize_le90
 from oriented_det.train.config import (
     TrainingExperimentConfig,
     get_preprocessing_params,
     apply_inference_config_to_model,
     effective_eval_metric_thresholds,
+    resolve_preds_final_nms_iou_threshold,
     resolve_inference_sliding_window_overlap_pixels,
 )
 from oriented_det.utils import tqdm_progress_stream
@@ -1506,31 +1507,19 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         per_cls_thr = cfg_thr_pc
     if per_cls_thr:
         print(f"Using per-class score thresholds for {len(per_cls_thr)} class(es) (post-NMS filtering)")
-    if nms_threshold is None:
-        if hasattr(model, "final_nms_iou_threshold"):
-            nms_threshold = float(model.final_nms_iou_threshold)
-            inf = getattr(config, "production", None)
-            if inf is not None and getattr(inf, "final_nms_iou_threshold", None) is not None:
-                print(
-                    "Using final_nms_iou_threshold from config (production.final_nms_iou_threshold overrides "
-                    f"model.final_nms_iou_threshold when set): {nms_threshold}"
-                )
-            else:
-                print(
-                    "Using final_nms_iou_threshold from config (model.final_nms_iou_threshold; "
-                    f"production.final_nms_iou_threshold unset): {nms_threshold}"
-                )
-        else:
-            m = getattr(config, "model", None)
-            nms_threshold = m.final_nms_iou_threshold if m is not None else 0.5
-            print(
-                "Using final_nms_iou_threshold from config (model.final_nms_iou_threshold; "
-                f"production.final_nms_iou_threshold unset): {nms_threshold}"
-            )
-    else:
-        if hasattr(model, "final_nms_iou_threshold"):
-            setattr(model, "final_nms_iou_threshold", float(nms_threshold))
-        print(f"Using CLI nms_threshold={nms_threshold} (overrides model final/merge NMS IoU)")
+    model_nms = (
+        float(model.final_nms_iou_threshold)
+        if hasattr(model, "final_nms_iou_threshold")
+        else None
+    )
+    nms_threshold, nms_source = resolve_preds_final_nms_iou_threshold(
+        config,
+        cli_nms_threshold=nms_threshold,
+        model_nms_threshold=model_nms,
+    )
+    if hasattr(model, "final_nms_iou_threshold"):
+        setattr(model, "final_nms_iou_threshold", float(nms_threshold))
+    print(f"Using final_nms_iou_threshold={nms_threshold} from {nms_source}")
     if nms_class_agnostic is not None:
         if not hasattr(model, "nms_class_agnostic"):
             raise AttributeError(
@@ -1588,45 +1577,44 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         raise ValueError("data_root is required. Provide --data-root or use a config that has dataset.data_root.")
     data_root = Path(data_root)
     
-    dataset_format = getattr(getattr(config, 'dataset', None), 'format', None) or "dota"
-    gt_by_image_path = None  # For Airbus: path -> list of GroundTruth; for DOTA stays None
+    dataset_format = dataset_format_name(getattr(config, "dataset", None))
+    gt_by_image_path = None  # For Airbus / HRSC: path -> list of GroundTruth; for DOTA stays None
     label_dir = None
     same_folder = False
 
-    if dataset_format == "airbus_playground":
-        # Airbus: no train/val directories; use annotations.csv + split.csv from config
+    if dataset_format in ("airbus_playground", "hrsc2016"):
+        from dataclasses import replace
+
         ds_config = config.dataset
-        if not getattr(ds_config, 'annotations_file', None) or not getattr(ds_config, 'split_file', None):
-            raise ValueError(
-                "Airbus Playground format requires dataset.annotations_file and dataset.split_file in config."
-            )
-        if data_split not in ("train", "val"):
-            raise ValueError(f"Airbus dataset supports only 'train' or 'val' split, got '{data_split}'.")
-        airbus_dataset = AirbusPlaygroundCSVDataset(
-            data_root=data_root,
-            split=data_split,
-            annotations_file=ds_config.annotations_file,
-            split_file=ds_config.split_file,
-            val_split_id=getattr(ds_config, "val_split_id", 0),
-            difficult_strategy=ds_config.difficult_strategy,
-            allowed_classes=getattr(ds_config, 'allowed_classes', None),
-            ignore_labels=getattr(ds_config, 'ignore_labels', None) or [],
-            map_labels=getattr(ds_config, 'map_labels', None) or {},
-        )
+        if dataset_format == "airbus_playground":
+            if not getattr(ds_config, 'annotations_file', None) or not getattr(ds_config, 'split_file', None):
+                raise ValueError(
+                    "Airbus Playground format requires dataset.annotations_file and dataset.split_file in config."
+                )
+            if data_split not in ("train", "val"):
+                raise ValueError(f"Airbus dataset supports only 'train' or 'val' split, got '{data_split}'.")
+        ds_cfg = replace(ds_config, data_root=data_root)
+        native_dataset = build_split_dataset(ds_cfg, data_split, filter_empty_gt=False)
         class_map = {name: i for i, name in enumerate(class_names)} if class_names else {}
         split_images = []
         gt_by_image_path = {}
-        for idx in range(len(airbus_dataset)):
-            sample = airbus_dataset[idx]
+        for idx in range(len(native_dataset)):
+            sample = native_dataset[idx]
             split_images.append(Path(sample.image_path))
             gt_by_image_path[Path(sample.image_path)] = _annotations_to_ground_truths(
                 list(sample.annotations), class_map
             )
-        val_split_id = getattr(ds_config, "val_split_id", 0)
-        print(
-            f"Using Airbus Playground CSV dataset: {ds_config.annotations_file}, "
-            f"{ds_config.split_file} (val_split_id={val_split_id})"
-        )
+        if dataset_format == "airbus_playground":
+            val_split_id = getattr(ds_config, "val_split_id", 0)
+            print(
+                f"Using Airbus Playground CSV dataset: {ds_config.annotations_file}, "
+                f"{ds_config.split_file} (val_split_id={val_split_id})"
+            )
+        else:
+            print(
+                f"Using HRSC2016 dataset: {data_root} "
+                f"(ImageSets split={getattr(native_dataset, 'split', data_split)})"
+            )
         print(f"\nFound {len(split_images)} {data_split} images\n")
     else:
         if data_split == "val" and val_dir:
@@ -1746,8 +1734,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
                 num_gt = 0
                 gt_entries = []
 
-        # run_inference_auto: single Resize+normalize forward when image == model canvas;
-        # pad/tile only when larger than canvas
+        # run_inference_auto: pad = whole-image train preprocess; fixed/crop tile if larger than canvas
         try:
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) if img is not None else None
             if img_rgb is None:
@@ -2151,8 +2138,16 @@ def main():
                             'in config when set; default: use evaluation.score_threshold or 0.5)')
     parser.add_argument('--no-per-class-score-thresholds', action='store_true',
                        help='Ignore evaluation.per_class_score_threshold from config and use the global score threshold only.')
-    parser.add_argument('--nms-threshold', type=float, default=None,
-                       help='IoU threshold for NMS in diagnostics (default: config.model.final_nms_iou_threshold, fallback: 0.5)')
+    parser.add_argument(
+        '--nms-threshold',
+        type=float,
+        default=None,
+        help=(
+            'Final detection NMS IoU for odet preds / eval-val. '
+            'Default: evaluation.final_nms_iou_threshold when set, else production/model '
+            '(after production patch), else 0.5. Deploy/image_demo keep production.*.'
+        ),
+    )
     parser.add_argument(
         '--nms-class-agnostic',
         action=argparse.BooleanOptionalAction,
@@ -2282,12 +2277,7 @@ def main():
         nms_thr = args.nms_threshold
         if nms_thr is None:
             if config is not None:
-                inf = getattr(config, "production", None)
-                if inf is not None and getattr(inf, "final_nms_iou_threshold", None) is not None:
-                    nms_thr = float(inf.final_nms_iou_threshold)
-                else:
-                    m = getattr(config, "model", None)
-                    nms_thr = float(m.final_nms_iou_threshold) if m is not None else 0.5
+                nms_thr, _ = resolve_preds_final_nms_iou_threshold(config)
             else:
                 v = diag_prev.get('final_nms_iou_threshold')
                 nms_thr = float(v) if v is not None else 0.5

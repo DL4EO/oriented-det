@@ -101,6 +101,30 @@ def get_model_size(preprocessing: dict = None):
     return get_model_canvas_size(mode, ts)
 
 
+def _resize_mode_name(preprocessing: Optional[dict] = None) -> str:
+    if not isinstance(preprocessing, dict):
+        return "fixed"
+    return str(preprocessing.get("resize_mode", "fixed") or "fixed").strip().lower()
+
+
+def uses_native_sliding_window(
+    image_height: int,
+    image_width: int,
+    preprocessing: Optional[dict] = None,
+) -> bool:
+    """Whether inference tiles the raster at native resolution.
+
+    ``resize_mode: pad`` / ``keep_ratio`` always fit the full image
+    (uniform scale; pad square or ``pad_size_divisor``), matching training.
+    DOTA ``fixed`` / ``crop`` still use native sliding windows when the image
+    exceeds the model canvas.
+    """
+    if _resize_mode_name(preprocessing) in {"pad", "keep_ratio"}:
+        return False
+    slice_h, slice_w = get_model_size(preprocessing)
+    return int(image_height) > slice_h or int(image_width) > slice_w
+
+
 def _sliding_window_grid(
     image_height: int,
     image_width: int,
@@ -223,14 +247,15 @@ def count_sliding_window_positions(
     overlap_ratio: Optional[float] = None,
     overlap_pixels: Optional[int] = 200,
 ) -> int:
-    """Number of 1024 (or model-size) windows ``run_inference_sliding_window`` runs for an image.
+    """Number of native-resolution windows ``run_inference_sliding_window`` runs for an image.
 
-    For images that fit in one model canvas, returns 1. Use to reason about total work when
-    large images are evaluated via a sliding window (overlap and tile size set how many).
+    Returns 1 when the image fits the canvas, or when ``resize_mode`` is ``pad``
+    / ``keep_ratio`` (whole-image scale, same as training). DOTA ``fixed`` /
+    ``crop`` still tile rasters larger than the canvas.
     """
-    slice_h, slice_w = get_model_size(preprocessing)
-    if image_height <= slice_h and image_width <= slice_w:
+    if not uses_native_sliding_window(image_height, image_width, preprocessing):
         return 1
+    slice_h, slice_w = get_model_size(preprocessing)
     return len(
         _sliding_window_grid(
             image_height, image_width, slice_h, slice_w,
@@ -425,8 +450,19 @@ def _preprocess_image_tensor_training_style(
     spatial = apply_spatial_preprocess(
         pil_image, [], mode, ts, random_crop=random_crop and mode == "crop"
     )
+    image = spatial.image
+    # Match collate: bottom-right pad to pad_size_divisor (MMRotate Pad).
+    div = int(preprocessing.get("pad_size_divisor") or 1)
+    if div > 1:
+        w, h = image.size
+        pad_w = (div - (w % div)) % div
+        pad_h = (div - (h % div)) % div
+        if pad_w or pad_h:
+            canvas = Image.new("RGB", (w + pad_w, h + pad_h), (0, 0, 0))
+            canvas.paste(image, (0, 0))
+            image = canvas
     transform = T.Compose([T.ToTensor(), T.Normalize(mean=mean, std=std)])
-    return transform(spatial.image)
+    return transform(image)
 
 
 def preprocess_image(
@@ -688,12 +724,14 @@ def run_inference_auto(
     class_names: Optional[Sequence[str]] = None,
     window_margin_pixels: Optional[float] = None,
 ):
-    """Run inference: single-image training-style resize for small/equal inputs, sliding windows for larger inputs.
+    """Run inference: training-style preprocess, or native sliding windows for oversized rasters.
 
-    When image height/width are <= model canvas from ``preprocessing`` (e.g. 1024×1024),
-    uses the same **Resize + ToTensor + Normalize** path as training / ``preprocess_image``
-    (effectively zooming smaller tiles to target size). Only larger images use
-    ``run_inference_sliding_window`` (zero-padded windows, ToTensor+normalize per crop).
+    ``resize_mode: pad`` / ``keep_ratio`` always use the training path (uniform
+    scale so the long edge equals ``max(target_size)``, then square pad or
+    ``pad_size_divisor``) even when the native image is larger — HRSC2016 eval
+    matches train. DOTA ``fixed`` / ``crop`` still use
+    ``run_inference_sliding_window`` when height or width exceeds the canvas.
+    Small images in every mode use the training-style preprocess.
     Detections are in original image pixel coordinates.
 
     Provide either ``image_path`` (to load) or ``image`` (PIL or numpy HWC RGB).
@@ -719,7 +757,7 @@ def run_inference_auto(
     slice_h, slice_w = get_model_size(preprocessing)
     image_width, image_height = image.size
 
-    if image_height <= slice_h and image_width <= slice_w:
+    if not uses_native_sliding_window(image_height, image_width, preprocessing):
         tensor = _preprocess_image_tensor_training_style(image, preprocessing)
         raw_output = run_inference_raw(model, tensor, device)
         dets = []

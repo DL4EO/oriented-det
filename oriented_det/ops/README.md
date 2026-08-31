@@ -198,9 +198,8 @@ Train-loss IoU for **matched pairs** (`[N, 5]`), not matching/NMS/mAP.
 
 ## Auxiliary decoded-box losses (`kfiou.py`, `probiou.py`, `gaussian_angle.py`)
 
-When **`model.roi_box_reg_iou_weight`** > 0 and **`model.roi_box_reg_main_loss_type`** is `smooth_l1` (default), training adds a scalar decoded-box term on ROI positives. When main is `probiou` / `riou` / `kfiou`, that decoded metric is the **primary** loss instead; use **`model.roi_box_reg_smooth_l1_aux_weight`** for encoded Smooth L1 aux.
-**`model.roi_box_reg_iou_loss_type`**: **`riou`** (default), **`kfiou`**, or
-**`probiou`**. All three are wired through
+When **`model.roi_box_reg_aux_weight`** > 0 and **`model.roi_box_reg_main_loss_type`** is `smooth_l1` (default), training adds a scalar decoded-box term on ROI positives (`roi_box_reg_aux_loss_type`: **`riou`**, **`kfiou`**, or **`probiou`**). When main is `probiou` / `riou` / `kfiou`, that decoded metric is the **primary** loss instead; use **`model.roi_box_reg_aux_weight`** with **`roi_box_reg_aux_loss_type: smooth_l1`** for encoded Smooth L1 aux.
+All three decoded metrics are wired through
 `mean_auxiliary_box_reg_loss` in [kfiou.py](kfiou.py).
 
 ### KFIoU (`kfiou.py`)
@@ -218,7 +217,7 @@ or unstable forward values (LR sweeps) do not trip ``linalg.solve`` on CUDA.
 
 [probiou.py](probiou.py) implements Probabilistic IoU (Gaussian bounding boxes),
 following the [reference implementation](https://github.com/ProbIOU/probiou-sample/blob/main/probiou_pytorch.py).
-Use **`model.roi_box_reg_iou_loss_type: "probiou"`**. Optional
+Use **`model.roi_box_reg_aux_loss_type: "probiou"`** (or `roi_box_reg_main_loss_type` when ProbIoU is primary). Optional
 **`model.roi_box_reg_probiou_mode`**: **`l1`** (bounded, default) or **`l2`**
 (`-log(1 - l1²)`).
 

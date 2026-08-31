@@ -1,6 +1,8 @@
 {
   "_base_": ["./dota_le90_1x.json"],
-  "model": {
+  "training": {
+    "learning_rate": 0.00025
+  },  "model": {
     "box_reg_loss_type": "l1",
     "aux_loss_type": "kfiou",
     "aux_loss_weight": 0.1,

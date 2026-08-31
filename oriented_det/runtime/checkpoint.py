@@ -271,15 +271,15 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             'roi_edge_swap': config.model.roi_edge_swap,
             'roi_proj_xy': getattr(config.model, 'roi_proj_xy', False),
             'roi_box_reg_angle_weight': getattr(config.model, 'roi_box_reg_angle_weight', 1.0),
-            'roi_box_reg_iou_weight': getattr(config.model, 'roi_box_reg_iou_weight', 0.0),
-            'roi_box_reg_iou_schedule_epochs': getattr(
-                config.model, 'roi_box_reg_iou_schedule_epochs', None
+            'roi_box_reg_aux_weight': getattr(config.model, 'roi_box_reg_aux_weight', 0.0),
+            'roi_box_reg_aux_schedule_epochs': getattr(
+                config.model, 'roi_box_reg_aux_schedule_epochs', None
             ),
-            'roi_box_reg_iou_schedule_values': getattr(
-                config.model, 'roi_box_reg_iou_schedule_values', None
+            'roi_box_reg_aux_schedule_values': getattr(
+                config.model, 'roi_box_reg_aux_schedule_values', None
             ),
-            'roi_box_reg_iou_loss_type': getattr(
-                config.model, 'roi_box_reg_iou_loss_type', 'riou'
+            'roi_box_reg_aux_loss_type': getattr(
+                config.model, 'roi_box_reg_aux_loss_type', None
             ),
             'roi_box_reg_kfiou_fun': getattr(config.model, 'roi_box_reg_kfiou_fun', None),
             'roi_box_reg_probiou_mode': getattr(config.model, 'roi_box_reg_probiou_mode', None),
@@ -287,9 +287,6 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
                 config.model, 'roi_box_reg_main_loss_type', 'smooth_l1'
             ),
             'roi_box_reg_norm': getattr(config.model, 'roi_box_reg_norm', 'sampled_all'),
-            'roi_box_reg_smooth_l1_aux_weight': getattr(
-                config.model, 'roi_box_reg_smooth_l1_aux_weight', 0.0
-            ),
             'use_hbb_for_matching': use_hbb,
             'inference_pre_nms_score_threshold': inference_pre_nms_score_threshold,
             'rpn_min_size': getattr(config.model, 'rpn_min_size', 0.0),
@@ -324,7 +321,6 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
         for key in (
             'rpn_min_size',
             'roi_box_reg_main_loss_type',
-            'roi_box_reg_smooth_l1_aux_weight',
         ):
             oriented_kwargs.pop(key, None)
         oriented_kwargs['roi_box_reg_norm'] = getattr(
@@ -359,16 +355,13 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             edge_swap=m.roi_edge_swap if m else True,
             box_reg_weight=getattr(m, "box_reg_weight", 1.0) if m else 1.0,
             box_reg_loss_type=getattr(m, "box_reg_loss_type", "smooth_l1") if m else "smooth_l1",
-            box_reg_iou_weight=getattr(m, "roi_box_reg_iou_weight", 0.0) if m else 0.0,
-            box_reg_iou_loss_type=getattr(m, "roi_box_reg_iou_loss_type", "riou") if m else "riou",
+            box_reg_aux_weight=getattr(m, "roi_box_reg_aux_weight", 0.0) if m else 0.0,
+            box_reg_aux_loss_type=getattr(m, "roi_box_reg_aux_loss_type", None) if m else None,
             box_reg_kfiou_fun=getattr(m, "roi_box_reg_kfiou_fun", None) if m else None,
             box_reg_probiou_mode=getattr(m, "roi_box_reg_probiou_mode", None) if m else None,
             box_reg_main_loss_type=getattr(
                 m, "roi_box_reg_main_loss_type", "smooth_l1"
             ) if m else "smooth_l1",
-            box_reg_encoded_aux_weight=getattr(
-                m, "roi_box_reg_smooth_l1_aux_weight", 0.0
-            ) if m else 0.0,
             reg_sample_size_per_image=getattr(
                 m, "roi_batch_size_per_image", 512
             ) if m else 512,
@@ -378,8 +371,8 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             max_detections_per_image=getattr(m, "max_detections_per_image", 100) if m else 100,
             final_nms_iou_schedule_epochs=m.final_nms_iou_schedule_epochs if m else None,
             final_nms_iou_schedule_values=m.final_nms_iou_schedule_values if m else None,
-            roi_box_reg_iou_schedule_epochs=getattr(m, "roi_box_reg_iou_schedule_epochs", None) if m else None,
-            roi_box_reg_iou_schedule_values=getattr(m, "roi_box_reg_iou_schedule_values", None) if m else None,
+            roi_box_reg_aux_schedule_epochs=getattr(m, "roi_box_reg_aux_schedule_epochs", None) if m else None,
+            roi_box_reg_aux_schedule_values=getattr(m, "roi_box_reg_aux_schedule_values", None) if m else None,
             final_nms_use_cpu=getattr(m, "final_nms_use_cpu", False) if m else False,
         )
     elif 'fcos' in model_type_lower:

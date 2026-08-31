@@ -614,7 +614,7 @@ class TestROILoss:
             positive_iou_threshold=0.5,
             negative_iou_threshold=0.3,
             include_assignment_diagnostics=False,
-            box_reg_iou_weight=0.0,
+            box_reg_aux_weight=0.0,
             edge_swap=False,
         )
         shifted_no_iou = compute_oriented_roi_loss(
@@ -626,7 +626,7 @@ class TestROILoss:
             positive_iou_threshold=0.5,
             negative_iou_threshold=0.3,
             include_assignment_diagnostics=False,
-            box_reg_iou_weight=0.0,
+            box_reg_aux_weight=0.0,
             edge_swap=False,
         )
         shifted_with_iou = compute_oriented_roi_loss(
@@ -638,7 +638,7 @@ class TestROILoss:
             positive_iou_threshold=0.5,
             negative_iou_threshold=0.3,
             include_assignment_diagnostics=False,
-            box_reg_iou_weight=0.5,
+            box_reg_aux_weight=0.5,
             edge_swap=False,
         )
 
@@ -662,7 +662,7 @@ class TestROILoss:
             positive_iou_threshold=0.5,
             negative_iou_threshold=0.3,
             box_reg_angle_weight=1.0,
-            box_reg_iou_weight=0.0,
+            box_reg_aux_weight=0.0,
             edge_swap=False,
             include_assignment_diagnostics=False,
         )
@@ -675,7 +675,7 @@ class TestROILoss:
             positive_iou_threshold=0.5,
             negative_iou_threshold=0.3,
             box_reg_angle_weight=3.0,
-            box_reg_iou_weight=0.0,
+            box_reg_aux_weight=0.0,
             edge_swap=False,
             include_assignment_diagnostics=False,
         )
@@ -699,7 +699,7 @@ def test_horizontal_roi_loss_angle_weight_scales_angle_term():
         positive_iou_threshold=0.5,
         negative_iou_threshold=0.3,
         box_reg_angle_weight=1.0,
-        box_reg_iou_weight=0.0,
+        box_reg_aux_weight=0.0,
         edge_swap=False,
         include_assignment_diagnostics=False,
     )
@@ -712,7 +712,7 @@ def test_horizontal_roi_loss_angle_weight_scales_angle_term():
         positive_iou_threshold=0.5,
         negative_iou_threshold=0.3,
         box_reg_angle_weight=3.0,
-        box_reg_iou_weight=0.0,
+        box_reg_aux_weight=0.0,
         edge_swap=False,
         include_assignment_diagnostics=False,
     )
@@ -744,7 +744,7 @@ def test_horizontal_roi_loss_angle_term_uses_encoded_smooth_l1():
         positive_iou_threshold=0.5,
         negative_iou_threshold=0.3,
         main_loss_type="smooth_l1",
-        box_reg_iou_weight=0.0,
+        box_reg_aux_weight=0.0,
         stds=target_stds,
         norm_factor=norm_factor,
         edge_swap=False,
@@ -775,7 +775,7 @@ def test_horizontal_roi_loss_mmrotate_matches_sampled_all():
         gt_labels=gt_labels,
         positive_iou_threshold=0.5,
         negative_iou_threshold=0.3,
-        box_reg_iou_weight=0.0,
+        box_reg_aux_weight=0.0,
         edge_swap=False,
         include_assignment_diagnostics=False,
     )
@@ -836,9 +836,9 @@ def test_horizontal_roi_loss_probiou_main_with_smooth_l1_aux_backward():
         negative_iou_threshold=0.3,
         main_loss_type="probiou",
         box_reg_probiou_mode="l1",
-        smooth_l1_aux_weight=0.1,
+        box_reg_aux_weight=0.1,
+        box_reg_aux_loss_type="smooth_l1",
         reg_norm="positives_only",
-        box_reg_iou_weight=0.0,
         edge_swap=False,
         include_assignment_diagnostics=False,
     )
@@ -859,8 +859,8 @@ def test_horizontal_roi_loss_default_smooth_l1_main_unchanged_with_probiou_aux()
         positive_iou_threshold=0.5,
         negative_iou_threshold=0.3,
         main_loss_type="smooth_l1",
-        box_reg_iou_weight=0.1,
-        box_reg_iou_loss_type="probiou",
+        box_reg_aux_weight=0.1,
+        box_reg_aux_loss_type="probiou",
         box_reg_probiou_mode="l1",
         edge_swap=False,
         include_assignment_diagnostics=False,

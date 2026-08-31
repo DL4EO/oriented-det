@@ -23,7 +23,7 @@
   },
   "training": {
     "num_epochs": 12,
-    "learning_rate": 0.00025,
+    "learning_rate": 0.0025,
     "momentum": 0.9,
     "weight_decay": 0.0001,
     "use_amp": false,
@@ -65,6 +65,7 @@
   "evaluation": {
     "score_threshold": 0.05,
     "iou_threshold": 0.5,
+    "final_nms_iou_threshold": 0.1,
     "compute_map_final": false,
     "compute_map_every_n_epochs": 4,
     "extended_gt_metrics": true,
@@ -87,7 +88,9 @@
     "fcos_centerness_on_reg": true,
     "fcos_scale_angle": true,
     "fcos_angle_weight": 1.0,
-    "box_reg_loss_type": "l1",
+    "box_reg_loss_type": "riou",
+    "aux_loss_type": null,
+    "aux_loss_weight": 0.0,
     "final_nms_use_cpu": false,
     "inference_pre_nms_score_threshold": 0.05,
     "final_nms_iou_threshold": 0.1,
@@ -96,7 +99,7 @@
   "production": {
     "score_threshold": 0.05,
     "inference_pre_nms_score_threshold": 0.05,
-    "final_nms_iou_threshold": 0.1,
+    "final_nms_iou_threshold": 0.3,
     "max_detections_per_image": 3000,
     "overlap_pixels": 200,
     "ignore_margin_pixels": 0,

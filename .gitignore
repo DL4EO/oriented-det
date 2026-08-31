@@ -4,7 +4,7 @@
 
 # Personal notebooks and scripts
 notebooks/
-post/
+cursor/
 docs/roadmap-detailed.md
 tools/test_*
 .cursor/
@@ -22,6 +22,7 @@ export/artifacts/
 runs/
 runs.*/
 predictions/
+previews/
 temp/
 
 # Raw val detections are too large for GitHub (one file can exceed 100 MB)

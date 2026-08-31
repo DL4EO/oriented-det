@@ -196,7 +196,7 @@ train_dataset = DOTADataset(
 
 - **Missing annotation files**: Dataset skips images without corresponding annotation files
 - **Malformed annotations**: Lines that can't be parsed are skipped with a warning
-- **Empty tiles**: By default, tiles with no ground-truth objects are included (empty target list). Set **`dataset.filter_empty_gt: true`** in the training config to drop them at dataset init (after `difficult_strategy`, `allowed_classes`, and `ignore_labels`), matching MMRotate `DOTADataset` (`filter_empty_gt=True`). The DOTA pretrain recipes [`dota_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/dota_le90_1x.json) and [`dota_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/dota_le90_3x.json) enable this.
+- **Empty tiles**: By default, tiles with no ground-truth objects are included (empty target list). Set **`dataset.filter_empty_gt: true`** in the training config to drop them at dataset init (after `difficult_strategy`, `allowed_classes`, and `ignore_labels`), matching MMRotate `DOTADataset` (`filter_empty_gt=True`). The DOTA pretrain recipes [`dota_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/dota_le90_1x.json) and [`dota_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/dota_le90_3x.json) enable this. To keep empty tiles that the model still false-positives on, leave `filter_empty_gt` false and set **`dataset.drop_easy_empty_tiles: true`** with **`dataset.tile_metrics_csv`** from `make train-preds`: training then drops only vacuous tiles (`tp=fp=fn=0`) and can oversample hard empties.
 - **Difficult objects**: Use `dataset.difficult_strategy`:
   - `drop`: remove difficult objects at read-time (never reach training/eval targets)
   - `ignore`: keep difficult objects but treat them as “don’t care” (MMRotate/MMDet style)
@@ -265,8 +265,77 @@ CSV + split-file datasets (`dataset.format: airbus_playground` in [Configuration
 - `split_file` — fold or train/val column (`val_split_id` for integer folds)
 - `train_includes_val` — when `true`, train on all folds; `val_split_id` fold is still used for validation/monitoring only (DOTA `train_tiles_dirs` trainval parity)
 - `ignore_labels`, `map_labels` — filter and rename classes
+- **Lookalike confusers** (hard negatives, not a semantic class) — see [Lookalike confusers](#lookalike-confusers) below
 
 Keep dataset JSON in your own config tree and inherit `@odet:configs/_base_/...` fragments. Prep tools: `odet playground-csv`, `odet playground-to-dota` (see [tools/README.md](https://github.com/DL4EO/oriented-det/blob/main/tools/README.md)).
+
+## Lookalike confusers
+
+`lookalike` is a **reserved class name**. It never enters `class_map` / `num_classes`. Boxes mapped onto it are trained as hard negatives: overlapping non-positive RPN/ROI/RetinaNet/FCOS samples are forced to **background** (not ignore), and two-stage heads preferentially sample those negatives.
+
+Recipe (Airbus Playground CSV or any loader that applies `map_labels`):
+
+```json
+"dataset": {
+  "map_labels": { "Confuser": "lookalike" },
+  "ignore_labels": [],
+  "lookalike_labels": null
+}
+```
+
+Notes:
+
+- CSV / DOTA labels must still contain the boxes. If they were dropped with `--ignore-label Confuser` / `ignore_labels`, regenerate or clear that filter.
+- Optional `dataset.lookalike_labels` adds extra aliases treated the same way; `"lookalike"` is always included. Example without renaming: `"lookalike_labels": ["Confuser"]`.
+- Lookalike wins over `ignore_labels` and is kept even when not in `allowed_classes`. Lookalike-only tiles are **not** dropped by `filter_empty_gt`.
+- At eval, lookalikes are not positives; a real-class detection on that region counts as an FP (desired). Do not put them on `rboxes_ignore` at eval.
+
+## HRSC2016
+
+Native XML loader (`dataset.format: hrsc2016`).
+
+### Download
+
+The original paper site (`escience.cn`) is often offline. Use one of these copies of the **official 2016 release** (1,061 images: 436 train / 181 val / 444 test):
+
+| Source | Size | Notes |
+|--------|------|--------|
+| [IEEE DataPort](https://ieee-dataport.org/documents/hrsc2016) | ~3.5 GB (`HRSC2016_dataset.zip`) | Free IEEE account; closest hosted archive |
+| [Baidu AI Studio](https://aistudio.baidu.com/datasetdetail/54106) | — | Link used by [MMRotate](https://github.com/open-mmlab/mmrotate/blob/main/tools/data/hrsc/README.md); needs a Baidu account |
+| [Kaggle `guofeng/hrsc2016`](https://www.kaggle.com/datasets/guofeng/hrsc2016) | — | Same layout; `kaggle datasets download -d guofeng/hrsc2016` |
+
+Do **not** use **HRSC2016-MS** (a later multi-scale variant). After unzip, point `dataset.data_root` at the folder that contains `FullDataSet/` and `ImageSets/` (a wrapping `HRSC2016/` directory is also accepted).
+
+Paper: Liu, Yuan, Weng, Yang, *A High Resolution Optical Satellite Image Dataset for Ship Recognition and Some New Baselines*, ICPRAM 2017. [DOI](https://doi.org/10.5220/0006120603240331).
+
+Official layout:
+
+```text
+HRSC2016/
+  FullDataSet/AllImages/*.bmp
+  FullDataSet/Annotations/*.xml
+  ImageSets/{train,val,test,trainval}.txt
+```
+
+- Single class: **`ship`** (fine-grained `Class_ID` values are ignored).
+- XML `mbox_cx/cy/w/h/ang` uses **radians**; boxes are converted through the same polygon → RBox path as DOTA (**le90**).
+- Default ImageSets mapping (MMRotate): train → **`trainval`**, val → **`test`**. Override with `dataset.train_split` / `dataset.val_split`.
+- Oriented R-CNN, Faster R-CNN, and FCOS 1×/3× use **`keep_ratio`** (long edge 800) + `pad_size_divisor` 32. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN 3× enable random rotate at p=0.5 **±20°**. Two-stage 1× recipes leave rotate off. Oriented R-CNN uses Smooth L1 + ProbIoU aux; Faster R-CNN keeps ProbIoU main + Smooth L1 aux. `make eval-val` / `odet preds` use the same whole-image path for `pad` / `keep_ratio` (no native sliding windows). DOTA eval-val stays on `fixed` pre-tiled rasters.
+- HRSC / DOTA NMS split: train `model` and eval-val `evaluation.final_nms_iou_threshold` **0.1** (MMRotate test parity); deploy `production.final_nms_iou_threshold` **0.3**. Two-stage HRSC keeps max **2000** dets/image and score **0.05**.
+- Optional DOTA export (for `odet tile-dota`): `odet hrsc-to-dota --data-root /path/to/HRSC2016 --output-dir /path/to/HRSC2016-dota`.
+
+```json
+{
+  "dataset": {
+    "format": "hrsc2016",
+    "data_root": "/path/to/data/HRSC2016",
+    "train_split": "trainval",
+    "val_split": "test"
+  }
+}
+```
+
+Recipes: [`configs/oriented_rcnn/hrsc2016_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/hrsc2016_le90_1x.json), [`configs/oriented_rcnn/hrsc2016_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/hrsc2016_le90_3x.json) (36 epochs, milestones 24/33, ±20° rotate), [`configs/rotated_faster_rcnn/hrsc2016_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_faster_rcnn/hrsc2016_le90_1x.json), [`configs/rotated_faster_rcnn/hrsc2016_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_faster_rcnn/hrsc2016_le90_3x.json), [`configs/rotated_fcos/hrsc2016_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_fcos/hrsc2016_le90_1x.json), [`configs/rotated_fcos/hrsc2016_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_fcos/hrsc2016_le90_3x.json).
 
 ## Image Tiling
 
@@ -317,21 +386,38 @@ visualize_tiles(
 
 ## Data Augmentation
 
-OrientedDet supports two types of data augmentation:
+Training collate applies geometric augs after spatial resize: random flips (`preprocessing.enable_flip_*`, MMRotate `RRandomFlip`) then optional random rotate (`enable_random_rotate`, `random_rotate_prob`, `random_rotate_angle_range` in degrees — MMRotate `PolyRandomRotate`, `auto_bound=False`). Val and inference do not flip or rotate. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°; two-stage 1× and DOTA leave rotate off.
 
 ### 1. Geometric Transforms (Oriented Bounding Box Aware)
 
-These transforms modify both the image and oriented bounding boxes:
+Image+box helpers in `oriented_det.data` (`flips.py` / `rotates.py`). Boxes are re-normalized to le90. `geometry.transforms.rotate` is rbox-only math (y-up); do not use it on PIL images without negating the angle.
 
 ```python
-from oriented_det.data import HorizontalFlip, Rotate, Compose
+import math
+from oriented_det.data import (
+    apply_flip_to_image,
+    apply_flip_to_rboxes,
+    apply_random_train_flips,
+    apply_random_train_rotate,
+    apply_rotate_to_image,
+    apply_rotate_to_rboxes,
+)
 
-aug = Compose([
-    HorizontalFlip(p=0.5),
-    Rotate(degrees=90, p=0.3),
-])
+# Same path as training collate
+image, rboxes = apply_random_train_flips(
+    image, rboxes, image_width=512, image_height=512,
+    enable_horizontal=True, enable_vertical=True, enable_diagonal=True,
+)
+image, rboxes = apply_random_train_rotate(
+    image, rboxes, image_width=512, image_height=512,
+    prob=0.5, angle_range_deg=180.0,
+)
 
-augmented_image, augmented_boxes = aug(image, rboxes, image_width, image_height)
+# Fixed flip / rotate (PIL visual CCW)
+image = apply_flip_to_image(image, "horizontal")
+rboxes = apply_flip_to_rboxes(rboxes, "horizontal", image_width=512, image_height=512)
+image = apply_rotate_to_image(image, 90.0)
+rboxes = apply_rotate_to_rboxes(rboxes, math.radians(90.0), image_width=512, image_height=512)
 ```
 
 ### 2. Albumentations (Non-Geometric Only)
@@ -366,7 +452,7 @@ augmented_image = aug(image)  # Returns PIL Image
 - **Blur**: GaussianBlur
 
 **Not Supported (Geometric):**
-- Rotation, Scaling, Translation, Affine transforms (use `oriented_det.data.Rotate` instead)
+- Rotation, Scaling, Translation, Affine transforms (use `apply_rotate_to_*` / `apply_random_train_rotate`)
 - Any transform that would require updating oriented bounding box coordinates
 
 You can also create custom albumentations pipelines:

@@ -78,20 +78,22 @@ def tensor_to_rboxes(boxes: torch.Tensor) -> List[RBox]:
 def prepare_targets(
     targets: Sequence[Dict[str, Any]],
     device: Optional[torch.device] = None,
-) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
+) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
     """Prepare targets for training, preserving oriented boxes.
     
     Args:
         targets: List of target dicts, each containing:
             - "rboxes" (List[RBox] or tensor [N, 5] with format [cx, cy, w, h, angle])
             - "labels" (tensor [N] or list, 1-indexed)
+            - optional "rboxes_ignore" / "rboxes_lookalike"
         device: Optional device to move tensors to
         
     Returns:
-        Tuple of (gt_boxes_list, gt_labels_list, gt_boxes_ignore_list):
+        Tuple of (gt_boxes_list, gt_labels_list, gt_boxes_ignore_list, gt_boxes_lookalike_list):
         - gt_boxes_list: List of tensors [M, 5] with oriented boxes
         - gt_labels_list: List of tensors [M] with class labels (1-indexed)
         - gt_boxes_ignore_list: List of tensors [I, 5] with ignored GT boxes (e.g. DOTA difficult)
+        - gt_boxes_lookalike_list: List of tensors [L, 5] hard-negative lookalike boxes
     """
     if torch is None:
         raise RuntimeError("PyTorch is required.")
@@ -99,6 +101,7 @@ def prepare_targets(
     gt_boxes_list = []
     gt_labels_list = []
     gt_boxes_ignore_list: List[torch.Tensor] = []
+    gt_boxes_lookalike_list: List[torch.Tensor] = []
     
     for target in targets:
         target = dict(target)
@@ -139,8 +142,187 @@ def prepare_targets(
         else:
             gt_ign = torch.zeros((0, 5), dtype=torch.float32, device=device)
         gt_boxes_ignore_list.append(gt_ign)
+
+        # Optional lookalike hard-negatives: force overlapping non-positives to background.
+        if "rboxes_lookalike" in target:
+            rboxes_look = target["rboxes_lookalike"]
+            if isinstance(rboxes_look, torch.Tensor):
+                gt_look = rboxes_look.to(device) if device is not None else rboxes_look
+            else:
+                gt_look = rboxes_to_tensor(rboxes_look, device=device)
+        else:
+            gt_look = torch.zeros((0, 5), dtype=torch.float32, device=device)
+        gt_boxes_lookalike_list.append(gt_look)
     
-    return gt_boxes_list, gt_labels_list, gt_boxes_ignore_list
+    return gt_boxes_list, gt_labels_list, gt_boxes_ignore_list, gt_boxes_lookalike_list
+
+
+def max_iou_vs_boxes(
+    boxes: "torch.Tensor",
+    gt_boxes: "torch.Tensor",
+    *,
+    use_hbb_for_matching: bool = False,
+) -> "torch.Tensor":
+    """Max IoU of each box in ``boxes`` against any box in ``gt_boxes`` ([N])."""
+    if torch is None:
+        raise RuntimeError("PyTorch is required.")
+    n = boxes.shape[0]
+    device = boxes.device
+    if gt_boxes is None or gt_boxes.numel() == 0 or n == 0:
+        return torch.zeros((n,), dtype=torch.float32, device=device)
+    boxes = boxes.to(device).detach()
+    gt_boxes = gt_boxes.to(device).detach()
+    try:
+        from ..ops.gpu_ops import oriented_box_hbb_iou_gpu
+        from ..ops.rotated_ops import pairwise_rotated_iou
+
+        if use_hbb_for_matching:
+            iou = oriented_box_hbb_iou_gpu(boxes, gt_boxes)
+        else:
+            iou = pairwise_rotated_iou(boxes, gt_boxes)
+    except Exception:
+        from ..ops.iou import batch_rbox_iou
+
+        a_list = [RBox(*a.tolist()) for a in boxes.detach().cpu()]
+        g_list = [RBox(*g.tolist()) for g in gt_boxes.detach().cpu()]
+        iou = torch.tensor(batch_rbox_iou(a_list, g_list, device=device), device=device)
+    if iou.numel() == 0:
+        return torch.zeros((n,), dtype=torch.float32, device=device)
+    return iou.max(dim=1).values
+
+
+def force_lookalike_to_background(
+    labels: "torch.Tensor",
+    boxes: "torch.Tensor",
+    gt_boxes_lookalike: Optional["torch.Tensor"],
+    *,
+    iou_threshold: float,
+    use_hbb_for_matching: bool = False,
+    matched_gt_indices: Optional["torch.Tensor"] = None,
+    matched_gt_boxes: Optional["torch.Tensor"] = None,
+    positive_mask: Optional["torch.Tensor"] = None,
+) -> "torch.Tensor":
+    """Force non-positive boxes overlapping lookalikes to background label ``0``.
+
+    Applied after normal assignment and ignore regions so lookalike wins over
+    don't-care (``-1``). Never overrides real-object positives.
+
+    Args:
+        labels: Per-sample labels (RPN: -1/0/1; ROI: -1/0/1..K). Modified in place.
+        boxes: Anchors or proposals [N, 5].
+        gt_boxes_lookalike: Lookalike OBBs [L, 5] or empty/None.
+        iou_threshold: IoU threshold (typically the positive assign threshold).
+        use_hbb_for_matching: Use HBB IoU instead of rotated IoU.
+        matched_gt_indices: Optional matched GT index tensor to clear for forced bg.
+        matched_gt_boxes: Optional matched GT boxes tensor to zero for forced bg.
+        positive_mask: Optional mask of positives to protect. Default: ``labels > 0``.
+
+    Returns:
+        Boolean mask of samples forced to background (for preferential sampling).
+    """
+    if torch is None:
+        raise RuntimeError("PyTorch is required.")
+    n = labels.shape[0]
+    device = labels.device
+    forced = torch.zeros((n,), dtype=torch.bool, device=device)
+    if gt_boxes_lookalike is None or gt_boxes_lookalike.numel() == 0 or n == 0:
+        return forced
+    if positive_mask is None:
+        positive_mask = labels > 0
+    max_iou = max_iou_vs_boxes(
+        boxes, gt_boxes_lookalike, use_hbb_for_matching=use_hbb_for_matching
+    )
+    look_mask = (~positive_mask) & (max_iou >= float(iou_threshold))
+    if not look_mask.any():
+        return forced
+    labels[look_mask] = 0
+    if matched_gt_indices is not None:
+        matched_gt_indices[look_mask] = -1
+    if matched_gt_boxes is not None:
+        matched_gt_boxes[look_mask] = 0.0
+    forced[look_mask] = True
+    return forced
+
+
+def sample_fg_bg_indices(
+    labels: "torch.Tensor",
+    *,
+    num_fg: int,
+    num_bg: int,
+    device: "torch.device",
+    fg_selector=None,
+    bg_selector=None,
+    boxes: Optional["torch.Tensor"] = None,
+    gt_boxes_lookalike: Optional["torch.Tensor"] = None,
+    lookalike_iou_threshold: Optional[float] = None,
+    use_hbb_for_matching: bool = False,
+    prefer_lookalike_bg_fraction: float = 0.5,
+) -> Tuple["torch.Tensor", "torch.Tensor"]:
+    """Sample foreground/background indices with optional lookalike-negative preference.
+
+    When ``gt_boxes_lookalike`` is set, up to ``prefer_lookalike_bg_fraction`` of the
+    background quota is filled first from bg samples overlapping lookalikes.
+    """
+    if torch is None:
+        raise RuntimeError("PyTorch is required.")
+    if fg_selector is None:
+        fg_selector = labels == 1
+    if bg_selector is None:
+        bg_selector = labels == 0
+    fg_indices = fg_selector.nonzero(as_tuple=True)[0]
+    bg_indices = bg_selector.nonzero(as_tuple=True)[0]
+    num_fg = min(int(num_fg), len(fg_indices))
+    num_bg = min(int(num_bg), len(bg_indices))
+    if num_fg > 0:
+        sampled_fg = fg_indices[torch.randperm(len(fg_indices), device=device)[:num_fg]]
+    else:
+        sampled_fg = torch.tensor([], dtype=torch.int64, device=device)
+
+    if num_bg <= 0:
+        sampled_bg = torch.tensor([], dtype=torch.int64, device=device)
+        return sampled_fg, sampled_bg
+
+    lookalike_bg = torch.tensor([], dtype=torch.int64, device=device)
+    other_bg = bg_indices
+    if (
+        boxes is not None
+        and gt_boxes_lookalike is not None
+        and gt_boxes_lookalike.numel() > 0
+        and len(bg_indices) > 0
+    ):
+        thr = float(lookalike_iou_threshold) if lookalike_iou_threshold is not None else 0.5
+        max_iou = max_iou_vs_boxes(
+            boxes[bg_indices],
+            gt_boxes_lookalike,
+            use_hbb_for_matching=use_hbb_for_matching,
+        )
+        look_mask = max_iou >= thr
+        lookalike_bg = bg_indices[look_mask]
+        other_bg = bg_indices[~look_mask]
+
+    prefer_n = min(len(lookalike_bg), max(0, int(num_bg * float(prefer_lookalike_bg_fraction))))
+    if len(other_bg) == 0:
+        prefer_n = min(len(lookalike_bg), num_bg)
+    rest_n = num_bg - prefer_n
+    parts = []
+    if prefer_n > 0:
+        parts.append(lookalike_bg[torch.randperm(len(lookalike_bg), device=device)[:prefer_n]])
+    if rest_n > 0 and len(other_bg) > 0:
+        take = min(rest_n, len(other_bg))
+        parts.append(other_bg[torch.randperm(len(other_bg), device=device)[:take]])
+        rest_n -= take
+    # If ordinary bg was short, fill remaining from leftover lookalikes.
+    if rest_n > 0 and len(lookalike_bg) > prefer_n:
+        leftover = lookalike_bg[torch.randperm(len(lookalike_bg), device=device)]
+        already = set(int(x) for x in parts[0].tolist()) if parts else set()
+        fill = [int(i) for i in leftover.tolist() if int(i) not in already][:rest_n]
+        if fill:
+            parts.append(torch.tensor(fill, dtype=torch.int64, device=device))
+    if parts:
+        sampled_bg = torch.cat(parts, dim=0)
+    else:
+        sampled_bg = bg_indices[torch.randperm(len(bg_indices), device=device)[:num_bg]]
+    return sampled_fg, sampled_bg
 
 
 # ============================================================================
@@ -292,43 +474,59 @@ def extract_backbone_features(
 def derive_fpn_strides_from_grid(
     image_size: Tuple[int, int],
     feature_map_sizes: Sequence[Tuple[int, int]],
+    configured: Optional[Sequence[int]] = None,
 ) -> List[int]:
     """Compute FPN strides from the real input size and backbone feature map shapes.
 
-    For each level, stride is ``image_size / feature_map_size`` (H and W must agree).
-    This keeps anchors, RPN, and ROI align consistent with the actual grid even if
-    ``fpn_strides`` in config is wrong or stale.
+    For each level, stride is ``image_size / feature_map_size`` when H and W agree
+    on a positive integer. Otherwise, if ``configured`` is set (MMRotate
+    ``[4, 8, 16, 32, 64]``), use that level's nominal stride. That is required for
+    ``Pad(size_divisor=32)`` + torchvision P6: ``max_pool(kernel=1, stride=2)`` on
+    a map whose size is odd (e.g. 800→25→13) so H/W no longer share one stride.
 
     Args:
         image_size: ``(H, W)`` of the image tensor fed to the backbone (same as anchor generation).
         feature_map_sizes: ``(h, w)`` per FPN level, from ``feature.shape[2:]``.
+        configured: Optional nominal strides (same length as ``feature_map_sizes``).
+            Used when the grid does not imply a unique integer isotropic stride.
 
     Returns:
         One integer stride per level.
 
     Raises:
-        ValueError: If sizes are invalid or H/W imply different strides.
+        ValueError: If sizes are invalid, or H/W imply different strides and no
+            configured fallback is available.
     """
     img_h, img_w = int(image_size[0]), int(image_size[1])
     if img_h <= 0 or img_w <= 0:
         raise ValueError(f"image_size must be positive, got {image_size}")
+    cfg = [int(x) for x in configured] if configured else None
     strides: List[int] = []
-    for fh, fw in feature_map_sizes:
+    for i, (fh, fw) in enumerate(feature_map_sizes):
         fh, fw = int(fh), int(fw)
         if fh <= 0 or fw <= 0:
             raise ValueError(f"feature_map_sizes entries must be positive, got {(fh, fw)}")
         sh = img_h / fh
         sw = img_w / fw
         tol = max(1e-2, 1e-3 * max(sh, sw))
-        if abs(sh - sw) > tol:
+        isotropic = abs(sh - sw) <= tol
+        mid = (sh + sw) / 2.0
+        s_round = int(round(mid))
+        clean = isotropic and s_round > 0 and abs(mid - s_round) <= tol
+        if clean:
+            strides.append(s_round)
+            continue
+        if cfg is not None and i < len(cfg) and cfg[i] > 0:
+            strides.append(cfg[i])
+            continue
+        if not isotropic:
             raise ValueError(
                 f"Anisotropic FPN stride for image {img_h}x{img_w} and feature map {fh}x{fw}: "
                 f"stride_h={sh:.6f}, stride_w={sw:.6f}"
             )
-        s = int(round((sh + sw) / 2.0))
-        if s <= 0:
-            raise ValueError(f"Non-positive derived stride {s} for image {image_size}, feature {(fh, fw)}")
-        strides.append(s)
+        if s_round <= 0:
+            raise ValueError(f"Non-positive derived stride {s_round} for image {image_size}, feature {(fh, fw)}")
+        strides.append(s_round)
     return strides
 
 
@@ -606,6 +804,9 @@ __all__ = [
     "rboxes_to_tensor",
     "tensor_to_rboxes",
     "prepare_targets",
+    "max_iou_vs_boxes",
+    "force_lookalike_to_background",
+    "sample_fg_bg_indices",
     "setup_backbone",
     "extract_backbone_features",
     "setup_anchors",

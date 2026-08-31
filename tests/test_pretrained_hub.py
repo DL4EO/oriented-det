@@ -28,6 +28,15 @@ def test_list_assets():
     assert assets["oriented_rcnn_dota_le90_3x"] == (
         "oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.pth"
     )
+    assert assets["oriented_rcnn_hrsc2016_le90_3x"] == (
+        "oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.pth"
+    )
+    assert assets["rotated_faster_rcnn_hrsc2016_le90_3x"] == (
+        "rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.pth"
+    )
+    assert assets["rotated_fcos_hrsc2016_le90_3x"] == (
+        "rotated_fcos_r50_fpn_hrsc2016_le90_3x-ad7b8f44.pth"
+    )
     assert assets["rotated_retinanet_dota_le90_1x"] == (
         "rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.pth"
     )
@@ -37,7 +46,7 @@ def test_list_assets():
     assert assets["rotated_faster_rcnn_dota_le90_3x"] == (
         "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
     )
-    assert assets["rotated_fcos_dota_le90_3x_riou"] == (
+    assert assets["rotated_fcos_dota_le90_3x"] == (
         "rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth"
     )
     assert assets["rotated_fcos_dota_le90_3x_kfiou_aux"] == (

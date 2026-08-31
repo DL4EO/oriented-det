@@ -65,6 +65,7 @@
   "evaluation": {
     "score_threshold": 0.05,
     "iou_threshold": 0.5,
+    "final_nms_iou_threshold": 0.1,
     "compute_map_final": false,
     "compute_map_every_n_epochs": 4,
     "extended_gt_metrics": true,

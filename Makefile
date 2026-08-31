@@ -81,7 +81,7 @@ help:
 	@echo ""
 	@echo "=== Tiled val: predictions & offline metrics ==="
 	@echo "  make eval-val               - preds then metrics on newest predictions/<ts>/ (same vars as below)"
-	@echo "  make preds                  - Val inference → predictions/<ts>/predictions.json (production.*; no GPU mAP)"
+	@echo "  make preds                  - Val inference → predictions/<ts>/predictions.json (eval NMS via evaluation.final_nms_iou_threshold; no GPU mAP)"
 	@echo "  make metrics                - Offline mAP/PR on METRICS_PRED_DIR or latest predictions/"
 	@echo "  make train-preds            - Train split + tile_metrics.csv (latest exp; SAVE_TRAIN_PRED_OUT= optional)"
 	@echo ""
@@ -115,7 +115,7 @@ help:
 	@echo "  DOTA_DATA_ROOT: if unset for preds / train-preds, data paths come from experiment config.json"
 	@echo "  Checkpoint loading (training): config-only — checkpoint.load_from_checkpoint, load_from_experiment,"
 	@echo "    discover_previous_run, resume_from_checkpoint_epoch, etc."
-	@echo "  preds: thresholds, overlap, NMS, margins from config production.*"
+	@echo "  preds: score/overlap/margins from production.*; final NMS from evaluation.final_nms_iou_threshold when set"
 	@echo "    (evaluation.* is training-time val only). Advanced overrides: call tools/save_predictions.py manually."
 	@echo "  stats / training paths: edit tools/train.py for DATA_ROOT, fine-tuning, pretrained weights as needed."
 	@echo "  make demo: DEMO_DIR=$(DEMO_DIR) — only *.jpg, *.jpeg, *.png directly under that folder (not subdirs e.g. out/)."
@@ -299,7 +299,7 @@ preds: check-install
 	MODEL_TYPE=$$(basename $$(dirname "$$LATEST_EXP")); \
 	echo "Experiment: $$LATEST_EXP"; \
 	echo "Model type: $$MODEL_TYPE"; \
-	echo "preds: val inference from experiment config (production.*; see tools/save_predictions.py). GPU mAP: run make metrics."; \
+	echo "preds: val inference from experiment config (evaluation.final_nms_iou_threshold for NMS when set; see tools/save_predictions.py). GPU mAP: run make metrics."; \
 	if [ -n "$$DOTA_DATA_ROOT" ]; then \
 		$(TRAIN_ENV) odet preds --model-type "$$MODEL_TYPE" --experiment-dir "$$LATEST_EXP" --data-root "$$DOTA_DATA_ROOT" --data-split val --no-diagnostics; \
 	else \

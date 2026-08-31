@@ -390,7 +390,7 @@ When using `tools/train.py` with a JSON config, you can choose the LR scheduler 
 
 | `lr_scheduler_type`    | Scheduler             | Stepping        | Typical use |
 |-------------------------|----------------------|-----------------|-------------|
-| (none) / `multistep` / `step` | MultiStepLR or StepLR | Once per epoch  | Default; use `lr_scheduler_milestones` for MultiStepLR. |
+| (none) / `multistep` / `step` | MultiStepLR or StepLR | Once per epoch  | Default; use `lr_scheduler_milestones` for MultiStepLR. `lr_scheduler_gamma` is a number (every drop) or a list (one factor per milestone). |
 | `reduce_on_plateau`     | ReduceLROnPlateau    | Once per epoch (after validation) | Reduce LR when a metric (e.g. loss or mAP) plateaus. |
 | `one_cycle` / `onecycle`| OneCycleLR           | Every optimizer step | Single cycle: warmup then decay over full training. |
 | `cosine_annealing` / `cosine` | PyTorch CosineAnnealingLR | Once per epoch  | Cosine decay; SGDR restarts if `num_epochs` > `T_max`. |
@@ -440,12 +440,12 @@ No separate warmup config is used; OneCycleLR has its own warmup. The training e
 
 ### CosineAnnealingLR (`cosine_annealing`)
 
-Standard PyTorch cosine decay. `T_max` from `lr_scheduler_cosine_epochs`, `lr_scheduler_cosine_t_max`, or `num_epochs`. If **`num_epochs` > `T_max`**, the LR **restarts** after each minimum (SGDR-style). Tail keys are ignored.
+Standard PyTorch cosine decay. `T_max` from `lr_scheduler_cosine_epochs` or `num_epochs`. If **`num_epochs` > `T_max`**, the LR **restarts** after each minimum (SGDR-style). Tail keys are ignored. Legacy `lr_scheduler_cosine_t_max` remaps onto `lr_scheduler_cosine_epochs`.
 
 ```json
 "training": {
   "lr_scheduler_type": "cosine_annealing",
-  "lr_scheduler_cosine_t_max": 72,
+  "lr_scheduler_cosine_epochs": 72,
   "lr_scheduler_cosine_eta_min": 1e-6,
   "lr_warmup_steps": 50
 }
@@ -453,7 +453,7 @@ Standard PyTorch cosine decay. `T_max` from `lr_scheduler_cosine_epochs`, `lr_sc
 
 ### Cosine + fixed tail (`cosine_annealing_with_tail`)
 
-Cosine for `cosine_epochs` (or `t_max`), then constant `lr_scheduler_cosine_tail_lr` for `tail_epochs`; the two phases must sum to `num_epochs`.
+Cosine for `cosine_epochs`, then constant `lr_scheduler_cosine_tail_lr` for `tail_epochs`; the two phases must sum to `num_epochs`.
 
 ```json
 "training": {

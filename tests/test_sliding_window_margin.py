@@ -2,7 +2,9 @@
 
 from oriented_det.runtime.inference import (
     _centroid_in_sliding_window_interior,
+    count_sliding_window_positions,
     resolve_sliding_window_margin_pixels,
+    uses_native_sliding_window,
 )
 
 
@@ -45,3 +47,24 @@ def test_zero_margin_keeps_all_in_crop():
     assert _centroid_in_sliding_window_interior(
         0.0, 0.0, 512, 512, 0.0, 0.0, 256, 256, 2048, 2048
     )
+
+
+def test_pad_mode_never_uses_native_sliding_window():
+    pad = {"resize_mode": "pad", "target_size": [800, 800]}
+    assert uses_native_sliding_window(824, 1234, pad) is False
+    assert count_sliding_window_positions(824, 1234, pad, overlap_pixels=0) == 1
+    assert count_sliding_window_positions(400, 300, pad, overlap_pixels=0) == 1
+    keep = {"resize_mode": "keep_ratio", "target_size": [800, 800], "pad_size_divisor": 32}
+    assert uses_native_sliding_window(824, 1234, keep) is False
+    assert count_sliding_window_positions(824, 1234, keep, overlap_pixels=0) == 1
+
+
+def test_fixed_mode_still_tiles_oversized_dota_rasters():
+    fixed = {"resize_mode": "fixed", "target_size": [1024, 1024]}
+    assert uses_native_sliding_window(800, 800, fixed) is False
+    assert uses_native_sliding_window(2048, 2048, fixed) is True
+    n = count_sliding_window_positions(2048, 2048, fixed, overlap_pixels=0)
+    assert n > 1
+    crop = {"resize_mode": "crop", "target_size": [800, 800]}
+    assert uses_native_sliding_window(824, 1234, crop) is True
+

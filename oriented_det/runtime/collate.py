@@ -9,6 +9,8 @@ from torchvision import transforms as T
 from torch.nn import functional as F
 from oriented_det.data import create_albumentations_augmentation
 from oriented_det.data.flips import apply_random_train_flips
+from oriented_det.data.lookalike import resolve_lookalike_label_set
+from oriented_det.data.rotates import apply_random_train_rotate
 from oriented_det.data.preprocessing import apply_spatial_preprocess
 from oriented_det.geometry.rbox import normalize_le90
 
@@ -21,6 +23,31 @@ IMAGENET_STD = [0.229, 0.224, 0.225]   # RGB
 # These are on [0, 1] scale (after ToTensor conversion)
 DOTA_MEAN = [0.245, 0.248, 0.235]  # RGB
 DOTA_STD = [0.22, 0.217, 0.208]   # RGB
+
+
+def pad_image_tensors_to_batch_hw(images: list[torch.Tensor]) -> list[torch.Tensor]:
+    """Bottom-right zero-pad to the max H×W in the batch (MMRotate stack pad).
+
+    Per-image ``keep_ratio`` + ``pad_size_divisor`` can yield 480×800 and 576×800
+    in one batch. The backbone ``torch.stack`` needs a shared canvas. Extra pad
+    does not move GT; ``target["content_size"]`` stays the valid region so
+    train-time val can clamp detections. Production ``odet preds`` is still
+    one image + divisor pad (no batch pad).
+    """
+    if len(images) <= 1:
+        return images
+    max_h = max(int(t.shape[-2]) for t in images)
+    max_w = max(int(t.shape[-1]) for t in images)
+    out: list[torch.Tensor] = []
+    for tensor in images:
+        _, height, width = tensor.shape
+        pad_h = max_h - height
+        pad_w = max_w - width
+        if pad_h or pad_w:
+            tensor = F.pad(tensor, (0, pad_w, 0, pad_h), value=0.0)
+        out.append(tensor)
+    return out
+
 
 # MMDetection/MMRotate normalization constants on [0, 1] scale
 MMDET_MEAN = [123.675 / 255.0, 116.28 / 255.0, 103.53 / 255.0]  # RGB
@@ -42,9 +69,13 @@ class _CollateFn:
         enable_flip_horizontal: Optional[bool],
         enable_flip_vertical: Optional[bool],
         enable_flip_diagonal: Optional[bool],
+        enable_random_rotate: bool,
+        random_rotate_prob: float,
+        random_rotate_angle_range: float,
         normalize_mean: Optional[list[float]],
         normalize_std: Optional[list[float]],
         difficult_strategy: str = "drop",
+        lookalike_labels: Optional[list[str]] = None,
         random_crop: bool = True,
     ):
         self.class_map = class_map
@@ -57,6 +88,9 @@ class _CollateFn:
         self.enable_flip_horizontal = enable_flip_horizontal
         self.enable_flip_vertical = enable_flip_vertical
         self.enable_flip_diagonal = enable_flip_diagonal
+        self.enable_random_rotate = enable_random_rotate
+        self.random_rotate_prob = random_rotate_prob
+        self.random_rotate_angle_range = random_rotate_angle_range
         mean = normalize_mean if normalize_mean is not None else MMDET_MEAN
         std = normalize_std if normalize_std is not None else MMDET_STD
         self.normalize_transform = T.Normalize(mean=mean, std=std) if normalize else None
@@ -65,6 +99,7 @@ class _CollateFn:
         if ds not in {"drop", "ignore", "keep"}:
             raise ValueError(f"Invalid difficult_strategy={difficult_strategy!r}; expected 'drop', 'ignore', or 'keep'.")
         self.difficult_strategy = ds
+        self.lookalike_labels = resolve_lookalike_label_set(lookalike_labels)
         self.random_crop = random_crop
 
     def __call__(self, batch):
@@ -93,11 +128,15 @@ class _CollateFn:
                 labels = []
                 rboxes_ignore = []
                 labels_ignore = []
+                rboxes_lookalike = []
                 for ann, scaled_rbox in zip(sample.annotations, scaled_rbox_list):
+                    nrb = normalize_le90(scaled_rbox)
+                    if ann.class_name in self.lookalike_labels:
+                        rboxes_lookalike.append(nrb)
+                        continue
                     class_id = self.class_map.get(ann.class_name, 0)
                     if class_id <= 0:
                         continue
-                    nrb = normalize_le90(scaled_rbox)
                     is_diff = int(getattr(ann, "difficult", 0)) == 1
                     if self.difficult_strategy == "ignore" and is_diff:
                         rboxes_ignore.append(nrb)
@@ -111,16 +150,37 @@ class _CollateFn:
                 flip_h = self.enable_flip_horizontal if self.enable_flip_horizontal is not None else self.enable_train_flip
                 flip_v = self.enable_flip_vertical if self.enable_flip_vertical is not None else self.enable_train_flip
                 flip_d = self.enable_flip_diagonal if self.enable_flip_diagonal is not None else False
+                n_real = len(rboxes)
+                n_ign = len(rboxes_ignore)
+                # Apply the same geometric transform to real / ignore / lookalike boxes.
+                all_rboxes = rboxes + rboxes_ignore + rboxes_lookalike
                 if flip_h or flip_v or flip_d:
-                    pil_image, rboxes = apply_random_train_flips(
+                    # Use the post-preprocess canvas (keep_ratio is not always target_size).
+                    flip_w, flip_h_px = pil_image.size
+                    pil_image, all_rboxes = apply_random_train_flips(
                         pil_image,
-                        rboxes,
-                        image_width=float(target_w),
-                        image_height=float(target_h),
+                        all_rboxes,
+                        image_width=float(flip_w),
+                        image_height=float(flip_h_px),
                         enable_horizontal=bool(flip_h),
                         enable_vertical=bool(flip_v),
                         enable_diagonal=bool(flip_d),
                     )
+
+                if self.enable_random_rotate:
+                    rot_w, rot_h_px = pil_image.size
+                    pil_image, all_rboxes = apply_random_train_rotate(
+                        pil_image,
+                        all_rboxes,
+                        image_width=float(rot_w),
+                        image_height=float(rot_h_px),
+                        prob=float(self.random_rotate_prob),
+                        angle_range_deg=float(self.random_rotate_angle_range),
+                    )
+
+                rboxes = all_rboxes[:n_real]
+                rboxes_ignore = all_rboxes[n_real : n_real + n_ign]
+                rboxes_lookalike = all_rboxes[n_real + n_ign :]
 
                 image_tensor = self._to_tensor(pil_image)
                 content_size = spatial.meta.content_size
@@ -130,9 +190,10 @@ class _CollateFn:
                     pad_w = (self.pad_size_divisor - (img_w % self.pad_size_divisor)) % self.pad_size_divisor
                     if pad_h or pad_w:
                         image_tensor = F.pad(image_tensor, (0, pad_w, 0, pad_h), value=0.0)
-                        content_size = (target_h, target_w)
-                if self.normalize_transform is not None:
-                    image_tensor = self.normalize_transform(image_tensor)
+                        # Square pad mode: content fills target_size. keep_ratio: keep scaled size.
+                        if self.resize_mode != "keep_ratio":
+                            content_size = (target_h, target_w)
+                # Normalize after the shared batch canvas so extra pad is black, then ImageNet-scaled.
                 images.append(image_tensor)
             except Exception as e:
                 raise RuntimeError(f"Failed to load image from {image_path}: {e}") from e
@@ -161,9 +222,19 @@ class _CollateFn:
                 else:
                     target["rboxes_ignore"] = torch.zeros((0, 5), dtype=torch.float32)
                     target["labels_ignore"] = torch.tensor([], dtype=torch.int64)
+            if rboxes_lookalike:
+                target["rboxes_lookalike"] = torch.tensor(
+                    [[rb.cx, rb.cy, rb.width, rb.height, rb.angle] for rb in rboxes_lookalike],
+                    dtype=torch.float32,
+                )
+            else:
+                target["rboxes_lookalike"] = torch.zeros((0, 5), dtype=torch.float32)
             if content_size is not None:
                 target["content_size"] = content_size
             targets.append(target)
+        images = pad_image_tensors_to_batch_hw(images)
+        if self.normalize_transform is not None:
+            images = [self.normalize_transform(tensor) for tensor in images]
         return images, targets
 
 
@@ -178,9 +249,13 @@ def create_collate_fn(
     enable_flip_horizontal: Optional[bool] = None,
     enable_flip_vertical: Optional[bool] = None,
     enable_flip_diagonal: Optional[bool] = None,
+    enable_random_rotate: bool = False,
+    random_rotate_prob: float = 0.5,
+    random_rotate_angle_range: float = 180.0,
     normalize_mean: Optional[list[float]] = None,
     normalize_std: Optional[list[float]] = None,
     difficult_strategy: str = "drop",
+    lookalike_labels: Optional[list[str]] = None,
     random_crop: bool = True,
 ) -> Callable:
     """Create a collate function with consistent class mapping and optional augmentation.
@@ -193,14 +268,22 @@ def create_collate_fn(
         augmentation: Optional albumentations transform to apply to training images.
             Should be None for validation (no augmentation).
         normalize: If True, apply MMDetection/MMRotate normalization.
-        resize_mode: ``fixed`` (stretch), ``pad`` (uniform scale by large edge + pad), or
+        resize_mode: ``fixed`` (stretch), ``pad`` (uniform scale by large edge + pad),
+            ``keep_ratio`` (uniform scale, no square pad; then ``pad_size_divisor``), or
             ``crop`` (native-res crop/pad to canvas).
         resize_to: Target canvas (height, width). MMRotate DOTA baseline uses 1024x1024.
-        pad_size_divisor: Pad image tensors to a multiple of this divisor.
+        pad_size_divisor: Per-image pad to a multiple of this divisor, then
+            bottom-right pad the batch to a shared H×W (needed for ``keep_ratio``).
         enable_train_flip: If True, apply random train flips (deprecated: use enable_flip_horizontal/vertical).
         enable_flip_horizontal: If True, allow random horizontal flip (training). None = use enable_train_flip.
         enable_flip_vertical: If True, allow random vertical flip (training). None = use enable_train_flip.
         enable_flip_diagonal: If True, allow random diagonal flip (MMRotate ``RRandomFlip``). Default False.
+        enable_random_rotate: If True, apply MMRotate-style ``PolyRandomRotate`` after flips.
+        random_rotate_prob: Probability of applying a random rotate (default 0.5).
+        random_rotate_angle_range: Half-range in degrees; angle is uniform in
+            ``[-range, +range]`` (default 180).
+        lookalike_labels: Optional extra aliases for hard-negative lookalike boxes
+            (reserved ``lookalike`` is always included).
     
     Returns:
         Collate function that can be used with DataLoader (picklable for multiprocessing).
@@ -216,9 +299,13 @@ def create_collate_fn(
         enable_flip_horizontal=enable_flip_horizontal,
         enable_flip_vertical=enable_flip_vertical,
         enable_flip_diagonal=enable_flip_diagonal,
+        enable_random_rotate=enable_random_rotate,
+        random_rotate_prob=random_rotate_prob,
+        random_rotate_angle_range=random_rotate_angle_range,
         normalize_mean=normalize_mean,
         normalize_std=normalize_std,
         difficult_strategy=difficult_strategy,
+        lookalike_labels=lookalike_labels,
         random_crop=random_crop,
     )
 

@@ -683,6 +683,8 @@ def match_oriented_proposals_to_gt(
     min_pos_iou: float = 0.5,
     gt_boxes_ignore: Optional[torch.Tensor] = None,
     ignore_iou_threshold: Optional[float] = None,
+    gt_boxes_lookalike: Optional[torch.Tensor] = None,
+    lookalike_iou_threshold: Optional[float] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Match oriented proposals to ground truth boxes using IoU.
     
@@ -709,6 +711,8 @@ def match_oriented_proposals_to_gt(
             MMRotate Rotated Faster R-CNN ROI uses False.
         min_pos_iou: When match_low_quality is True, only force best proposal to positive if
             max_iou_per_gt >= min_pos_iou. MMRotate RCNN assigner uses 0.5.
+        gt_boxes_lookalike: Optional hard-negative lookalike boxes; non-positives overlapping
+            these are forced to background after ignore regions.
     
     Returns:
         Tuple of (labels, matched_gt_indices, matched_gt_boxes):
@@ -900,6 +904,24 @@ def match_oriented_proposals_to_gt(
             labels[ign_mask] = -1
             matched_gt_indices[ign_mask] = -1
             matched_gt_boxes[ign_mask] = 0.0
+
+    if gt_boxes_lookalike is not None and gt_boxes_lookalike.numel() > 0:
+        from .utils import force_lookalike_to_background
+        look_thr = (
+            float(lookalike_iou_threshold)
+            if lookalike_iou_threshold is not None
+            else float(positive_iou_threshold)
+        )
+        force_lookalike_to_background(
+            labels,
+            proposals,
+            gt_boxes_lookalike,
+            iou_threshold=look_thr,
+            use_hbb_for_matching=use_hbb_for_matching,
+            matched_gt_indices=matched_gt_indices,
+            matched_gt_boxes=matched_gt_boxes,
+            positive_mask=(labels > 0),
+        )
     
     return labels, matched_gt_indices, matched_gt_boxes
 
@@ -1180,6 +1202,7 @@ def compute_oriented_roi_loss(
     gt_boxes: torch.Tensor,
     gt_labels: torch.Tensor,
     gt_boxes_ignore: Optional[torch.Tensor] = None,
+    gt_boxes_lookalike: Optional[torch.Tensor] = None,
     positive_iou_threshold: float = 0.5,
     negative_iou_threshold: float = 0.5,
     box_reg_weight: float = 1.0,
@@ -1196,8 +1219,8 @@ def compute_oriented_roi_loss(
     norm_factor: Optional[float] = 2.0,
     edge_swap: bool = True,
     proj_xy: bool = False,
-    box_reg_iou_weight: float = 0.0,
-    box_reg_iou_loss_type: str = "riou",
+    box_reg_aux_weight: float = 0.0,
+    box_reg_aux_loss_type: str = "riou",
     box_reg_kfiou_fun: Optional[str] = None,
     box_reg_probiou_mode: Optional[str] = None,
     use_hbb_for_matching: bool = False,
@@ -1245,14 +1268,14 @@ def compute_oriented_roi_loss(
         norm_factor: Angle scaling for encode (MMRotate uses 2.0).
         edge_swap: Whether to use edge_swap in bbox encode (MMRotate uses True).
         proj_xy: If True, encode/decode dx/dy in the proposal local frame (MMRotate DeltaXYWHTRBBoxCoder).
-        box_reg_iou_weight: Extra weight for auxiliary loss on decoded positive ROI boxes,
+        box_reg_aux_weight: Extra weight for auxiliary loss on decoded positive ROI boxes,
             added to the SmoothL1 regression loss. Ignored when this weight is 0.
-        box_reg_iou_loss_type: ``\"riou\"`` (default): ``mean(1 - rIoU)`` via
+        box_reg_aux_loss_type: ``\"riou\"`` (default): ``mean(1 - rIoU)`` via
             :func:`~oriented_det.ops.rotated_ops.pairwise_rotated_iou`. ``\"kfiou\"``: Kalman-filter
             IoU surrogate (Gaussian overlap + center Smooth L1). ``\"probiou\"``: mean ProbIoU.
-        box_reg_kfiou_fun: When ``box_reg_iou_loss_type=\"kfiou\"``, optional ``ln`` / ``exp``
+        box_reg_kfiou_fun: When ``box_reg_aux_loss_type=\"kfiou\"``, optional ``ln`` / ``exp``
             transform on the overlap term (see :func:`~oriented_det.ops.kfiou.kfiou_loss`).
-        box_reg_probiou_mode: When ``box_reg_iou_loss_type=\"probiou\"``, ``\"l1\"`` (default) or ``\"l2\"``.
+        box_reg_probiou_mode: When ``box_reg_aux_loss_type=\"probiou\"``, ``\"l1\"`` (default) or ``\"l2\"``.
         use_hbb_for_matching: If True, match proposals to GT using axis-aligned (HBB) IoU
             instead of oriented IoU. Gives more positive labels when proposal angles are wrong,
             so the classifier and angle regression can learn; recommended when angle regression is weak.
@@ -1285,11 +1308,12 @@ def compute_oriented_roi_loss(
         min_pos_iou=roi_min_pos_iou,
         gt_boxes_ignore=gt_boxes_ignore,
         ignore_iou_threshold=positive_iou_threshold,
+        gt_boxes_lookalike=gt_boxes_lookalike,
+        lookalike_iou_threshold=positive_iou_threshold,
     )
     
     # Sample proposals for training (balance foreground/background)
-    fg_indices = (matched_labels > 0).nonzero(as_tuple=True)[0]
-    bg_indices = (matched_labels == 0).nonzero(as_tuple=True)[0]
+    from .utils import sample_fg_bg_indices
 
     assign_stats = _roi_assignment_stats(
         matched_labels,
@@ -1304,6 +1328,8 @@ def compute_oriented_roi_loss(
     num_bg = int(assign_stats["roi_sampled_bg"])
 
     # Log match statistics
+    fg_indices = (matched_labels > 0).nonzero(as_tuple=True)[0]
+    bg_indices = (matched_labels == 0).nonzero(as_tuple=True)[0]
     logger.trace(
         "ROI match stats: proposals={}, positive={}, negative={}, "
         "gt_boxes={}, matched_gt={}, match_rate={:.1%}, "
@@ -1319,15 +1345,18 @@ def compute_oriented_roi_loss(
             positive_iou_threshold, negative_iou_threshold
         )
     
-    if num_fg > 0:
-        sampled_fg = fg_indices[torch.randperm(len(fg_indices), device=device)[:num_fg]]
-    else:
-        sampled_fg = torch.tensor([], dtype=torch.int64, device=device)
-    
-    if num_bg > 0:
-        sampled_bg = bg_indices[torch.randperm(len(bg_indices), device=device)[:num_bg]]
-    else:
-        sampled_bg = torch.tensor([], dtype=torch.int64, device=device)
+    sampled_fg, sampled_bg = sample_fg_bg_indices(
+        matched_labels,
+        num_fg=num_fg,
+        num_bg=num_bg,
+        device=device,
+        fg_selector=(matched_labels > 0),
+        bg_selector=(matched_labels == 0),
+        boxes=proposals,
+        gt_boxes_lookalike=gt_boxes_lookalike,
+        lookalike_iou_threshold=positive_iou_threshold,
+        use_hbb_for_matching=use_hbb_for_matching,
+    )
     
     sampled_indices = torch.cat([sampled_fg, sampled_bg], dim=0)
     
@@ -1395,7 +1424,7 @@ def compute_oriented_roi_loss(
             reg_norm=_normalize_reg_norm(reg_norm),
             num_total_samples=max(1, int(len(sampled_indices))),
         )
-        if box_reg_iou_weight > 0.0:
+        if box_reg_aux_weight > 0.0:
             decoded_boxes = decode_oriented_boxes(
                 positive_proposals,
                 selected_regression,
@@ -1409,11 +1438,11 @@ def compute_oriented_roi_loss(
             loss_iou = mean_auxiliary_box_reg_loss(
                 decoded_boxes,
                 positive_matched_gt,
-                loss_type=box_reg_iou_loss_type,
+                loss_type=box_reg_aux_loss_type,
                 kfiou_fun=box_reg_kfiou_fun,
                 probiou_mode=box_reg_probiou_mode,
             )
-            loss_box_reg = loss_box_reg + (box_reg_iou_weight * loss_iou)
+            loss_box_reg = loss_box_reg + (box_reg_aux_weight * loss_iou)
     else:
         # Maintain gradient flow: compute zero loss from model outputs
         # Use box_regression to maintain connection to computation graph
@@ -1455,6 +1484,22 @@ def _normalize_main_reg_loss_type(main_loss_type: str) -> MainRegLossType:
             f"main_loss_type must be smooth_l1|probiou|riou|kfiou, got {main_loss_type!r}"
         )
     return lt  # type: ignore[return-value]
+
+
+def _split_box_reg_aux(
+    main_loss_type: str,
+    aux_weight: float,
+    aux_loss_type: Optional[str],
+) -> Tuple[float, str, float]:
+    """Map unified aux knobs to (decoded_weight, decoded_type, encoded_weight)."""
+    main_lt = _normalize_main_reg_loss_type(main_loss_type)
+    w = float(aux_weight)
+    decoded_type = (aux_loss_type or "riou").strip().lower()
+    if w <= 0.0:
+        return 0.0, decoded_type, 0.0
+    if main_lt == "smooth_l1":
+        return w, decoded_type, 0.0
+    return 0.0, main_lt, w
 
 
 def _smooth_l1_encoded_regression_loss(
@@ -1511,17 +1556,17 @@ def compute_horizontal_roi_loss(
     gt_boxes: torch.Tensor,
     gt_labels: torch.Tensor,
     gt_boxes_ignore: Optional[torch.Tensor] = None,
+    gt_boxes_lookalike: Optional[torch.Tensor] = None,
     positive_iou_threshold: float = 0.5,
     negative_iou_threshold: float = 0.5,
     box_reg_weight: float = 1.0,
     box_reg_angle_weight: float = 1.0,
     main_loss_type: str = "smooth_l1",
     reg_norm: RegNorm = "positives_only",
-    box_reg_iou_weight: float = 0.0,
-    box_reg_iou_loss_type: str = "riou",
+    box_reg_aux_weight: float = 0.0,
+    box_reg_aux_loss_type: Optional[str] = None,
     box_reg_kfiou_fun: Optional[str] = None,
     box_reg_probiou_mode: Optional[str] = None,
-    smooth_l1_aux_weight: float = 0.0,
     fg_bg_sampling_ratio: float = 0.25,
     batch_size_per_image: int = 512,
     num_classes: int = 1,
@@ -1551,9 +1596,9 @@ def compute_horizontal_roi_loss(
       ``riou`` / ``kfiou``.
     - ``reg_norm``: ``sampled_all`` (MMDet avg_factor: divide by pos+neg sample count) or
       ``positives_only`` (mean over positive RoIs).
-    - When main is ``smooth_l1``, ``box_reg_iou_weight`` adds decoded aux loss
-      (``box_reg_iou_loss_type``). When main is decoded, ``smooth_l1_aux_weight`` adds
-      encoded Smooth L1 aux.
+    - When main is ``smooth_l1``, ``box_reg_aux_weight`` adds decoded aux loss
+      (``box_reg_aux_loss_type``). When main is decoded, ``box_reg_aux_weight`` with
+      ``box_reg_aux_loss_type='smooth_l1'`` adds encoded Smooth L1 aux.
     """
     if torch is None or F is None:
         raise RuntimeError("PyTorch is required for loss computation.")
@@ -1576,10 +1621,11 @@ def compute_horizontal_roi_loss(
         min_pos_iou=roi_min_pos_iou,
         gt_boxes_ignore=gt_boxes_ignore,
         ignore_iou_threshold=positive_iou_threshold,
+        gt_boxes_lookalike=gt_boxes_lookalike,
+        lookalike_iou_threshold=positive_iou_threshold,
     )
 
-    fg_indices = (matched_labels > 0).nonzero(as_tuple=True)[0]
-    bg_indices = (matched_labels == 0).nonzero(as_tuple=True)[0]
+    from .utils import sample_fg_bg_indices
 
     assign_stats = _roi_assignment_stats(
         matched_labels,
@@ -1591,14 +1637,18 @@ def compute_horizontal_roi_loss(
     num_fg = int(assign_stats["roi_sampled_fg"])
     num_bg = int(assign_stats["roi_sampled_bg"])
 
-    if num_fg > 0:
-        sampled_fg = fg_indices[torch.randperm(len(fg_indices), device=device)[:num_fg]]
-    else:
-        sampled_fg = torch.tensor([], dtype=torch.int64, device=device)
-    if num_bg > 0:
-        sampled_bg = bg_indices[torch.randperm(len(bg_indices), device=device)[:num_bg]]
-    else:
-        sampled_bg = torch.tensor([], dtype=torch.int64, device=device)
+    sampled_fg, sampled_bg = sample_fg_bg_indices(
+        matched_labels,
+        num_fg=num_fg,
+        num_bg=num_bg,
+        device=device,
+        fg_selector=(matched_labels > 0),
+        bg_selector=(matched_labels == 0),
+        boxes=proposals_obb,
+        gt_boxes_lookalike=gt_boxes_lookalike,
+        lookalike_iou_threshold=positive_iou_threshold,
+        use_hbb_for_matching=True,
+    )
     sampled_indices = torch.cat([sampled_fg, sampled_bg], dim=0)
 
     sampled_logits = class_logits[sampled_indices].clone()
@@ -1650,6 +1700,9 @@ def compute_horizontal_roi_loss(
         num_total_samples = max(1, int(len(sampled_indices)))
         norm = _normalize_reg_norm(reg_norm)
         main_lt = _normalize_main_reg_loss_type(main_loss_type)
+        decoded_aux_w, decoded_aux_type, encoded_aux_w = _split_box_reg_aux(
+            main_lt, box_reg_aux_weight, box_reg_aux_loss_type
+        )
         smooth_l1_loss = _smooth_l1_encoded_regression_loss(
             selected_regression,
             regression_targets,
@@ -1669,15 +1722,15 @@ def compute_horizontal_roi_loss(
         )
         if main_lt == "smooth_l1":
             loss_box_reg = smooth_l1_loss
-            if box_reg_iou_weight > 0.0:
+            if decoded_aux_w > 0.0:
                 loss_iou = _horizontal_decoded_reg_loss(
                     decoded_boxes,
                     positive_matched_gt,
-                    loss_type=box_reg_iou_loss_type,
+                    loss_type=decoded_aux_type,
                     kfiou_fun=box_reg_kfiou_fun,
                     probiou_mode=box_reg_probiou_mode,
                 )
-                loss_box_reg = loss_box_reg + (box_reg_iou_weight * loss_iou)
+                loss_box_reg = loss_box_reg + (decoded_aux_w * loss_iou)
         else:
             loss_box_reg = _horizontal_decoded_reg_loss(
                 decoded_boxes,
@@ -1686,8 +1739,8 @@ def compute_horizontal_roi_loss(
                 kfiou_fun=box_reg_kfiou_fun,
                 probiou_mode=box_reg_probiou_mode,
             )
-            if smooth_l1_aux_weight > 0.0:
-                loss_box_reg = loss_box_reg + (smooth_l1_aux_weight * smooth_l1_loss)
+            if encoded_aux_w > 0.0:
+                loss_box_reg = loss_box_reg + (encoded_aux_w * smooth_l1_loss)
     else:
         loss_box_reg = (box_regression[0:1] * 0.0).sum() if box_regression.numel() > 0 else (class_logits[0:1] * 0.0).sum()
 

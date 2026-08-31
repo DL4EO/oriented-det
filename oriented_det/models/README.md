@@ -36,8 +36,7 @@ ROI training loss uses `compute_horizontal_roi_loss` (Rotated Faster R-CNN). Def
 
 - `roi_box_reg_main_loss_type`: `smooth_l1` (encoded primary, default) or decoded `probiou` / `riou` / `kfiou`
 - `roi_box_reg_norm`: `sampled_all` (MMDet avg_factor over pos+neg sample count) or `positives_only` (per-dim mean over positives)
-- `roi_box_reg_iou_weight`: decoded aux when main is Smooth L1 (optional `roi_box_reg_iou_schedule_*`)
-- `roi_box_reg_smooth_l1_aux_weight`: encoded Smooth L1 aux when main is decoded
+- `roi_box_reg_aux_weight` / `roi_box_reg_aux_loss_type`: the other family (decoded when main is Smooth L1; encoded Smooth L1 when main is decoded). Optional `roi_box_reg_aux_schedule_*`
 - `roi_box_reg_angle_weight` (5th encoded dim; optional `roi_box_reg_angle_schedule_*`), `roi_match_low_quality`, `roi_min_pos_iou`
 - `roi_proj_xy`: encode/decode ROI dx/dy in the proposal local frame (`true` in DOTA base configs; no-op for axis-aligned xyxy RoIs, required for non-horizontal proposal angles)
 
@@ -45,7 +44,7 @@ Encoded Smooth L1 (main or aux) applies **directly to all five encoded channels*
 
 **Oriented R-CNN** uses `compute_oriented_roi_loss` with the same encoded Smooth L1 and MMDet `avg_factor` normalization (`roi_box_reg_norm: sampled_all` by default).
 
-**Rotated RetinaNet** uses `compute_oriented_retinanet_loss`. Set `roi_box_reg_main_loss_type: probiou` (or `riou` / `kfiou`) for a decoded primary loss; add encoded L1/Smooth L1 aux via `roi_box_reg_smooth_l1_aux_weight` (type from `box_reg_loss_type`, default `l1` in DOTA recipes). Decoded regression randomly subsamples at most `roi_batch_size_per_image` (default **512**) **positive anchors per image across all FPN levels** (not per level). `loss_box_reg` normalizes by the number of sampled positives used in regression. Classification still uses every matched anchor. When main is `smooth_l1` (default), optional decoded aux uses `roi_box_reg_iou_weight`.
+**Rotated RetinaNet** uses `compute_oriented_retinanet_loss`. Set `roi_box_reg_main_loss_type: probiou` (or `riou` / `kfiou`) for a decoded primary loss; add encoded L1/Smooth L1 aux via `roi_box_reg_aux_weight` with `roi_box_reg_aux_loss_type: smooth_l1` (encoded flavor from `box_reg_loss_type`, default `l1` in DOTA recipes). Decoded regression randomly subsamples at most `roi_batch_size_per_image` (default **512**) **positive anchors per image across all FPN levels** (not per level). `loss_box_reg` normalizes by the number of sampled positives used in regression. Classification still uses every matched anchor. When main is `smooth_l1` (default), optional decoded aux uses `roi_box_reg_aux_weight` / `roi_box_reg_aux_loss_type`.
 
 ### `roi_inference_top_class_only` (two-stage models)
 
@@ -60,7 +59,7 @@ Encoded Smooth L1 (main or aux) applies **directly to all five encoded channels*
 
 ### MMRotate parity notes (two-stage detectors)
 
-- **FPN levels:** the RPN runs on all 5 levels (P2–P6, strides 4–64; `include_pool_level=True` keeps torchvision's stride-64 max-pool level). **Both** two-stage detectors restrict ROI extraction to the **first 4 FPN levels** (strides 4–32): `horizontal_roi_align` (Rotated Faster R-CNN) and `oriented_roi_align` (Oriented R-CNN), matching MMRotate `SingleRoIExtractor` / `RotatedSingleRoIExtractor`.
+- **FPN levels:** the RPN runs on all 5 levels (P2–P6, strides 4–64; `include_pool_level=True` keeps torchvision's stride-64 max-pool level). **Both** two-stage detectors restrict ROI extraction to the **first 4 FPN levels** (strides 4–32): `horizontal_roi_align` (Rotated Faster R-CNN) and `oriented_roi_align` (Oriented R-CNN), matching MMRotate `SingleRoIExtractor` / `RotatedSingleRoIExtractor`. When `Pad(size_divisor=32)` leaves a side not divisible by 64, P6 `max_pool` is anisotropic (`derive_fpn_strides_from_grid` then uses configured `[4, 8, 16, 32, 64]`, same as MMRotate).
 - **RoIAlign:** `horizontal_roi_align` uses `aligned=True` (half-pixel aligned), matching mmcv's `RoIAlign` default.
 - **Backbone BN:** frozen statistics (`FrozenBatchNorm2d`) by default, matching MMRotate `norm_eval=True`. See `backbones/README.md`.
 - **Loss normalization:** RPN and ROI SmoothL1 box-regression losses are summed over positives and divided by the **total** number of sampled anchors/RoIs (MMDet `avg_factor`), including Oriented R-CNN midpoint RPN and oriented ROI stages.
@@ -102,11 +101,11 @@ This replaced an earlier softmax background+K formulation whose background-bias 
   - **`kfiou`**: decode to absolute OBBs (×stride when `norm_on_bbox`), then centerness-weighted [`kfiou_loss_per_box`](../ops/kfiou.py).
   - **`riou`**: same decode path, then centerness-weighted [`riou_loss_per_box`](../ops/diff_iou_rotated.py) (`1 -` differentiable polygon IoU). Not sampling `pairwise_rotated_iou`.
 - **Aux:** **`aux_loss_type`** (`kfiou` / `probiou`) + **`aux_loss_weight`** (0 disables). Decoded, centerness-weighted; logged as `loss_box_reg_aux`. Gaussian overlap plus an aspect-gated heading term (`aux_angle_weight`, default 1.0; `aux_angle_lambda` default 1.0). Prefer L1 primary + aux 0.1. Aux `riou` is rejected.
-- **Inference:** `sigmoid(cls) * sigmoid(centerness)` → decode → class-aware rotated NMS. Keep **`production.final_nms_iou_threshold: 0.1`** aligned with `model.*`; 0.3 leaves dense duplicates at eval-val.
+- **Inference:** `sigmoid(cls) * sigmoid(centerness)` → decode → class-aware rotated NMS. Recipes: **`model` / `evaluation.final_nms_iou_threshold: 0.1`** for train val and `odet preds` / eval-val; **`production.final_nms_iou_threshold: 0.3`** for deploy / `image_demo`.
 
-Configs: `configs/rotated_fcos/dota_le90_{1x,3x}.json` (L1), `dota_le90_{1x,3x}_kfiou_aux.json` (L1 + KFIoU aux), `dota_le90_{1x,3x}_riou.json` (decoded rIoU primary, lr 2.5e-3). Results: [`configs/rotated_fcos/README.md`](../../configs/rotated_fcos/README.md).
+Configs: `configs/rotated_fcos/dota_le90_1x.json` (rIoU 1×), `dota_le90_3x.json` (rIoU 3× Hub recipe), `dota_le90_1x_l1_kfiou_aux.json` (L1 + KFIoU aux 1×). Results: [`configs/rotated_fcos/README.md`](../../configs/rotated_fcos/README.md).
 
-**1× L1 recipe:** `learning_rate=2.5e-4`, `max_detections_per_image=2000`, NMS IoU **0.1**. L1 **3×** eval-val **73.92%** (local baseline). **Hub:** 3× decoded rIoU **81.58%** (`rotated_fcos_dota_le90_3x_riou`, `runs/rotated_fcos/20260822-153943`); report [`docs/eval-reports/rotated_fcos_dota_le90_3x_riou/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x_riou/model_analysis.md). 3× L1 + KFIoU aux **77.18%** remains as `rotated_fcos_dota_le90_3x_kfiou_aux`.
+**1× L1 recipe:** `learning_rate=2.5e-4`, `max_detections_per_image=2000`, NMS IoU **0.1**. L1 **3×** eval-val **73.92%** (local baseline). **Hub:** 3× decoded rIoU **81.58%** (`rotated_fcos_dota_le90_3x`, `runs/rotated_fcos/20260822-153943`); report [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md). 3× L1 + KFIoU aux **77.18%** remains as `rotated_fcos_dota_le90_3x_kfiou_aux`.
 
 **Checkpoint break (v0.1.1):** RetinaNet now uses MMRotate-style **separate cls/reg 4-conv towers** with **3×3 prediction heads** and **P6/P7 convs on C5** (`LastLevelP6P7`). Pre-change checkpoints (`head.convs`, 1×1 `conv_cls`/`conv_bbox`, `extra_fpn_conv`) are incompatible.
 

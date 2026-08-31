@@ -1,8 +1,10 @@
 """Behavioral tests: values set in `TrainingExperimentConfig` reach the code paths that consume them (todo7)."""
 
 from pathlib import Path
+import json
 import sys
 import importlib
+import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -39,7 +41,8 @@ def _minimal_config(model_type: str) -> TrainingExperimentConfig:
             roi_norm_factor=3.0,
             roi_edge_swap=False,
             roi_box_reg_angle_weight=1.7,
-            roi_box_reg_iou_weight=0.2,
+            roi_box_reg_aux_weight=0.2,
+            roi_box_reg_aux_loss_type="probiou",
             use_hbb_for_matching=False,
             inference_pre_nms_score_threshold=0.13,
             rpn_pre_nms_top_n=111,
@@ -176,3 +179,138 @@ def test_oriented_rcnn_dota_3x_config_loads():
     assert cfg.training.num_epochs == 36
     assert cfg.training.lr_scheduler_milestones == [24, 33]
     assert cfg.model.rpn_nms_threshold == pytest.approx(0.8)
+
+
+def _write_minimal_experiment(path: Path, model: dict) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "model_type": "oriented_rcnn",
+                "dataset": {"data_root": str(path.parent), "format": "dota"},
+                "model": model,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_legacy_roi_box_reg_keys_remap_smooth_l1_main(tmp_path):
+    cfg_path = tmp_path / "cfg.json"
+    _write_minimal_experiment(
+        cfg_path,
+        {
+            "roi_box_reg_iou_weight": 0.1,
+            "roi_box_reg_iou_loss_type": "probiou",
+            "roi_box_reg_iou_schedule_epochs": [24, 28],
+            "roi_box_reg_iou_schedule_values": [0.1, 0.05, 0.0],
+        },
+    )
+    with pytest.warns(DeprecationWarning, match="roi_box_reg_iou_weight"):
+        cfg = TrainingExperimentConfig.load(cfg_path)
+    assert cfg.model.roi_box_reg_aux_weight == pytest.approx(0.1)
+    assert cfg.model.roi_box_reg_aux_loss_type == "probiou"
+    assert cfg.model.roi_box_reg_aux_schedule_epochs == [24, 28]
+    assert cfg.model.roi_box_reg_aux_schedule_values == [0.1, 0.05, 0.0]
+
+
+def test_legacy_roi_box_reg_keys_remap_decoded_main(tmp_path):
+    cfg_path = tmp_path / "cfg.json"
+    _write_minimal_experiment(
+        cfg_path,
+        {
+            "roi_box_reg_main_loss_type": "probiou",
+            "roi_box_reg_iou_weight": 0.0,
+            "roi_box_reg_iou_loss_type": "probiou",
+            "roi_box_reg_smooth_l1_aux_weight": 0.1,
+        },
+    )
+    with pytest.warns(DeprecationWarning, match="roi_box_reg_smooth_l1_aux_weight"):
+        cfg = TrainingExperimentConfig.load(cfg_path)
+    assert cfg.model.roi_box_reg_aux_weight == pytest.approx(0.1)
+    assert cfg.model.roi_box_reg_aux_loss_type == "smooth_l1"
+    assert cfg.model.roi_box_reg_main_loss_type == "probiou"
+
+
+def test_legacy_and_new_roi_box_reg_keys_conflict(tmp_path):
+    cfg_path = tmp_path / "cfg.json"
+    _write_minimal_experiment(
+        cfg_path,
+        {
+            "roi_box_reg_iou_weight": 0.1,
+            "roi_box_reg_aux_weight": 0.1,
+            "roi_box_reg_aux_loss_type": "probiou",
+        },
+    )
+    with pytest.raises(ValueError, match="Cannot mix legacy ROI box-reg keys"):
+        TrainingExperimentConfig.load(cfg_path)
+
+
+def test_roi_box_reg_aux_requires_type_when_weight_positive():
+    with pytest.raises(ValueError, match="requires roi_box_reg_aux_loss_type"):
+        ModelConfig(roi_box_reg_aux_weight=0.1)
+
+
+def test_roi_box_reg_aux_rejects_same_type_as_main():
+    with pytest.raises(ValueError, match="must differ"):
+        ModelConfig(
+            roi_box_reg_main_loss_type="probiou",
+            roi_box_reg_aux_weight=0.1,
+            roi_box_reg_aux_loss_type="probiou",
+        )
+
+
+def test_legacy_cosine_t_max_remaps_to_cosine_epochs(tmp_path):
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "model_type": "oriented_rcnn",
+                "dataset": {"data_root": str(tmp_path), "format": "dota"},
+                "training": {"lr_scheduler_cosine_t_max": 72},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.warns(DeprecationWarning, match="lr_scheduler_cosine_t_max"):
+        cfg = TrainingExperimentConfig.load(cfg_path)
+    assert cfg.training.lr_scheduler_cosine_epochs == 72
+
+
+def test_legacy_cosine_t_max_conflicts_with_cosine_epochs(tmp_path):
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "model_type": "oriented_rcnn",
+                "dataset": {"data_root": str(tmp_path), "format": "dota"},
+                "training": {
+                    "lr_scheduler_cosine_t_max": 72,
+                    "lr_scheduler_cosine_epochs": 20,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Cannot set both lr_scheduler_cosine_t_max"):
+        TrainingExperimentConfig.load(cfg_path)
+
+
+def test_legacy_cosine_t_max_null_is_dropped(tmp_path):
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "model_type": "oriented_rcnn",
+                "dataset": {"data_root": str(tmp_path), "format": "dota"},
+                "training": {
+                    "lr_scheduler_cosine_t_max": None,
+                    "lr_scheduler_cosine_epochs": None,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        cfg = TrainingExperimentConfig.load(cfg_path)
+    assert cfg.training.lr_scheduler_cosine_epochs is None

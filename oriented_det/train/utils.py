@@ -737,14 +737,11 @@ class CosineAnnealingWithFixedTailLR(_lr_scheduler_base_class()):  # type: ignor
 
 
 def _resolve_cosine_phase_epochs(training: Any) -> int:
-    """Cosine period length: ``lr_scheduler_cosine_epochs``, then ``lr_scheduler_cosine_t_max``, else ``num_epochs``."""
+    """Cosine period length: ``lr_scheduler_cosine_epochs``, else ``num_epochs``."""
     num_epochs = int(training.num_epochs)
     cosine_epochs_cfg = getattr(training, "lr_scheduler_cosine_epochs", None)
-    t_max_cfg = getattr(training, "lr_scheduler_cosine_t_max", None)
     if cosine_epochs_cfg is not None:
         phase = int(cosine_epochs_cfg)
-    elif t_max_cfg is not None:
-        phase = int(t_max_cfg)
     else:
         phase = num_epochs
     if phase < 1:
@@ -777,6 +774,55 @@ def resolve_cosine_with_tail_lengths(training: Any) -> Tuple[int, int]:
             f"num_epochs ({num_epochs}) for cosine_annealing_with_tail"
         )
     return cosine_epochs, tail_epochs
+
+
+def multistep_lr_factor(
+    epoch: int,
+    milestones: Sequence[int],
+    gammas: Sequence[float],
+) -> float:
+    """Cumulative MultiStepLR factor at ``epoch`` (``last_epoch`` after ``step()``)."""
+    factor = 1.0
+    for milestone, gamma in zip(milestones, gammas):
+        if epoch >= int(milestone):
+            factor *= float(gamma)
+    return factor
+
+
+def resolve_multistep_gammas(training: Any, milestones: Sequence[int]) -> Optional[List[float]]:
+    """Per-milestone factors when ``lr_scheduler_gamma`` is a list; else ``None``."""
+    raw = getattr(training, "lr_scheduler_gamma", 0.1)
+    if not isinstance(raw, (list, tuple)):
+        return None
+    gammas = [float(g) for g in raw]
+    if len(gammas) != len(milestones):
+        raise ValueError(
+            f"lr_scheduler_gamma list length ({len(gammas)}) must match "
+            f"lr_scheduler_milestones ({len(milestones)})."
+        )
+    return gammas
+
+
+def create_multistep_lr_scheduler(
+    optimizer: "optim.Optimizer",
+    training: Any,
+) -> Tuple[Any, Optional[List[float]]]:
+    """MultiStepLR for a scalar gamma, or LambdaLR when gamma is a per-milestone list."""
+    _require_torch()
+    milestones = [int(m) for m in (getattr(training, "lr_scheduler_milestones", None) or [])]
+    gammas = resolve_multistep_gammas(training, milestones)
+    if gammas is None:
+        scheduler = optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=milestones,
+            gamma=float(getattr(training, "lr_scheduler_gamma", 0.1)),
+        )
+        return scheduler, None
+    scheduler = optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda epoch, ms=milestones, gs=gammas: multistep_lr_factor(epoch, ms, gs),
+    )
+    return scheduler, gammas
 
 
 def create_pytorch_cosine_lr_scheduler(
@@ -1053,7 +1099,10 @@ __all__ = [
     "collate_dota_samples",
     "collate_fn_generic",
     "create_cosine_with_tail_lr_scheduler",
+    "create_multistep_lr_scheduler",
     "create_pytorch_cosine_lr_scheduler",
+    "multistep_lr_factor",
+    "resolve_multistep_gammas",
     "format_cosine_with_tail_scheduler_description",
     "format_pytorch_cosine_scheduler_description",
     "resolve_cosine_with_tail_lengths",

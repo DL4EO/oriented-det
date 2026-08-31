@@ -14,7 +14,7 @@ Large checkpoint files live here (typically **gitignored**). Registered assets a
 
 | Metric | Source | Typical use |
 |--------|--------|-------------|
-| **`eval_map50` in manifest / zoo tables** | `odet preds` on val tiles (`make eval-val` / `make metrics`) — all val tiles, `filter_empty_gt=false`, `production.*` decode | Published Hub metadata |
+| **`eval_map50` in manifest / zoo tables** | `odet preds` on val tiles (`make eval-val` / `make metrics`) — all val tiles, `filter_empty_gt=false`, decode with `evaluation.final_nms_iou_threshold` when set (recipes: **0.1**); deploy still uses `production` NMS **0.3** | Published Hub metadata |
 | **Periodic mAP during training** | `evaluation.compute_map_every_n_epochs` on non-empty val tiles; often GPU-sampled IoU (`use_exact_rotated_iou: false`) | Monitor convergence |
 | **Final mAP after training** | `evaluation.compute_map_final` on best checkpoint; often exact CPU polygon IoU (`use_exact_rotated_iou_for_final_map: true`) | Training log headline number |
 
@@ -87,7 +87,31 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 
 | Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
 |------|--------|----------------|--------|--------------|-----------|
-| `rotated_fcos_dota_le90_3x_riou` | 3× decoded rIoU primary | 81.58% | [`dota_le90_3x_riou.json`](../configs/rotated_fcos/dota_le90_3x_riou.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.json`](./rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.log`](./rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.log) |
-| `rotated_fcos_dota_le90_3x_kfiou_aux` | 3× L1 + KFIoU aux 0.1 | 77.18% | [`dota_le90_3x_kfiou_aux.json`](../configs/rotated_fcos/dota_le90_3x_kfiou_aux.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log) |
+| `rotated_fcos_dota_le90_3x` | 3× decoded rIoU primary | 81.58% | [`dota_le90_3x.json`](../configs/rotated_fcos/dota_le90_3x.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.json`](./rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.log`](./rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.log) |
+| `rotated_fcos_dota_le90_3x_kfiou_aux` | 3× L1 + KFIoU aux 0.1 | 77.18% | [`dota_le90_1x_l1_kfiou_aux.json`](../configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json) (1× lineage; 3× recipe retired) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log) |
+
+## HRSC2016 le90 zoo
+
+**Training split: ImageSets trainval.** **Eval split: ImageSets test** (453 images; 15 empty). Whole-image `keep_ratio` + pad-32 (no native sliding windows).
+
+**mAP** below is **`make eval-val`** mAP50 (rotated IoU ≥ 0.50, `evaluation.final_nms_iou_threshold` **0.1**; deploy production NMS **0.3**).
+
+### Oriented R-CNN R50-FPN
+
+| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
+|------|--------|----------------|--------|--------------|-----------|
+| `oriented_rcnn_hrsc2016_le90_3x` | 3× keep-ratio + pad-32, rotate ±20° | 90.41% | [`hrsc2016_le90_3x.json`](../configs/oriented_rcnn/hrsc2016_le90_3x.json) | [`oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.json`](./oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.json) | [`oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.log`](./oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.log) |
+
+### Rotated Faster R-CNN R50-FPN
+
+| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
+|------|--------|----------------|--------|--------------|-----------|
+| `rotated_faster_rcnn_hrsc2016_le90_3x` | 3× keep-ratio + pad-32, rotate ±20° | 88.77% | [`hrsc2016_le90_3x.json`](../configs/rotated_faster_rcnn/hrsc2016_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.json`](./rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.json) | [`rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.log`](./rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.log) |
+
+### Rotated FCOS R50-FPN
+
+| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
+|------|--------|----------------|--------|--------------|-----------|
+| `rotated_fcos_hrsc2016_le90_3x` | 3× decoded rIoU, rotate ±20° | 88.34% | [`hrsc2016_le90_3x.json`](../configs/rotated_fcos/hrsc2016_le90_3x.json) | [`rotated_fcos_r50_fpn_hrsc2016_le90_3x-ad7b8f44.json`](./rotated_fcos_r50_fpn_hrsc2016_le90_3x-ad7b8f44.json) | [`rotated_fcos_r50_fpn_hrsc2016_le90_3x-ad7b8f44.log`](./rotated_fcos_r50_fpn_hrsc2016_le90_3x-ad7b8f44.log) |
 
 Per-class AP and eval reports: [`docs/eval-reports/`](../docs/eval-reports/) (tracked reports; raw `predictions.json` under gitignored [`predictions/`](../predictions/) for `odet viewer`).

@@ -65,7 +65,7 @@ help:
 	@echo ""
 	@echo "Rotated FCOS example:"
 	@echo "  make export-tf MODE=rotated_fcos_pre_nms \\"
-	@echo "    CONFIG=$(REPO_ROOT)/configs/rotated_fcos/dota_le90_3x_riou.json \\"
+	@echo "    CONFIG=$(REPO_ROOT)/configs/rotated_fcos/dota_le90_3x.json \\"
 	@echo "    CKPT=$(REPO_ROOT)/pretrained/rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth"
 
 ## export-tf: ONNX + Keras detect bundle via odet

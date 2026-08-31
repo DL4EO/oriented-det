@@ -12,8 +12,11 @@ from oriented_det.train.config import TrainingConfig
 from oriented_det.train.utils import (
     CosineAnnealingWithFixedTailLR,
     create_cosine_with_tail_lr_scheduler,
+    create_multistep_lr_scheduler,
     create_pytorch_cosine_lr_scheduler,
+    multistep_lr_factor,
     resolve_cosine_with_tail_lengths,
+    resolve_multistep_gammas,
     resolve_pytorch_cosine_t_max,
 )
 
@@ -26,8 +29,8 @@ def _closed_cosine_lr(epoch: int, base: float, t_max: int, eta_min: float) -> fl
     return eta_min + (base - eta_min) * (1.0 + math.cos(math.pi * epoch / t_max)) / 2.0
 
 
-def test_resolve_pytorch_t_max_legacy():
-    t = TrainingConfig(num_epochs=12, lr_scheduler_cosine_t_max=12)
+def test_resolve_pytorch_t_max_from_cosine_epochs():
+    t = TrainingConfig(num_epochs=12, lr_scheduler_cosine_epochs=12)
     assert resolve_pytorch_cosine_t_max(t) == 12
 
 
@@ -59,7 +62,7 @@ def test_pytorch_cosine_single_cycle():
         opt,
         TrainingConfig(
             num_epochs=12,
-            lr_scheduler_cosine_t_max=t_max,
+            lr_scheduler_cosine_epochs=t_max,
             lr_scheduler_cosine_eta_min=eta_min,
         ),
     )
@@ -128,6 +131,45 @@ def test_with_tail_matches_pytorch_cosine_then_constant():
         else:
             expected = tail_lr
         assert opt.param_groups[0]["lr"] == pytest.approx(expected, rel=1e-6, abs=1e-10)
+
+
+def test_multistep_lr_factor_per_milestone_gammas():
+    milestones = [48, 66]
+    gammas = [0.1, 0.5]
+    assert multistep_lr_factor(0, milestones, gammas) == 1.0
+    assert multistep_lr_factor(47, milestones, gammas) == 1.0
+    assert multistep_lr_factor(48, milestones, gammas) == pytest.approx(0.1)
+    assert multistep_lr_factor(65, milestones, gammas) == pytest.approx(0.1)
+    assert multistep_lr_factor(66, milestones, gammas) == pytest.approx(0.05)
+
+
+def test_resolve_multistep_gammas_length():
+    assert resolve_multistep_gammas(TrainingConfig(), [48, 66]) is None
+    cfg = TrainingConfig(lr_scheduler_milestones=[48, 66], lr_scheduler_gamma=[0.1, 0.5])
+    assert resolve_multistep_gammas(cfg, [48, 66]) == [0.1, 0.5]
+    with pytest.raises(ValueError, match="must match"):
+        resolve_multistep_gammas(
+            TrainingConfig(lr_scheduler_gamma=[0.1]),
+            [48, 66],
+        )
+
+
+def test_create_multistep_lr_scheduler_lambda_steps():
+    param = torch.nn.Parameter(torch.zeros(1))
+    opt = optim.SGD([param], lr=0.0025)
+    cfg = TrainingConfig(
+        lr_scheduler_milestones=[2, 4],
+        lr_scheduler_gamma=[0.1, 0.5],
+    )
+    sch, gammas = create_multistep_lr_scheduler(opt, cfg)
+    assert gammas == [0.1, 0.5]
+    assert opt.param_groups[0]["lr"] == pytest.approx(0.0025)
+    sch.step()
+    sch.step()
+    assert opt.param_groups[0]["lr"] == pytest.approx(0.00025)
+    sch.step()
+    sch.step()
+    assert opt.param_groups[0]["lr"] == pytest.approx(0.000125)
 
 
 def test_with_tail_rejects_mismatched_lengths():

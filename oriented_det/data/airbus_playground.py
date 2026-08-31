@@ -415,9 +415,12 @@ class AirbusPlaygroundCSVDataset:
         allowed_classes: Optional[Sequence[str]] = None,
         difficult_strategy: str = "drop",
         ignore_labels: Optional[Sequence[str]] = None,
+        lookalike_labels: Optional[Sequence[str]] = None,
         map_labels: Optional[Dict[str, str]] = None,
         filter_empty_gt: bool = False,
     ):
+        from .lookalike import resolve_lookalike_label_set
+
         if split not in {"train", "val"}:
             raise ValueError(f"Unsupported split '{split}'. Expected 'train' or 'val'.")
 
@@ -437,6 +440,10 @@ class AirbusPlaygroundCSVDataset:
         self.allowed_classes = set(allowed_classes) if allowed_classes is not None else None
         self.difficult_strategy = ds
         self.ignore_labels = set(ignore_labels or [])
+        self.lookalike_labels = list(lookalike_labels) if lookalike_labels else None
+        self._lookalike_set = resolve_lookalike_label_set(self.lookalike_labels)
+        # Lookalike wins over ignore_labels.
+        self.ignore_labels -= self._lookalike_set
         self.map_labels = dict(map_labels or {})
         self.filter_empty_gt = bool(filter_empty_gt)
 
@@ -514,10 +521,16 @@ class AirbusPlaygroundCSVDataset:
                 class_name = str(row.get("class_name", "")).strip()
                 if not class_name:
                     continue
-                if class_name in self.ignore_labels:
-                    continue
                 class_name = self.map_labels.get(class_name, class_name)
-                if self.allowed_classes is not None and class_name not in self.allowed_classes:
+                is_lookalike = class_name in self._lookalike_set
+                # Lookalike wins over ignore_labels (checked after map_labels).
+                if class_name in self.ignore_labels and not is_lookalike:
+                    continue
+                if (
+                    self.allowed_classes is not None
+                    and class_name not in self.allowed_classes
+                    and not is_lookalike
+                ):
                     continue
 
                 difficult = int(str(row.get("difficult", "0")).strip() or "0")
@@ -586,11 +599,13 @@ class AirbusPlaygroundCSVDataset:
             yield self[idx]
 
     def get_class_names(self) -> List[str]:
+        from .lookalike import filter_semantic_class_names
+
         classes = set()
         for annotations in self._annotations_by_tile.values():
             for ann in annotations:
                 classes.add(ann.class_name)
-        return sorted(classes)
+        return filter_semantic_class_names(classes, self._lookalike_set)
 
 
 def format_airbus_empty_gt_filter_log(dataset: AirbusPlaygroundCSVDataset, *, split: str) -> str:

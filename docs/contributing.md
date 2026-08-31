@@ -93,7 +93,7 @@ oriented_det/
 
 Aligned with the [Roadmap](roadmap.md):
 
-- **v0.3:** HRSC2016 and FAIR1M dataset loaders
+- **v0.3:** FAIR1M dataset loader (HRSC2016 loader + 3× Hub zoo are in)
 - **v0.4:** RTMDet-R and native YOLO-OBB (clean-room, no Ultralytics)
 - **v0.5+:** Swin-FPN backbone
 - **Docs:** Tutorials, hosted MkDocs, eval reports

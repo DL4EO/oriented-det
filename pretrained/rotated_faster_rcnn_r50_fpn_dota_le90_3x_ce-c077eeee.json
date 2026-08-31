@@ -105,13 +105,11 @@
     "roi_edge_swap": true,
     "roi_proj_xy": false,
     "roi_box_reg_angle_weight": 1.0,
-    "roi_box_reg_iou_weight": 0.1,
     "roi_batch_size_per_image": 512,
     "roi_positive_iou_threshold": 0.5,
     "roi_negative_iou_threshold": 0.5,
     "roi_match_low_quality": false,
     "roi_min_pos_iou": 0.5,
-    "roi_box_reg_iou_loss_type": "riou",
     "roi_box_reg_kfiou_fun": null,
     "gpu_oriented_iou_samples": 225,
     "rpn_min_size": 0,
@@ -132,7 +130,9 @@
     "final_nms_iou_schedule_values": null,
     "max_detections_per_image": 2000,
     "inference_pre_nms_score_threshold": 0.05,
-    "roi_inference_top_class_only": true
+    "roi_inference_top_class_only": true,
+    "roi_box_reg_aux_weight": 0.1,
+    "roi_box_reg_aux_loss_type": "riou"
   },
   "training": {
     "lr_scheduler_type": null,
@@ -148,7 +148,6 @@
     "lr_scheduler_one_cycle_pct_start": 0.3,
     "lr_scheduler_one_cycle_div_factor": 25.0,
     "lr_scheduler_one_cycle_final_div_factor": 10000.0,
-    "lr_scheduler_cosine_t_max": null,
     "lr_scheduler_cosine_eta_min": 1e-06,
     "lr_scheduler_cosine_epochs": null,
     "lr_scheduler_cosine_tail_epochs": 0,

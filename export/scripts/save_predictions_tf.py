@@ -200,24 +200,16 @@ def run_tf_inference_and_save(
 
     class_map = {name: i for i, name in enumerate(class_names)} if class_names else {}
     gt_by_image_path = None
-    if dataset_format == "airbus_playground":
-        from oriented_det.data.airbus_playground import AirbusPlaygroundCSVDataset
+    if dataset_format in ("airbus_playground", "hrsc2016"):
+        from dataclasses import replace
 
-        ds_config = config.dataset
-        airbus_dataset = AirbusPlaygroundCSVDataset(
-            data_root=data_root,
-            split=data_split,
-            annotations_file=ds_config.annotations_file,
-            split_file=ds_config.split_file,
-            val_split_id=getattr(ds_config, "val_split_id", 0),
-            difficult_strategy=ds_config.difficult_strategy,
-            allowed_classes=getattr(ds_config, "allowed_classes", None),
-            ignore_labels=getattr(ds_config, "ignore_labels", None) or [],
-            map_labels=getattr(ds_config, "map_labels", None) or {},
-        )
+        from oriented_det.data.build import build_split_dataset
+
+        ds_cfg = replace(config.dataset, data_root=data_root)
+        native_dataset = build_split_dataset(ds_cfg, data_split, filter_empty_gt=False)
         gt_by_image_path = {}
-        for idx in range(len(airbus_dataset)):
-            sample = airbus_dataset[idx]
+        for idx in range(len(native_dataset)):
+            sample = native_dataset[idx]
             gt_by_image_path[Path(sample.image_path)] = _annotations_to_ground_truths(
                 list(sample.annotations), class_map
             )

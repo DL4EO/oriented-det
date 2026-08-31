@@ -40,7 +40,7 @@ For **tiling** and **inference** on single images, run the scripts directly (see
 
 Run inference on image(s) using oriented-det **config + checkpoint**. Loads model type, num_classes, preprocessing, and class names from the config. For registered pretrained weights, you can omit the config and pass only `hf://<slug>`; the checkpoint sidecar JSON is used automatically. If you do pass a config, a sidecar config beside the `.pth` is preferred only when the provided config is the checkpoint's manifest `source_recipe`; a different config is kept as-is. Detection **labels are 1-based** foreground ids (same convention as training `class_map`); overlay text uses `class_names[label - 1]`.
 
-**Inference:** If the image **width×height** equals the model canvas from `preprocessing.target_size` (same as `oriented_det.runtime.inference.get_model_size`), runs **one** `run_inference` forward (ToTensor+normalize, no resize). Otherwise uses **`run_inference_sliding_window`** (zero-pad smaller images, tile larger ones; NMS in image space), same as `oriented_det.runtime.inference` / `save_predictions`. Use `--zoom 2` or `--zoom 4` to upscale for inference only; detections are mapped back to the original image before visualization.
+**Inference:** Same as `run_inference_auto`: **`pad`** always one training-style whole-image forward; **`fixed`/`crop`** one forward when the image fits the canvas, otherwise **`run_inference_sliding_window`**. Use `--zoom 2` or `--zoom 4` to upscale for inference only; detections are mapped back to the original image before visualization.
 
 **Usage:**
 ```bash
@@ -297,7 +297,7 @@ ORIENTED_DET_WINDOW_BATCH_SIZE=16 python -m oriented_det.runtime.inference large
 
 ### `save_predictions.py`
 
-Run inference on a validation (or train) split, save predictions to JSON, and optionally compute mAP in the same process (`--no-diagnostics` skips GPU-side metrics). Use **`make eval-val`** for inference plus offline metrics in one step, or after **`make preds`**, run **`make metrics`** (or `python tools/save_predictions.py --metrics-from-json path/to/dir`) to recompute mAP/PR with different `--iou-threshold`, `--metrics-margin-pixels`, PR sweep steps, etc., **without** re-running inference (metrics rebuild GT/det maps from `predictions.json`). Uses `oriented_det.runtime.inference.run_inference_auto`: when the image is at or below `preprocessing.target_size`, it runs a **single** training-style forward (Resize + ToTensor + Normalize, so smaller tiles are zoomed to target size); larger images use padded sliding windows. Supports **override of the validation folder** for non-tiled DOTA val (e.g. to compare with literature mAP on full-size images). Model construction reads `model.fpn_returned_layers`, `model.fpn_strides`, and `model.trainable_layers` / `frozen_stages` from the experiment `config.json` so the backbone matches training (required when FPN does not use all ResNet stages, e.g. `[1,2,3]` without C5).
+Run inference on a validation (or train) split, save predictions to JSON, and optionally compute mAP in the same process (`--no-diagnostics` skips GPU-side metrics). Use **`make eval-val`** for inference plus offline metrics in one step, or after **`make preds`**, run **`make metrics`** (or `python tools/save_predictions.py --metrics-from-json path/to/dir`) to recompute mAP/PR with different `--iou-threshold`, `--metrics-margin-pixels`, PR sweep steps, etc., **without** re-running inference (metrics rebuild GT/det maps from `predictions.json`). Uses `oriented_det.runtime.inference.run_inference_auto`: **`resize_mode: pad`** (HRSC2016) always runs one training-style whole-image forward (scale long edge to `target_size`, then pad). **`fixed` / `crop`** (DOTA) use a single training-style forward when the image fits the canvas, and padded sliding windows when it is larger. Supports **override of the validation folder** for non-tiled DOTA val (e.g. to compare with literature mAP on full-size images). Model construction reads `model.fpn_returned_layers`, `model.fpn_strides`, and `model.trainable_layers` / `frozen_stages` from the experiment `config.json` so the backbone matches training (required when FPN does not use all ResNet stages, e.g. `[1,2,3]` without C5).
 
 **GPU / cuDNN:** If every val image fits in one model tile, the script **does not** run the sliding-window batch probe (inference is already one forward per image). When some images need multiple tiles, the one-time probe may print `Plan failed with an OutOfMemoryError` **warnings** from cuDNN v8 trying convolution algorithms—that is usually the planner discarding a bad plan, not a failed run. If inference stalls or fragments memory after a probe, set `ORIENTED_DET_CUDNN_BENCHMARK=0` or a fixed `ORIENTED_DET_WINDOW_BATCH_SIZE` (see `oriented_det/runtime/inference.py`).
 
@@ -348,7 +348,7 @@ Sweep controls:
 
 **Per-tile metrics CSV:** Pass `--tile-metrics-csv path.csv` (relative paths are resolved under the run output directory). Writes one row per image (columns match `per_image_metrics` in the analysis JSON), for joining with training oversampling (`dataset.tile_metrics_csv` in config). Tiles with **no ground truth and no predictions** above the chosen global threshold get **precision = recall = F1 = F2 = 1.0** (correct empty image), so they are not treated as low-F1 failures. Training still ignores `tp=fp=fn=0` rows as hard tiles when reusing older CSVs that stored F1=0 for those cases.
 
-**Hard-tile oversampling in training:** From the repo root, `make train-preds` runs the train split (latest experiment) and writes `tile_metrics.csv` under `<latest_exp>/train_tile_eval/` by default (override with `SAVE_TRAIN_PRED_OUT=/path`). Equivalent manual command: `python tools/save_predictions.py --data-split train --tile-metrics-csv tile_metrics.csv ...`. Then set in your training config: `dataset.tile_metrics_csv` to that CSV path, plus optional `hard_tile_metric_column` (default `f1`), `hard_tile_threshold` (default `0.8`), `hard_tile_oversample_factor` (default `2.0`). Single-GPU training uses `WeightedRandomSampler`; multi-GPU expands the dataset index list so `DistributedSampler` sees more draws of hard tiles.
+**Hard-tile oversampling in training:** From the repo root, `make train-preds` runs the train split (latest experiment) and writes `tile_metrics.csv` under `<latest_exp>/train_tile_eval/` by default (override with `SAVE_TRAIN_PRED_OUT=/path`). Equivalent manual command: `python tools/save_predictions.py --data-split train --tile-metrics-csv tile_metrics.csv ...`. Then set in your training config: `dataset.tile_metrics_csv` to that CSV path, plus optional `hard_tile_metric_column` (default `f1`), `hard_tile_threshold` (default `0.8`), `hard_tile_oversample_factor` (default `2.0`). Single-GPU training uses `WeightedRandomSampler`; multi-GPU expands the dataset index list so `DistributedSampler` sees more draws of hard tiles. Optional **`dataset.drop_easy_empty_tiles: true`** (requires the CSV) removes train tiles with `tp=fp=fn=0` before `max_train_samples` and oversampling, so you can keep `filter_empty_gt: false` in the loader: easy empty tiles leave the epoch, empty tiles with false positives stay and can be oversampled. Tiles with no CSV row are kept. Validation is unchanged.
 
 **`make preds` / `make metrics` (Makefile):** The root `Makefile` does **not** pass score, IoU, overlap, or NMS overrides. **`make preds`** runs `tools/save_predictions.py` with **`--no-diagnostics`** only; thresholds and tiling come from the experiment **`config.json`** (**`production.*`** for deploy-style inference; **`evaluation.*`** is for training-time validation). For tiled DOTA, **all tiles** under the split roots are included (**`dataset.filter_empty_gt` is not applied** at inference; training may still drop empty tiles). **`make metrics`** runs **`--metrics-from-json`** with no extra flags: mAP/PR reuse **`predictions.json`** metadata (the values written at inference time). To re-run metrics with different thresholds, call `python tools/save_predictions.py --metrics-from-json <dir> --score-threshold …` yourself.
 
@@ -412,9 +412,9 @@ python tools/dataset_stats.py --config path/to/config.json --split val
 
 ### `preview_augmentation.py`
 
-Preview **training-time** augmentations from an experiment config before a long run. Loads the train (or val) split, applies the same collate path as `tools/train.py` (resize, optional random flips, optional Albumentations), and writes comparison grids with oriented boxes drawn on each panel.
+Preview **training-time** augmentations from an experiment config before a long run. Loads the train (or val) split, applies the same collate path as `tools/train.py` (resize, optional random flips, optional random rotate, optional Albumentations), and writes comparison grids with oriented boxes drawn on each panel.
 
-Use this to sanity-check `augmentation.json` / recipe overrides, flip settings in `preprocessing`, and `enable_albumentation` without starting training.
+Use this to sanity-check `augmentation.json` / recipe overrides, flip / rotate settings in `preprocessing`, and `enable_albumentation` without starting training.
 
 **Usage:**
 ```bash
@@ -444,11 +444,11 @@ python tools/preview_augmentation.py --config configs/.../config.json --output-d
 **Output:** For each tile, one row PNG (`00042_<stem>.png`) with panels:
 1. **baseline** — resize only, no augmentation
 2. **albumentations only** — when `--include-albumentations-only` and `enable_albumentation` is true
-3. **train aug #N** — full training collate (flips + Albumentations when enabled)
+3. **train aug #N** — full training collate (flips + random rotate + Albumentations when enabled)
 
 Also writes `grid_all.png` (all rows stacked) and `meta.json` (config path, indices, seed, variants).
 
-**Config loading:** Uses lenient parsing when the config contains unknown keys (e.g. older run configs); unknown section fields are dropped so preview still runs. Supports DOTA tiled datasets and Airbus Playground (`dataset.format`).
+**Config loading:** Uses lenient parsing when the config contains unknown keys (e.g. older run configs); unknown section fields are dropped so preview still runs. Supports DOTA tiled datasets, Airbus Playground, and HRSC2016 (`dataset.format`).
 
 **Typical workflow:** Run `dataset_stats.py` for normalization and class balance, then `preview_augmentation.py` to verify augmentations look reasonable on real tiles.
 
@@ -487,6 +487,18 @@ python tools/playground_to_dota.py --data-root /path/to/export --output-dir /pat
 # Dry run (report stats only)
 python tools/playground_to_dota.py --data-root /path/to/export --output-dir /path/to/dota_out --dry-run
 ```
+
+### `hrsc_to_dota.py`
+
+Export official **HRSC2016** XML/BMP splits to DOTA-format PNG + `.txt` folders. Native training uses `dataset.format: hrsc2016` and does **not** require this step; use it when you want DOTA loaders or `odet tile-dota`.
+
+**Usage:**
+```bash
+odet hrsc-to-dota --data-root /path/to/HRSC2016 --output-dir /path/to/HRSC2016-dota
+python tools/hrsc_to_dota.py --data-root /path/to/HRSC2016 --output-dir /tmp/hrsc_dota --splits trainval,test
+```
+
+See [Data guide — HRSC2016](../docs/user-guide/data.md#hrsc2016).
 
 ### `tile_dota.py`
 
@@ -623,7 +635,7 @@ See [oriented_det/ops/README.md](../oriented_det/ops/README.md#geometry-based-ri
 
 ## Tips
 
-1. **Preview augmentations**: Run `preview_augmentation.py` on your config to verify flips and Albumentations before a long training run
+1. **Preview augmentations**: Run `preview_augmentation.py` on your config to verify flips, random rotate, and Albumentations before a long training run
 2. **Test on small dataset**: Before full training, test on a subset of your data
 3. **Monitor training**: Check checkpoint directory for saved models
 4. **Adjust hyperparameters**: Learning rate, batch size, and thresholds may need tuning for your data

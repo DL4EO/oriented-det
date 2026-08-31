@@ -35,7 +35,7 @@ def _minimal_config(model_type: str) -> TrainingExperimentConfig:
             roi_edge_swap=False,
             roi_proj_xy=True,
             roi_box_reg_angle_weight=1.7,
-            roi_box_reg_iou_weight=0.2,
+            roi_box_reg_aux_weight=0.15,
             roi_min_pos_iou=0.37,
             use_hbb_for_matching=False,
             inference_pre_nms_score_threshold=0.13,
@@ -46,14 +46,13 @@ def _minimal_config(model_type: str) -> TrainingExperimentConfig:
             final_nms_iou_threshold=0.31,
             final_nms_iou_schedule_epochs=[1, 2],
             final_nms_iou_schedule_values=[0.6, 0.4, 0.2],
-            roi_box_reg_iou_schedule_epochs=[10, 20],
-            roi_box_reg_iou_schedule_values=[0.2, 0.1, 0.0],
+            roi_box_reg_aux_schedule_epochs=[10, 20],
+            roi_box_reg_aux_schedule_values=[0.2, 0.1, 0.0],
             roi_inference_top_class_only=True,
-            roi_box_reg_iou_loss_type="kfiou",
+            roi_box_reg_aux_loss_type="smooth_l1",
             roi_box_reg_kfiou_fun="ln",
             roi_box_reg_main_loss_type="probiou",
             roi_box_reg_norm="positives_only",
-            roi_box_reg_smooth_l1_aux_weight=0.15,
             rpn_positive_iou_threshold=0.51,
             rpn_negative_iou_threshold=0.39,
             fpn_returned_layers=[2, 3, 4],
@@ -106,8 +105,8 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     assert call_kw["anchor_ratios"] == [0.5, 2.0]
     assert call_kw["norm_factor"] == pytest.approx(3.0)
     assert call_kw["edge_swap"] is False
-    assert call_kw["box_reg_iou_weight"] == pytest.approx(0.2)
-    assert call_kw["box_reg_iou_loss_type"] == "kfiou"
+    assert call_kw["box_reg_aux_weight"] == pytest.approx(0.15)
+    assert call_kw["box_reg_aux_loss_type"] == "smooth_l1"
     assert call_kw["box_reg_kfiou_fun"] == "ln"
     assert call_kw["use_hbb_for_matching"] is False
     assert call_kw["positive_iou_threshold"] == pytest.approx(0.51)
@@ -120,7 +119,6 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     assert call_kw["stacked_convs"] == 4
     assert call_kw["box_reg_loss_type"] == "l1"
     assert call_kw["box_reg_main_loss_type"] == "probiou"
-    assert call_kw["box_reg_encoded_aux_weight"] == pytest.approx(0.15)
     assert call_kw["reg_sample_size_per_image"] == 512
     assert call_kw["box_reg_weight"] == pytest.approx(0.9)
     assert call_kw["score_threshold"] == pytest.approx(0.13)
@@ -128,8 +126,8 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     assert call_kw["max_detections_per_image"] == 33
     assert call_kw["final_nms_iou_schedule_epochs"] == [1, 2]
     assert call_kw["final_nms_iou_schedule_values"] == [0.6, 0.4, 0.2]
-    assert call_kw["roi_box_reg_iou_schedule_epochs"] == [10, 20]
-    assert call_kw["roi_box_reg_iou_schedule_values"] == [0.2, 0.1, 0.0]
+    assert call_kw["roi_box_reg_aux_schedule_epochs"] == [10, 20]
+    assert call_kw["roi_box_reg_aux_schedule_values"] == [0.2, 0.1, 0.0]
 
 
 def test_create_model_fcos_passes_config_fields():
@@ -180,9 +178,9 @@ def test_create_model_fcos_passes_config_fields():
     ]
 
 
-def test_fcos_riou_recipe_loads_lr_and_loss_type():
+def test_fcos_riou_1x_recipe_loads_lr_and_loss_type():
     root = Path(__file__).resolve().parents[1]
-    cfg = TrainingExperimentConfig.load(root / "configs" / "rotated_fcos" / "dota_le90_1x_riou.json")
+    cfg = TrainingExperimentConfig.load(root / "configs" / "rotated_fcos" / "dota_le90_1x.json")
     assert cfg.model_type == "rotated_fcos"
     assert cfg.model.box_reg_loss_type == "riou"
     assert cfg.training.learning_rate == pytest.approx(0.0025)
@@ -191,7 +189,7 @@ def test_fcos_riou_recipe_loads_lr_and_loss_type():
 
 def test_fcos_riou_3x_recipe_keeps_lr_and_extends_schedule():
     root = Path(__file__).resolve().parents[1]
-    cfg = TrainingExperimentConfig.load(root / "configs" / "rotated_fcos" / "dota_le90_3x_riou.json")
+    cfg = TrainingExperimentConfig.load(root / "configs" / "rotated_fcos" / "dota_le90_3x.json")
     assert cfg.model_type == "rotated_fcos"
     assert cfg.model.box_reg_loss_type == "riou"
     assert cfg.training.learning_rate == pytest.approx(0.0025)
@@ -199,6 +197,18 @@ def test_fcos_riou_3x_recipe_keeps_lr_and_extends_schedule():
     assert cfg.training.lr_scheduler_milestones == [24, 33]
     assert cfg.training.lr_warmup_steps == 2000
     assert float(cfg.model.aux_loss_weight or 0.0) == pytest.approx(0.0)
+
+
+def test_fcos_l1_kfiou_aux_1x_recipe_loads():
+    root = Path(__file__).resolve().parents[1]
+    cfg = TrainingExperimentConfig.load(
+        root / "configs" / "rotated_fcos" / "dota_le90_1x_l1_kfiou_aux.json"
+    )
+    assert cfg.model_type == "rotated_fcos"
+    assert cfg.model.box_reg_loss_type == "l1"
+    assert cfg.model.aux_loss_type == "kfiou"
+    assert cfg.model.aux_loss_weight == pytest.approx(0.1)
+    assert cfg.training.learning_rate == pytest.approx(0.00025)
 
 
 def test_load_model_from_checkpoint_retinanet_passes_fpn_and_anchor_config():
@@ -396,12 +406,11 @@ def test_create_model_rcnn_passes_inference_pre_nms_score_from_config():
     assert call_kw["roi_edge_swap"] is False
     assert call_kw["roi_proj_xy"] is True
     assert call_kw["roi_box_reg_angle_weight"] == pytest.approx(1.7)
-    assert call_kw["roi_box_reg_iou_weight"] == pytest.approx(0.2)
-    assert call_kw["roi_box_reg_iou_loss_type"] == "kfiou"
+    assert call_kw["roi_box_reg_aux_weight"] == pytest.approx(0.15)
+    assert call_kw["roi_box_reg_aux_loss_type"] == "smooth_l1"
     assert call_kw["roi_box_reg_kfiou_fun"] == "ln"
     assert call_kw["roi_box_reg_main_loss_type"] == "probiou"
     assert call_kw["roi_box_reg_norm"] == "positives_only"
-    assert call_kw["roi_box_reg_smooth_l1_aux_weight"] == pytest.approx(0.15)
     assert call_kw["roi_min_pos_iou"] == pytest.approx(0.37)
     assert call_kw["use_hbb_for_matching"] is False
     assert call_kw["inference_pre_nms_score_threshold"] == pytest.approx(0.13)
@@ -412,8 +421,8 @@ def test_create_model_rcnn_passes_inference_pre_nms_score_from_config():
     assert call_kw["final_nms_iou_threshold"] == pytest.approx(0.31)
     assert call_kw["final_nms_iou_schedule_epochs"] == [1, 2]
     assert call_kw["final_nms_iou_schedule_values"] == [0.6, 0.4, 0.2]
-    assert call_kw["roi_box_reg_iou_schedule_epochs"] == [10, 20]
-    assert call_kw["roi_box_reg_iou_schedule_values"] == [0.2, 0.1, 0.0]
+    assert call_kw["roi_box_reg_aux_schedule_epochs"] == [10, 20]
+    assert call_kw["roi_box_reg_aux_schedule_values"] == [0.2, 0.1, 0.0]
     assert call_kw["roi_inference_top_class_only"] is True
 
 

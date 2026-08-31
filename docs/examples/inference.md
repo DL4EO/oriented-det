@@ -25,7 +25,7 @@ odet preds --experiment-dir runs/oriented_rcnn/<timestamp> --data-split val --no
 ## Behavior
 
 - Thresholds, NMS, and sliding-window overlap come from **`production.*`** in the experiment `config.json`
-- Images larger than the model canvas use **sliding-window** tiling in `save_predictions.py`, then merge detections in image space
+- Images larger than the model canvas use **sliding-window** tiling when `resize_mode` is `fixed` or `crop` (DOTA). **`pad`** (HRSC2016) always runs one training-style whole-image forward (scale long edge to the canvas, then pad).
 
 ## Output artifacts
 
@@ -36,7 +36,7 @@ Default directory: `predictions/<YYYYMMDD_HHMMSS>/` at the **repository root** (
 | `predictions.json` | Always (inference) | Per-image detections (rboxes, scores, labels) |
 | `analysis_iou0.50.json` | With diagnostics (default) | PR/F1 threshold sweep, per-class AP, confusion matrix, best-threshold block |
 | `model_analysis_<timestamp>.md` | With diagnostics | Human-readable report: per-class gts/dets/recall/AP, optional per-class best thresholds |
-| `tile_metrics.csv` | With `--save-tile-metrics-csv` | Per-tile precision/recall/F1 for hard-tile oversampling |
+| `tile_metrics.csv` | With `--save-tile-metrics-csv` | Per-tile precision/recall/F1 for hard-tile oversampling and `dataset.drop_easy_empty_tiles` |
 | `visualizations/` | With `--save-visualizations` | Overlay images |
 
 Per-class best-threshold tables are computed **by default**. Disable with `--no-per-class-threshold-analysis` (`--per-class-threshold-analysis` is kept for backward compatibility).

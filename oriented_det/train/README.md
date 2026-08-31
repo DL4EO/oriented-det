@@ -23,10 +23,10 @@ Anchor-based detectors (`RotatedFasterRCNN`, `OrientedRCNN`, `RotatedRetinaNet`)
 
 ## FCOS box regression (`model.box_reg_loss_type`, `model.aux_loss_type`)
 
-- **`box_reg_loss_type`**: `l1` (default), `kfiou`, or `riou` (decoded differentiable polygon IoU). DOTA Hub FCOS is 3× rIoU ([`dota_le90_3x_riou.json`](../../configs/rotated_fcos/dota_le90_3x_riou.json), lr **2.5e-3**); L1 + KFIoU aux remains published as `rotated_fcos_dota_le90_3x_kfiou_aux`.
+- **`box_reg_loss_type`**: `l1` (default), `kfiou`, or `riou` (decoded differentiable polygon IoU). DOTA Hub FCOS is 3× rIoU ([`dota_le90_3x.json`](../../configs/rotated_fcos/dota_le90_3x.json), lr **2.5e-3**); L1 + KFIoU aux remains published as `rotated_fcos_dota_le90_3x_kfiou_aux`.
 - **`aux_loss_type`** / **`aux_loss_weight`**: decoded `kfiou` or `probiou` on positives (centerness-weighted). Weight **0** disables. Typical **0.1**. Aux `riou` is rejected. Logged as `loss_box_reg_aux`. Aux is Gaussian overlap plus an aspect-gated heading term (`ω sin²(2Δθ)`); **`aux_angle_weight`** (default **1.0**, **0** disables the heading term) and **`aux_angle_lambda`** (default **1.0**) control it.
 
-Recipes: [`configs/rotated_fcos/dota_le90_1x_kfiou_aux.json`](../../configs/rotated_fcos/dota_le90_1x_kfiou_aux.json), [`dota_le90_3x_kfiou_aux.json`](../../configs/rotated_fcos/dota_le90_3x_kfiou_aux.json), [`dota_le90_1x_riou.json`](../../configs/rotated_fcos/dota_le90_1x_riou.json), [`dota_le90_3x_riou.json`](../../configs/rotated_fcos/dota_le90_3x_riou.json).
+Recipes: [`configs/rotated_fcos/dota_le90_1x.json`](../../configs/rotated_fcos/dota_le90_1x.json), [`dota_le90_3x.json`](../../configs/rotated_fcos/dota_le90_3x.json), [`dota_le90_1x_l1_kfiou_aux.json`](../../configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json).
 
 ## Debug mode (`--debug`)
 
@@ -48,11 +48,13 @@ When training with `--debug` (or `make train DEBUG=1`), extra logs are printed a
 
 Optional root section **`production`** holds overrides for:
 
-- **Training validation / mAP** — **`effective_eval_metric_thresholds`** merges **`evaluation`** with **`production`**: **`score_threshold`** uses **`production.score_threshold`** when set, else **`evaluation.score_threshold`**; **`iou_threshold`** always comes from **`evaluation`**; **`per_class_score_threshold`** merges like deploy (evaluation entries, then production overrides). **`tools/train.py`** passes the merged triple into `train()` / `evaluate()`. **`evaluation.use_exact_rotated_iou`** controls mAP and GT-cover IoU only (not NMS).
+- **Training validation / mAP** — **`effective_eval_metric_thresholds`** merges **`evaluation`** with **`production`**: **`score_threshold`** uses **`production.score_threshold`** when set, else **`evaluation.score_threshold`**; **`iou_threshold`** always comes from **`evaluation`**; **`per_class_score_threshold`** merges like deploy (evaluation entries, then production overrides). **`tools/train.py`** passes the merged triple into `train()` / `evaluate()`. Training forward NMS uses **`model.final_nms_iou_threshold`** (not `production`). **`evaluation.use_exact_rotated_iou`** controls mAP matching IoU only.
 
-- **Decode / NMS on the loaded checkpoint model** — Non-null **`production.inference_pre_nms_score_threshold`**, **`final_nms_iou_threshold`**, **`final_nms_use_cpu`**, **`max_detections_per_image`**, **`nms_class_agnostic`**, **`roi_inference_top_class_only`**, **`rpn_pre_nms_top_n`**, **`rpn_post_nms_top_n`**, **`rpn_nms_threshold`** are applied by **`apply_inference_config_to_model`** in **`tools/save_predictions.load_model_from_checkpoint`** (deploy, **`save_predictions`**, **`image_demo`**, **`test_single_image`**). **`tools/train.py` does not call this** — the training forward pass always uses **`model.*`** from the merged config so deploy-oriented decode overrides stay in the saved JSON for publishing but do not change train speed or behavior. Use **`production.*`** to sweep decode knobs without editing the saved **`model`** block when loading weights for inference only.
+- **Final detection NMS split** — Recipes ship **`model.final_nms_iou_threshold: 0.1`** (train val / MMRotate-style), **`production.final_nms_iou_threshold: 0.3`** (deploy / `image_demo`), and **`evaluation.final_nms_iou_threshold: 0.1`** for **`odet preds` / `make eval-val`** published protocol. Resolver: **`resolve_preds_final_nms_iou_threshold`** (CLI → `evaluation` → production-patched model).
 
-- **Deploy / `save_predictions` / `image_demo`** — Global score uses **`resolve_inference_score_threshold`** (**`production.score_threshold`** else **`evaluation.score_threshold`**). Per-class floors use the same merge as validation (**`evaluation`** then **`production`**). Sliding-window overlap defaults to **200 px** per axis unless **`production.overlap_pixels`** is set (**`resolve_inference_sliding_window_overlap_pixels`**). Edge margin from **`production.ignore_margin_pixels`** when set, else **`dataset.overlap`/2**. Canvas: **`production.stick_to_model_canvas`** (default **true** when null), **`production.use_first_image_canvas`** (default **false** when null).
+- **Decode / NMS on the loaded checkpoint model** — Non-null **`production.inference_pre_nms_score_threshold`**, **`final_nms_iou_threshold`**, **`final_nms_use_cpu`**, **`max_detections_per_image`**, **`nms_class_agnostic`**, **`roi_inference_top_class_only`**, **`rpn_pre_nms_top_n`**, **`rpn_post_nms_top_n`**, **`rpn_nms_threshold`** are applied by **`apply_inference_config_to_model`** in **`tools/save_predictions.load_model_from_checkpoint`** (deploy, **`image_demo`**, **`test_single_image`**, and as a base before eval-val may override NMS). **`tools/train.py` does not call this**.
+
+- **Deploy / `image_demo`** — Global score uses **`resolve_inference_score_threshold`** (**`production.score_threshold`** else **`evaluation.score_threshold`**). Per-class floors use the same merge as validation (**`evaluation`** then **`production`**). Sliding-window overlap defaults to **200 px** per axis unless **`production.overlap_pixels`** is set (**`resolve_inference_sliding_window_overlap_pixels`**). Edge margin from **`production.ignore_margin_pixels`** when set, else **`dataset.overlap`/2**. Canvas: **`production.stick_to_model_canvas`** (default **true** when null), **`production.use_first_image_canvas`** (default **false** when null).
 
 Any field **`null`** or omitted keeps the usual **`evaluation`** / **`model`** / env source.
 
@@ -71,6 +73,10 @@ At the beginning of `train()`, rank 0 prints **`Training started at: …`** (wal
 ## TensorBoard `train/learning_rate`
 
 When optimizer **per-module param groups** are enabled (`training.use_lr_param_groups`), the first group is usually the backbone with a reduced LR. The scalar `train/learning_rate` is the **config-scale reference LR** (same scale as `training.learning_rate` after batch/DDP scaling), not the backbone group’s LR alone.
+
+**Per-milestone drops:** `training.lr_scheduler_gamma` is a number (same factor every drop) or a list of the same length as `lr_scheduler_milestones`. Oriented R-CNN HRSC 3× uses `[0.1, 0.5]`.
+
+**Cosine phase:** `training.lr_scheduler_cosine_epochs` is PyTorch `T_max` (else `num_epochs`). Legacy `lr_scheduler_cosine_t_max` still loads with a deprecation warning.
 
 **LR multipliers:** `lr_mult_backbone` applies to `backbone.*`. **`lr_mult_head`** (optional): when set, it applies to RetinaNet `head.*` and, for two-stage models, to both `rpn_head.*` and `roi_head.*` (same value for RPN and ROI, overriding `lr_mult_rpn` / `lr_mult_roi` for those tensors). When `lr_mult_head` is unset (`null`), `head.*` uses `lr_mult_other`, and RPN/ROI use `lr_mult_rpn` / `lr_mult_roi`. Any other trainable parameter uses `lr_mult_other`.
 
@@ -94,26 +100,26 @@ The training loop calls `set_grouped_ce_alpha_for_epoch(epoch)` each epoch (same
 
 ## ROI angle weight schedule (`model.roi_box_reg_angle_schedule_*`)
 
-`model.roi_box_reg_angle_weight` scales the angle (5th encoded dim) SmoothL1 term in ROI box regression. An optional piecewise schedule ramps that weight by 0-based epoch (same convention as `roi_box_reg_iou_schedule_*`).
+`model.roi_box_reg_angle_weight` scales the angle (5th encoded dim) SmoothL1 term in ROI box regression. An optional piecewise schedule ramps that weight by 0-based epoch (same convention as `roi_box_reg_aux_schedule_*`).
 
 - **`model.roi_box_reg_angle_schedule_epochs`**: epoch boundaries.
 - **`model.roi_box_reg_angle_schedule_values`**: weight per segment; length = `len(epochs) + 1`. When either field is null, `roi_box_reg_angle_weight` stays constant.
 
 Each training epoch, the engine calls `set_roi_box_reg_angle_weight_for_epoch(epoch)` on two-stage models.
 
-## ROI auxiliary IoU weight schedule (`model.roi_box_reg_iou_schedule_*`)
+## ROI auxiliary box-reg weight schedule (`model.roi_box_reg_aux_schedule_*`)
 
-When `model.roi_box_reg_iou_weight` > 0, an optional piecewise schedule can reduce the decoded-box rIoU/KFIoU/ProbIoU term during late fine-tuning (helps near-isotropic classes such as roundabout while keeping a stronger weight early for elongated objects).
+When `model.roi_box_reg_aux_weight` > 0, an optional piecewise schedule can change the auxiliary term during training (decoded rIoU/KFIoU/ProbIoU when main is Smooth L1; encoded Smooth L1 when main is decoded).
 
-- **`model.roi_box_reg_iou_schedule_epochs`**: 0-based epoch boundaries (same convention as `freeze_backbone_epochs` and `final_nms_iou_schedule_epochs`).
-- **`model.roi_box_reg_iou_schedule_values`**: weight per segment; length = `len(epochs) + 1`. When either schedule field is null, `roi_box_reg_iou_weight` stays constant.
+- **`model.roi_box_reg_aux_schedule_epochs`**: 0-based epoch boundaries (same convention as `freeze_backbone_epochs` and `final_nms_iou_schedule_epochs`).
+- **`model.roi_box_reg_aux_schedule_values`**: weight per segment; length = `len(epochs) + 1`. When either schedule field is null, `roi_box_reg_aux_weight` stays constant.
 
-Each training epoch, the engine calls `set_roi_box_reg_iou_weight_for_epoch(epoch)` on two-stage models (or `set_box_reg_iou_weight_for_epoch` on RetinaNet). This schedule applies to **decoded aux** when `roi_box_reg_main_loss_type` is `smooth_l1` (default).
+Each training epoch, the engine calls `set_roi_box_reg_aux_weight_for_epoch(epoch)` on two-stage models (or `set_box_reg_aux_weight_for_epoch` on RetinaNet).
 
 ## ROI main regression loss (`model.roi_box_reg_main_loss_type`, Rotated Faster R-CNN)
 
-- **`smooth_l1`** (default): encoded Smooth L1 primary; optional decoded aux via `roi_box_reg_iou_weight` / `roi_box_reg_iou_loss_type`.
-- **`probiou` / `riou` / `kfiou`**: decoded primary on positive RoIs; optional encoded Smooth L1 aux via `roi_box_reg_smooth_l1_aux_weight`.
+- **`smooth_l1`** (default): encoded Smooth L1 primary; optional decoded aux via `roi_box_reg_aux_weight` / `roi_box_reg_aux_loss_type`.
+- **`probiou` / `riou` / `kfiou`**: decoded primary on positive RoIs; optional encoded Smooth L1 aux via `roi_box_reg_aux_weight` with `roi_box_reg_aux_loss_type: smooth_l1`.
 - **`roi_box_reg_norm`**: `sampled_all` (MMRotate avg_factor) or `positives_only` (per-dim mean over positives). Default `sampled_all` preserves existing DOTA recipes.
 
 Example (ProbIoU main + Smooth L1 aux, see [`dota_le90_1x.json`](../../configs/rotated_faster_rcnn/dota_le90_1x.json)):
@@ -122,8 +128,8 @@ Example (ProbIoU main + Smooth L1 aux, see [`dota_le90_1x.json`](../../configs/r
 "model": {
   "roi_box_reg_main_loss_type": "probiou",
   "roi_box_reg_probiou_mode": "l1",
-  "roi_box_reg_iou_weight": 0.0,
-  "roi_box_reg_smooth_l1_aux_weight": 0.1,
+  "roi_box_reg_aux_weight": 0.1,
+  "roi_box_reg_aux_loss_type": "smooth_l1",
   "roi_box_reg_norm": "positives_only"
 }
 ```
@@ -132,9 +138,9 @@ Example (piecewise ROI IoU aux weight):
 
 ```json
 "model": {
-  "roi_box_reg_iou_weight": 0.1,
-  "roi_box_reg_iou_schedule_epochs": [24, 28],
-  "roi_box_reg_iou_schedule_values": [0.1, 0.05, 0.0]
+  "roi_box_reg_aux_weight": 0.1,
+  "roi_box_reg_aux_schedule_epochs": [24, 28],
+  "roi_box_reg_aux_schedule_values": [0.1, 0.05, 0.0]
 }
 ```
 
@@ -149,6 +155,8 @@ Two independent thresholds (0-based loop epoch, same as checkpoint `epoch`): `fr
 ## Capping train/val size
 
 `max_train_samples` / `max_val_samples` default to the **first N** samples in dataset order (often many tiles from the same source image). Set **`dataset.max_samples_shuffle_seed`** to an integer (e.g. `42`) to instead take **N indices from a deterministic shuffle** of the full split (same cap, spread across the listing; train and val each use the same seed with independent permutations).
+
+When **`dataset.tile_metrics_csv`** is set, **`dataset.drop_easy_empty_tiles: true`** removes vacuous train tiles (`tp=fp=fn=0`) **before** this cap, so `max_train_samples` counts remaining tiles (including empty tiles with false positives). Hard-tile oversampling runs after the cap.
 
 ## Checkpoint and Resume Behavior
 

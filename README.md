@@ -6,7 +6,7 @@
 
 - **Geometry**: Rotated bounding boxes (rbox: cx, cy, w, h, angle), quadrilateral boxes (qbox), polygon ↔ rbox ↔ hbox conversions, angle normalization (le90, 0–180°), flip/rotate/scale transforms, visualization helpers
 - **IoU & NMS**: Rotated IoU and oriented NMS (CPU with optional GPU kernels when available); AABB pre-filtering; `obb_to_xyxy` / HBB conversion
-- **Datasets**: DOTA polygon loader (pattern, split file, or separate folders), image tiling, label filtering, ignore masks, oriented mAP evaluation
+- **Datasets**: DOTA polygon loader (pattern, split file, or separate folders), **HRSC2016** native XML loader, image tiling, label filtering, ignore masks, oriented mAP evaluation
 - **Models**: **Oriented R-CNN** ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html); horizontal RPN + MidpointOffset → oriented RoIAlign + oriented ROI head), **Rotated Faster R-CNN** (Ren et al., NeurIPS 2015 two-stage baseline with horizontal RPN + horizontal RoIAlign + rotated ROI head; MMRotate reference), **Rotated RetinaNet** ([Lin et al., ICCV 2017](https://openaccess.thecvf.com/content_ICCV_2017/papers/Lin_Focal_Loss_for_ICCV_2017_paper.pdf); oriented anchors, sigmoid focal loss), **Rotated FCOS** (anchor-free single-stage; distance-angle coder, centerness, L1 / KFIoU / decoded rIoU); ResNet + FPN backbones; selective loading of external checkpoints where configs wire `checkpoint.load_from_checkpoint`
 - **Training**: JSON configs + **`odet train`**, mixed precision (AMP), gradient accumulation, checkpointing, best-metric tracking, TensorBoard, optional curriculum learning and profiling
 
@@ -118,6 +118,7 @@ Install once: `uv pip install -e .`. Then:
 | Train | `odet train --config configs/oriented_rcnn/dota_le90_1x.json` or `make train` |
 | Multi-GPU | `make train-multi-gpu` (`torchrun` + cuDNN on `LD_LIBRARY_PATH`) |
 | Tile DOTA | `odet tile-dota /path/to/dota/train` |
+| HRSC2016 → DOTA (optional) | `odet hrsc-to-dota --data-root /path/to/HRSC2016 --output-dir /path/to/HRSC2016-dota` |
 | Val predictions | `odet preds --experiment-dir runs/oriented_rcnn/<timestamp>` or `make preds` |
 | Offline mAP | `make eval-val` or `make preds` then `make metrics` |
 
@@ -125,7 +126,7 @@ DOTA configs: per-model `dota_le90_1x.json` / `dota_le90_3x.json` under [configs
 
 ## Pretrained weights and evaluation
 
-- Place exported best checkpoints under **`pretrained/`** or use Hub slugs (`odet pretrained download oriented_rcnn_dota_le90_3x` or `oriented_rcnn_dota_le90_1x`). See [pretrained/README.md](pretrained/README.md) and [configs/README.md](configs/README.md#dota-pretrained-models-model-zoo).
+- Place exported best checkpoints under **`pretrained/`** or use Hub slugs (`odet pretrained download oriented_rcnn_dota_le90_3x`, `oriented_rcnn_dota_le90_1x`, or `oriented_rcnn_hrsc2016_le90_3x` / `rotated_faster_rcnn_hrsc2016_le90_3x` / `rotated_fcos_hrsc2016_le90_3x`). See [pretrained/README.md](pretrained/README.md) and [configs/README.md](configs/README.md#dota-pretrained-models-model-zoo).
 - **Tiled validation:** after training, run `make preds` then `make metrics`. Published mAP reports: [`docs/eval-reports/`](docs/eval-reports/) (git). Raw detections for the viewer: gitignored [`predictions/`](predictions/).
 
 ## Important notes
@@ -140,8 +141,8 @@ See **[docs/roadmap.md](docs/roadmap.md)** for the full public plan. Summary:
 
 - **v0.1** (shipped): Geometry, IoU/NMS, DOTA, three ResNet-FPN detectors, config training, Hub pretrained weights
 - **v0.1.1** (shipped): ProbIoU Faster R-CNN 1×/3× on Hub
-- **v0.2** (shipped): Rotated FCOS (anchor-free single-stage); Hub `rotated_fcos_dota_le90_3x_riou` (81.58% eval-val mAP50)
-- **v0.3**: HRSC2016 and FAIR1M dataset support
+- **v0.2** (shipped): Rotated FCOS (anchor-free single-stage); Hub `rotated_fcos_dota_le90_3x` (81.58% eval-val mAP50)
+- **v0.3**: HRSC2016 loader + Hub 3× zoo (Oriented R-CNN 90.41%, Faster R-CNN 88.77%, FCOS 88.34% eval-val); FAIR1M remaining
 - **v0.4**: RTMDet-R and native YOLO-OBB (AGPL-free production tier)
 - **v0.5+**: Swin-FPN backbone; optional fused CUDA kernels; hosted docs
 

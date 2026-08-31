@@ -4,7 +4,7 @@ These files are **base configs** only. They are not used as top-level training c
 
 ## Contents
 
-- **datasets/** — Dataset defaults: `dota_le90.json` (`data_root`, tile dirs, format, classes, etc.).
+- **datasets/** — Dataset defaults: `dota_le90.json` (tiled DOTA v1.0), `hrsc2016.json` (native XML, single-class ship).
 - **models/** — Model backbones and heads: `oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`.
 - **schedules/** — Training schedules: `1x.json`, `3x.json`, `6x.json` (epochs, LR, warmup, etc.).
 - **fp16.json** — Mixed-precision (AMP) settings.

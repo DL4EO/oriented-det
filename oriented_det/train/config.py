@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Union, Tuple
 import json
+import warnings
 
 from oriented_det.utils.config import MUTED_KEY_PREFIX, load_config
 
@@ -60,6 +61,21 @@ def _normalize_legacy_loss_type(config_dict: Dict[str, Any]) -> None:
 # Removed from ModelConfig; GPU IoU sample count is now env-driven (see ops/README.md).
 _LEGACY_MODEL_KEYS = frozenset({"gpu_oriented_iou_samples"})
 
+_LEGACY_ROI_BOX_REG_KEYS = (
+    "roi_box_reg_iou_weight",
+    "roi_box_reg_iou_loss_type",
+    "roi_box_reg_iou_schedule_epochs",
+    "roi_box_reg_iou_schedule_values",
+    "roi_box_reg_smooth_l1_aux_weight",
+)
+_NEW_ROI_BOX_REG_AUX_KEYS = (
+    "roi_box_reg_aux_weight",
+    "roi_box_reg_aux_loss_type",
+    "roi_box_reg_aux_schedule_epochs",
+    "roi_box_reg_aux_schedule_values",
+)
+_DECODED_REG_LOSS_TYPES = frozenset({"probiou", "riou", "kfiou"})
+
 
 def _normalize_legacy_model_keys(config_dict: Dict[str, Any]) -> None:
     """Drop obsolete ``model.*`` keys so older experiment configs still load."""
@@ -70,11 +86,113 @@ def _normalize_legacy_model_keys(config_dict: Dict[str, Any]) -> None:
         model.pop(key, None)
 
 
+def _normalize_legacy_roi_box_reg_keys(config_dict: Dict[str, Any]) -> None:
+    """Rewrite pre-rename ROI box-reg aux keys onto ``roi_box_reg_aux_*``.
+
+    ``roi_box_reg_iou_weight`` was decoded aux when main is Smooth L1.
+    ``roi_box_reg_smooth_l1_aux_weight`` was encoded aux when main is decoded.
+    """
+    model = config_dict.get("model")
+    if not isinstance(model, dict):
+        return
+    present_legacy = [k for k in _LEGACY_ROI_BOX_REG_KEYS if k in model]
+    if not present_legacy:
+        return
+    present_new = [k for k in _NEW_ROI_BOX_REG_AUX_KEYS if k in model]
+    if present_new:
+        raise ValueError(
+            "Cannot mix legacy ROI box-reg keys "
+            f"{present_legacy} with {present_new}. Use roi_box_reg_aux_weight / "
+            "roi_box_reg_aux_loss_type only."
+        )
+
+    main = str(model.get("roi_box_reg_main_loss_type") or "smooth_l1").strip().lower()
+    decoded_main = main in _DECODED_REG_LOSS_TYPES
+    iou_w = model.pop("roi_box_reg_iou_weight", None)
+    iou_type = model.pop("roi_box_reg_iou_loss_type", None)
+    encoded_w = model.pop("roi_box_reg_smooth_l1_aux_weight", None)
+    if "roi_box_reg_iou_schedule_epochs" in model:
+        model["roi_box_reg_aux_schedule_epochs"] = model.pop(
+            "roi_box_reg_iou_schedule_epochs"
+        )
+    if "roi_box_reg_iou_schedule_values" in model:
+        model["roi_box_reg_aux_schedule_values"] = model.pop(
+            "roi_box_reg_iou_schedule_values"
+        )
+
+    iou_w_f = float(iou_w) if iou_w is not None else 0.0
+    encoded_w_f = float(encoded_w) if encoded_w is not None else 0.0
+    if iou_w_f > 0.0 and encoded_w_f > 0.0:
+        raise ValueError(
+            "Legacy ROI box-reg configs cannot enable both "
+            "roi_box_reg_iou_weight and roi_box_reg_smooth_l1_aux_weight."
+        )
+
+    if decoded_main:
+        if iou_w_f > 0.0:
+            raise ValueError(
+                "roi_box_reg_iou_weight is decoded aux; when "
+                "roi_box_reg_main_loss_type is decoded, use "
+                "roi_box_reg_aux_weight with roi_box_reg_aux_loss_type "
+                "'smooth_l1' (legacy: roi_box_reg_smooth_l1_aux_weight)."
+            )
+        if encoded_w is not None:
+            model["roi_box_reg_aux_weight"] = encoded_w_f
+            if encoded_w_f > 0.0:
+                model["roi_box_reg_aux_loss_type"] = "smooth_l1"
+    else:
+        if encoded_w_f > 0.0:
+            raise ValueError(
+                "roi_box_reg_smooth_l1_aux_weight is encoded aux; when "
+                "roi_box_reg_main_loss_type is smooth_l1, use "
+                "roi_box_reg_aux_weight with a decoded "
+                "roi_box_reg_aux_loss_type (legacy: roi_box_reg_iou_weight)."
+            )
+        if iou_w is not None:
+            model["roi_box_reg_aux_weight"] = iou_w_f
+        if iou_type is not None:
+            model["roi_box_reg_aux_loss_type"] = iou_type
+
+    warnings.warn(
+        "Deprecated ROI box-reg keys "
+        f"{present_legacy} were remapped to roi_box_reg_aux_weight / "
+        "roi_box_reg_aux_loss_type. Update the config to the new names.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
+def _normalize_legacy_cosine_t_max(config_dict: Dict[str, Any]) -> None:
+    """Rewrite ``training.lr_scheduler_cosine_t_max`` onto ``lr_scheduler_cosine_epochs``."""
+    training = config_dict.get("training")
+    if not isinstance(training, dict) or "lr_scheduler_cosine_t_max" not in training:
+        return
+    t_max = training.pop("lr_scheduler_cosine_t_max")
+    if t_max is None:
+        return
+    t_max_i = int(t_max)
+    epochs = training.get("lr_scheduler_cosine_epochs")
+    if epochs is not None and int(epochs) != t_max_i:
+        raise ValueError(
+            "Cannot set both lr_scheduler_cosine_t_max and "
+            "lr_scheduler_cosine_epochs to different values. "
+            "Use lr_scheduler_cosine_epochs only."
+        )
+    if epochs is None:
+        training["lr_scheduler_cosine_epochs"] = t_max_i
+    warnings.warn(
+        "Deprecated training.lr_scheduler_cosine_t_max was remapped to "
+        "lr_scheduler_cosine_epochs. Update the config to the new name.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+
 @dataclass
 class DatasetConfig:
     """Dataset configuration."""
     data_root: Path
-    format: str = "dota"  # Options: "dota", "airbus_playground"
+    format: str = "dota"  # Options: "dota", "airbus_playground", "hrsc2016"
     train_tiles_dir: Optional[Path] = None
     val_tiles_dir: Optional[Path] = None
     # Optional list of tile roots (MMRotate trainval-style union without on-disk merge).
@@ -91,6 +209,9 @@ class DatasetConfig:
     # val split still uses val_split_id for monitoring only.
     train_includes_val: bool = False
     ignore_labels: Optional[List[str]] = None
+    # Extra aliases treated as hard-negative lookalikes. Reserved name "lookalike"
+    # is always included even when this list is null/empty.
+    lookalike_labels: Optional[List[str]] = None
     map_labels: Optional[Dict[str, str]] = None
     # How to handle DOTA "difficult" annotations (last field in label lines):
     # - "drop": remove difficult objects at read-time (fast; they never reach training/eval targets)
@@ -105,11 +226,19 @@ class DatasetConfig:
     # instead of the first N in dataset order (see capped_subset_indices in train.utils).
     max_samples_shuffle_seed: Optional[int] = None
     allowed_classes: Optional[List[str]] = None
+    # HRSC2016 / FAIR1M ImageSets name used for the training-loop train/val roles.
+    # HRSC defaults (when null): train → trainval, val → test (MMRotate).
+    train_split: Optional[str] = None
+    val_split: Optional[str] = None
     # Optional CSV from tools/save_predictions (--save-tile-metrics-csv); join on image_id / stem
     tile_metrics_csv: Optional[Path] = None
     hard_tile_metric_column: str = "f1"
     hard_tile_threshold: float = 0.8
     hard_tile_oversample_factor: float = 2.0
+    # When tile_metrics_csv is set: drop vacuous true-negative tiles (tp=fp=fn=0) from train
+    # before max_train_samples / hard-tile oversampling. Empty tiles with FPs stay and can
+    # be oversampled. Requires filter_empty_gt=false in the loader to keep those hard empties.
+    drop_easy_empty_tiles: bool = False
 
     def __post_init__(self):
         """Convert string paths to Path objects."""
@@ -210,20 +339,19 @@ class ModelConfig:
     roi_box_reg_angle_weight: float = 1.0
     roi_box_reg_angle_schedule_epochs: Optional[List[int]] = None
     roi_box_reg_angle_schedule_values: Optional[List[float]] = None
-    roi_box_reg_iou_weight: float = 0.0
-    roi_box_reg_iou_schedule_epochs: Optional[List[int]] = None
-    roi_box_reg_iou_schedule_values: Optional[List[float]] = None
+    roi_box_reg_aux_weight: float = 0.0
+    roi_box_reg_aux_schedule_epochs: Optional[List[int]] = None
+    roi_box_reg_aux_schedule_values: Optional[List[float]] = None
     roi_batch_size_per_image: int = 512
     roi_positive_iou_threshold: float = 0.5
     roi_negative_iou_threshold: float = 0.5
     roi_match_low_quality: bool = False
     roi_min_pos_iou: float = 0.5
-    roi_box_reg_iou_loss_type: str = "riou"
+    roi_box_reg_aux_loss_type: Optional[str] = None
     roi_box_reg_kfiou_fun: Optional[str] = None
     roi_box_reg_probiou_mode: Optional[str] = None
     roi_box_reg_main_loss_type: str = "smooth_l1"
     roi_box_reg_norm: str = "sampled_all"
-    roi_box_reg_smooth_l1_aux_weight: float = 0.0
     # RetinaNet head / regression
     retinanet_stacked_convs: int = 4
     box_reg_loss_type: str = "smooth_l1"
@@ -270,6 +398,46 @@ class ModelConfig:
     # keep every foreground class above inference_pre_nms_score_threshold (helps weak classifiers).
     roi_inference_top_class_only: bool = False
 
+    def __post_init__(self) -> None:
+        aux_w = float(self.roi_box_reg_aux_weight)
+        aux_t = self.roi_box_reg_aux_loss_type
+        if aux_t is not None:
+            aux_t = str(aux_t).strip().lower()
+            self.roi_box_reg_aux_loss_type = aux_t or None
+            aux_t = self.roi_box_reg_aux_loss_type
+        main_t = str(self.roi_box_reg_main_loss_type or "smooth_l1").strip().lower()
+        self.roi_box_reg_main_loss_type = main_t
+        allowed_aux = {"smooth_l1", "probiou", "riou", "kfiou"}
+        if aux_w > 0.0:
+            if not aux_t:
+                raise ValueError(
+                    "roi_box_reg_aux_weight > 0 requires roi_box_reg_aux_loss_type "
+                    "(smooth_l1|probiou|riou|kfiou)."
+                )
+            if aux_t not in allowed_aux:
+                raise ValueError(
+                    f"roi_box_reg_aux_loss_type must be one of {sorted(allowed_aux)}, got {aux_t!r}."
+                )
+            if aux_t == main_t:
+                raise ValueError(
+                    "roi_box_reg_aux_loss_type must differ from roi_box_reg_main_loss_type "
+                    f"(both {main_t!r})."
+                )
+            if main_t == "smooth_l1" and aux_t not in _DECODED_REG_LOSS_TYPES:
+                raise ValueError(
+                    "When roi_box_reg_main_loss_type is smooth_l1, "
+                    "roi_box_reg_aux_loss_type must be probiou, riou, or kfiou."
+                )
+            if main_t in _DECODED_REG_LOSS_TYPES and aux_t != "smooth_l1":
+                raise ValueError(
+                    "When roi_box_reg_main_loss_type is decoded "
+                    "(probiou/riou/kfiou), roi_box_reg_aux_loss_type must be smooth_l1."
+                )
+        elif aux_t is not None and aux_t not in allowed_aux:
+            raise ValueError(
+                f"roi_box_reg_aux_loss_type must be one of {sorted(allowed_aux)}, got {aux_t!r}."
+            )
+
 
 @dataclass
 class TrainingConfig:
@@ -278,17 +446,18 @@ class TrainingConfig:
     lr_scheduler_type: Optional[str] = None  # None/"multistep"/"step" | "reduce_on_plateau" | "one_cycle" | "cosine_annealing" | "cosine_annealing_with_tail"
     lr_scheduler_step_epochs: int = 8
     lr_scheduler_milestones: Optional[List[int]] = None
-    lr_scheduler_gamma: float = 0.1
+    # Scalar: same factor at every MultiStepLR/StepLR drop. List: one factor per milestone.
+    lr_scheduler_gamma: Any = 0.1
     lr_scheduler_plateau_metric: str = "total_loss"
     lr_scheduler_plateau_factor: float = 0.1
     lr_scheduler_plateau_patience: int = 5
     lr_scheduler_one_cycle_pct_start: float = 0.3
     lr_scheduler_one_cycle_div_factor: float = 25.0
     lr_scheduler_one_cycle_final_div_factor: float = 1e4
-    lr_scheduler_cosine_t_max: Optional[int] = None
     lr_scheduler_cosine_eta_min: float = 1e-6
     # Cosine phase length (epochs). If set with num_epochs > this value, remaining epochs use a
     # fixed LR tail (see lr_scheduler_cosine_tail_lr). Alternative: set lr_scheduler_cosine_tail_epochs only.
+    # Legacy JSON key lr_scheduler_cosine_t_max is remapped onto this field on load.
     lr_scheduler_cosine_epochs: Optional[int] = None
     lr_scheduler_cosine_tail_epochs: int = 0
     lr_scheduler_cosine_tail_lr: Optional[float] = None  # default: lr_scheduler_cosine_eta_min
@@ -332,6 +501,10 @@ class EvaluationConfig:
     # Optional class_name -> min score; classes not listed use score_threshold
     per_class_score_threshold: Optional[Dict[str, float]] = None
     iou_threshold: float = 0.5  # IoU threshold for mAP calculation
+    # Final detection NMS IoU for ``odet preds`` / ``make eval-val`` only (MMRotate test parity).
+    # When set, overrides ``production.final_nms_iou_threshold`` for that path. Deploy / image_demo
+    # still use ``production.*`` via ``apply_inference_config_to_model``. Training val uses ``model.*``.
+    final_nms_iou_threshold: Optional[float] = None
     compute_map_final: bool = True  # After training, load best checkpoint and compute mAP once
     compute_map_every_n_epochs: int = 0  # If >0, compute mAP every N epochs during training (current model)
     # If True, compute expensive GT–IoU histograms (mean/median/buckets, wrong-class counts)
@@ -399,6 +572,49 @@ def resolve_inference_score_threshold(config: "TrainingExperimentConfig") -> flo
         if v is not None:
             return float(v)
     return float(getattr(config.evaluation, "score_threshold", 0.5))
+
+
+def resolve_preds_final_nms_iou_threshold(
+    config: "TrainingExperimentConfig",
+    *,
+    cli_nms_threshold: Optional[float] = None,
+    model_nms_threshold: Optional[float] = None,
+) -> Tuple[float, str]:
+    """Final detection NMS IoU for ``odet preds`` / ``make eval-val``.
+
+    Priority:
+    1. CLI ``--nms-threshold``
+    2. ``evaluation.final_nms_iou_threshold`` (published MMRotate-parity protocol)
+    3. ``model_nms_threshold`` (live model attr after ``production`` patch, if provided)
+    4. ``production.final_nms_iou_threshold`` then ``model.final_nms_iou_threshold``
+    5. ``0.5``
+
+    Deploy / ``image_demo`` do not use this helper; they keep ``production.*`` via
+    :func:`apply_inference_config_to_model`.
+    """
+    if cli_nms_threshold is not None:
+        return float(cli_nms_threshold), "CLI --nms-threshold"
+    ev = getattr(config, "evaluation", None)
+    if ev is not None and getattr(ev, "final_nms_iou_threshold", None) is not None:
+        return (
+            float(ev.final_nms_iou_threshold),
+            "evaluation.final_nms_iou_threshold (eval-val / odet preds)",
+        )
+    if model_nms_threshold is not None:
+        inf = getattr(config, "production", None)
+        if inf is not None and getattr(inf, "final_nms_iou_threshold", None) is not None:
+            return (
+                float(model_nms_threshold),
+                "production.final_nms_iou_threshold (patched onto model)",
+            )
+        return float(model_nms_threshold), "model.final_nms_iou_threshold"
+    inf = getattr(config, "production", None)
+    if inf is not None and getattr(inf, "final_nms_iou_threshold", None) is not None:
+        return float(inf.final_nms_iou_threshold), "production.final_nms_iou_threshold"
+    m = getattr(config, "model", None)
+    if m is not None and getattr(m, "final_nms_iou_threshold", None) is not None:
+        return float(m.final_nms_iou_threshold), "model.final_nms_iou_threshold"
+    return 0.5, "default 0.5"
 
 
 def effective_eval_metric_thresholds(
@@ -560,10 +776,11 @@ PREPROCESSING_DEFAULT_STD = [58.395 / 255.0, 57.12 / 255.0, 57.375 / 255.0]  # R
 
 @dataclass
 class PreprocessingConfig:
-    """Preprocessing. Keys ordered: resize_mode (switch) first, then target_size, normalize_*, pad_*, enable_flip_*.
+    """Preprocessing. Keys ordered: resize_mode (switch) first, then target_size, normalize_*, pad_*, enable_flip_*, enable_random_rotate_*.
 
-    resize_mode: ``fixed`` (stretch to target_size), ``pad`` (scale by large edge + pad),
-    or ``crop`` (native-res crop/pad to target_size).
+    resize_mode: ``fixed`` (stretch to target_size), ``pad`` (scale by large edge + pad to
+    target_size), ``keep_ratio`` (scale by large edge; then ``pad_size_divisor``, MMRotate
+    style), or ``crop`` (native-res crop/pad to target_size).
     """
     resize_mode: str = "fixed"
     target_size: Any = field(default_factory=lambda: [1024, 1024])
@@ -573,6 +790,9 @@ class PreprocessingConfig:
     enable_flip_horizontal: bool = True
     enable_flip_vertical: bool = True
     enable_flip_diagonal: bool = False
+    enable_random_rotate: bool = False
+    random_rotate_prob: float = 0.5
+    random_rotate_angle_range: float = 180.0
 
 
 def get_preprocessing_params(config: Any) -> Dict[str, Any]:
@@ -706,6 +926,8 @@ class TrainingExperimentConfig:
         config_dict = frozen_cfg.to_dict()
         _normalize_legacy_loss_type(config_dict)
         _normalize_legacy_model_keys(config_dict)
+        _normalize_legacy_roi_box_reg_keys(config_dict)
+        _normalize_legacy_cosine_t_max(config_dict)
 
         # JSON `null` for a section should fall back to dataclass defaults, not be passed
         # as `None` into non-optional sub-configs.
@@ -803,6 +1025,9 @@ class TrainingExperimentConfig:
                     print("  Train Includes Val: true (all folds in train; val fold for monitoring only)")
                 print(f"  Ignore Labels: {self.dataset.ignore_labels}")
                 print(f"  Map Labels: {self.dataset.map_labels}")
+            elif self.dataset.format == "hrsc2016":
+                print(f"  Train Split (ImageSets): {self.dataset.train_split or 'trainval'}")
+                print(f"  Val Split (ImageSets): {self.dataset.val_split or 'test'}")
             else:
                 if self.dataset.train_tiles_dirs:
                     print(f"  Train Tiles: {self.dataset.train_tiles_dirs}")
@@ -814,8 +1039,15 @@ class TrainingExperimentConfig:
                     print(f"  Val Tiles: {self.dataset.val_tiles_dir}")
                 if getattr(self.dataset, "same_folder", False):
                     print(f"  Same folder: images and labels in train/val tiles dirs")
+            if getattr(self.dataset, "lookalike_labels", None):
+                print(f"  Lookalike Labels (aliases): {self.dataset.lookalike_labels}")
+            print(
+                "  Lookalike: reserved name 'lookalike' is always a hard-negative "
+                "routing token (excluded from class_map)."
+            )
             print(f"  difficult_strategy: {getattr(self.dataset, 'difficult_strategy', 'drop')}")
             print(f"  filter_empty_gt: {getattr(self.dataset, 'filter_empty_gt', False)}")
+            print(f"  drop_easy_empty_tiles: {getattr(self.dataset, 'drop_easy_empty_tiles', False)}")
             print(f"  Tile overlap (px): {getattr(self.dataset, 'overlap', 16)}")
             print()
         
@@ -860,6 +1092,10 @@ class TrainingExperimentConfig:
             print(f"  Per-class score thresholds: {self.evaluation.per_class_score_threshold}")
         print(f"  Extended GT metrics: {self.evaluation.extended_gt_metrics}")
         print(f"  IoU Threshold: {self.evaluation.iou_threshold}")
+        print(
+            f"  final_nms_iou_threshold (odet preds / eval-val): "
+            f"{self.evaluation.final_nms_iou_threshold!r}"
+        )
         print(f"  Compute mAP final (best model): {self.evaluation.compute_map_final}")
         print(f"  Compute mAP every N epochs: {self.evaluation.compute_map_every_n_epochs}")
         print(f"  Use exact rotated IoU (mAP / GT cover): {self.evaluation.use_exact_rotated_iou}")
@@ -872,10 +1108,14 @@ class TrainingExperimentConfig:
         inf = self.production
         ow_px = resolve_inference_sliding_window_overlap_pixels(self)
         _eff_sc, _eff_pc, _eff_iou = effective_eval_metric_thresholds(self)
+        _preds_nms, _preds_nms_src = resolve_preds_final_nms_iou_threshold(self)
         print(f"  score_threshold: {inf.score_threshold!r} → effective {_eff_sc}")
         print(f"  per_class_score_threshold: {inf.per_class_score_threshold!r} → effective {_eff_pc!r}")
         print(f"  (mAP IoU from evaluation.iou_threshold: {self.evaluation.iou_threshold} → effective {_eff_iou})")
-        print(f"  final_nms_iou_threshold: {inf.final_nms_iou_threshold!r}")
+        print(
+            f"  final_nms_iou_threshold: {inf.final_nms_iou_threshold!r} "
+            f"(deploy/image_demo); odet preds → {_preds_nms} via {_preds_nms_src}"
+        )
         print(f"  final_nms_use_cpu: {inf.final_nms_use_cpu!r}")
         print(f"  inference_pre_nms_score_threshold: {inf.inference_pre_nms_score_threshold!r}")
         print(f"  max_detections_per_image: {inf.max_detections_per_image!r}")

@@ -68,7 +68,7 @@ except Exception:  # pragma: no cover
     SummaryWriter = None  # type: ignore
 from datetime import datetime
 from collections import Counter
-from typing import Optional, Dict, Any, List, Union, Set
+from typing import Optional, Dict, Any, List, Union, Set, Tuple
 import math
 import numpy as np
 import sys
@@ -77,18 +77,19 @@ import argparse
 
 from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet, RotatedFCOS
 from oriented_det.data import (
-    DOTADataset,
-    AirbusPlaygroundCSVDataset,
+    build_split_dataset,
+    dataset_format_name,
     format_airbus_empty_gt_filter_log,
-    build_dota_split_dataset,
-    dota_dataset_class_names,
     format_dota_empty_gt_filter_log,
+    format_hrsc_empty_gt_filter_log,
+    split_class_names,
 )
 from oriented_det.train import train, CheckpointManager, WarmupScheduler, OneCycleWrapper, get_best_checkpoint_path
 from oriented_det.train.utils import (
     capped_subset_indices,
     capture_source_provenance,
     create_cosine_with_tail_lr_scheduler,
+    create_multistep_lr_scheduler,
     create_pytorch_cosine_lr_scheduler,
     format_cosine_with_tail_scheduler_description,
     format_pytorch_cosine_scheduler_description,
@@ -174,6 +175,40 @@ def _stems_vacuous_true_negatives_from_tile_csv(csv_path: Path) -> Set[str]:
     return stems
 
 
+def _tile_csv_has_count_columns(csv_path: Path) -> bool:
+    with csv_path.open(newline="", encoding="utf-8") as f:
+        fields = csv_module.DictReader(f).fieldnames or []
+    return all(c in fields for c in ("tp", "fp", "fn"))
+
+
+def _drop_easy_empty_tiles(dataset: Dataset, csv_path: Path) -> Tuple[Dataset, int]:
+    """Remove vacuous true-negative tiles (tp=fp=fn=0) from the train set.
+
+    Tiles with no CSV row are kept. Empty tiles with false positives stay so
+    hard-tile oversampling can up-weight them.
+    """
+    if not _tile_csv_has_count_columns(csv_path):
+        raise ValueError(
+            "dataset.drop_easy_empty_tiles requires tp, fp, and fn columns in "
+            f"tile_metrics_csv ({csv_path})"
+        )
+    vacuous_stems = _stems_vacuous_true_negatives_from_tile_csv(csv_path)
+    keep = [
+        i
+        for i in range(len(dataset))
+        if _dataset_index_to_image_stem(dataset, i) not in vacuous_stems
+    ]
+    n_dropped = len(dataset) - len(keep)
+    if n_dropped == 0:
+        return dataset, 0
+    if not keep:
+        raise ValueError(
+            "dataset.drop_easy_empty_tiles removed every train tile "
+            f"(all were tp=fp=fn=0 in {csv_path})"
+        )
+    return Subset(dataset, keep), n_dropped
+
+
 class _HardTileExpandedDataset(Dataset):
     """Repeat hard tile indices so DistributedSampler can oversample (DDP)."""
 
@@ -186,6 +221,8 @@ class _HardTileExpandedDataset(Dataset):
 
     def __getitem__(self, idx: int):
         return self.base[self.order[idx]]
+
+
 from oriented_det.runtime.collate import create_collate_fn, create_train_augmentation, check_directories
 
 # ============================================================================
@@ -486,14 +523,14 @@ def print_wizard_recommendations(
             print(
                 f"- box_reg_loss_type: {box_loss} (L1 baseline). Dense small classes "
                 "(ship/small-vehicle/storage-tank) often lag; try L1 + decoded aux "
-                "(configs/rotated_fcos/dota_le90_1x_kfiou_aux.json)."
+                "(configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json)."
             )
         elif box_loss == "kfiou":
             print("- box_reg_loss_type: kfiou (decoded KFIoU primary). Prefer L1 + aux recipes.")
         elif box_loss == "riou":
             print(
                 "- box_reg_loss_type: riou (decoded differentiable polygon IoU, 1-IoU). "
-                "Recipe configs/rotated_fcos/dota_le90_1x_riou.json uses lr 2.5e-3. "
+                "Recipe configs/rotated_fcos/dota_le90_1x.json uses lr 2.5e-3. "
                 "Not sampling pairwise_rotated_iou."
             )
         else:
@@ -680,17 +717,14 @@ def create_model_from_config(
             roi_box_reg_angle_schedule_values=getattr(
                 config.model, "roi_box_reg_angle_schedule_values", None
             ),
-            roi_box_reg_iou_weight=getattr(config.model, "roi_box_reg_iou_weight", 0.0),
-            roi_box_reg_iou_loss_type=getattr(config.model, "roi_box_reg_iou_loss_type", "riou"),
+            roi_box_reg_aux_weight=getattr(config.model, "roi_box_reg_aux_weight", 0.0),
+            roi_box_reg_aux_loss_type=getattr(config.model, "roi_box_reg_aux_loss_type", None),
             roi_box_reg_kfiou_fun=getattr(config.model, "roi_box_reg_kfiou_fun", None),
             roi_box_reg_probiou_mode=getattr(config.model, "roi_box_reg_probiou_mode", None),
             roi_box_reg_main_loss_type=getattr(
                 config.model, "roi_box_reg_main_loss_type", "smooth_l1"
             ),
             roi_box_reg_norm=getattr(config.model, "roi_box_reg_norm", "sampled_all"),
-            roi_box_reg_smooth_l1_aux_weight=getattr(
-                config.model, "roi_box_reg_smooth_l1_aux_weight", 0.0
-            ),
             use_hbb_for_matching=use_hbb,
             inference_pre_nms_score_threshold=inference_pre_nms_score_threshold,
             rpn_min_size=getattr(config.model, "rpn_min_size", 0.0),
@@ -714,8 +748,8 @@ def create_model_from_config(
             roi_negative_iou_threshold=getattr(config.model, "roi_negative_iou_threshold", 0.5),
             final_nms_iou_schedule_epochs=config.model.final_nms_iou_schedule_epochs,
             final_nms_iou_schedule_values=config.model.final_nms_iou_schedule_values,
-            roi_box_reg_iou_schedule_epochs=config.model.roi_box_reg_iou_schedule_epochs,
-            roi_box_reg_iou_schedule_values=config.model.roi_box_reg_iou_schedule_values,
+            roi_box_reg_aux_schedule_epochs=config.model.roi_box_reg_aux_schedule_epochs,
+            roi_box_reg_aux_schedule_values=config.model.roi_box_reg_aux_schedule_values,
             roi_inference_top_class_only=getattr(
                 config.model, "roi_inference_top_class_only", False
             ),
@@ -747,8 +781,8 @@ def create_model_from_config(
             roi_box_reg_angle_schedule_values=getattr(
                 config.model, "roi_box_reg_angle_schedule_values", None
             ),
-            roi_box_reg_iou_weight=getattr(config.model, "roi_box_reg_iou_weight", 0.0),
-            roi_box_reg_iou_loss_type=getattr(config.model, "roi_box_reg_iou_loss_type", "riou"),
+            roi_box_reg_aux_weight=getattr(config.model, "roi_box_reg_aux_weight", 0.0),
+            roi_box_reg_aux_loss_type=getattr(config.model, "roi_box_reg_aux_loss_type", None),
             roi_box_reg_kfiou_fun=getattr(config.model, "roi_box_reg_kfiou_fun", None),
             roi_box_reg_probiou_mode=getattr(config.model, "roi_box_reg_probiou_mode", None),
             use_hbb_for_matching=use_hbb,
@@ -773,8 +807,8 @@ def create_model_from_config(
             roi_negative_iou_threshold=getattr(config.model, "roi_negative_iou_threshold", 0.3),
             final_nms_iou_schedule_epochs=config.model.final_nms_iou_schedule_epochs,
             final_nms_iou_schedule_values=config.model.final_nms_iou_schedule_values,
-            roi_box_reg_iou_schedule_epochs=config.model.roi_box_reg_iou_schedule_epochs,
-            roi_box_reg_iou_schedule_values=config.model.roi_box_reg_iou_schedule_values,
+            roi_box_reg_aux_schedule_epochs=config.model.roi_box_reg_aux_schedule_epochs,
+            roi_box_reg_aux_schedule_values=config.model.roi_box_reg_aux_schedule_values,
             add_gt_as_proposals=getattr(config.model, "add_gt_as_proposals", True),
             roi_inference_top_class_only=getattr(
                 config.model, "roi_inference_top_class_only", False
@@ -804,15 +838,12 @@ def create_model_from_config(
             edge_swap=config.model.roi_edge_swap,
             box_reg_weight=getattr(config.model, "box_reg_weight", 1.0),
             box_reg_loss_type=getattr(config.model, "box_reg_loss_type", "smooth_l1"),
-            box_reg_iou_weight=getattr(config.model, "roi_box_reg_iou_weight", 0.0),
-            box_reg_iou_loss_type=getattr(config.model, "roi_box_reg_iou_loss_type", "riou"),
+            box_reg_aux_weight=getattr(config.model, "roi_box_reg_aux_weight", 0.0),
+            box_reg_aux_loss_type=getattr(config.model, "roi_box_reg_aux_loss_type", None),
             box_reg_kfiou_fun=getattr(config.model, "roi_box_reg_kfiou_fun", None),
             box_reg_probiou_mode=getattr(config.model, "roi_box_reg_probiou_mode", None),
             box_reg_main_loss_type=getattr(
                 config.model, "roi_box_reg_main_loss_type", "smooth_l1"
-            ),
-            box_reg_encoded_aux_weight=getattr(
-                config.model, "roi_box_reg_smooth_l1_aux_weight", 0.0
             ),
             reg_sample_size_per_image=getattr(
                 config.model, "roi_batch_size_per_image", 512
@@ -823,8 +854,8 @@ def create_model_from_config(
             max_detections_per_image=getattr(config.model, "max_detections_per_image", 100),
             final_nms_iou_schedule_epochs=config.model.final_nms_iou_schedule_epochs,
             final_nms_iou_schedule_values=config.model.final_nms_iou_schedule_values,
-            roi_box_reg_iou_schedule_epochs=config.model.roi_box_reg_iou_schedule_epochs,
-            roi_box_reg_iou_schedule_values=config.model.roi_box_reg_iou_schedule_values,
+            roi_box_reg_aux_schedule_epochs=config.model.roi_box_reg_aux_schedule_epochs,
+            roi_box_reg_aux_schedule_values=config.model.roi_box_reg_aux_schedule_values,
             final_nms_use_cpu=getattr(config.model, "final_nms_use_cpu", False),
         )
     elif model_type == "rotated_fcos":
@@ -1181,7 +1212,7 @@ def main():
         print(f"Mixed Precision (AMP): {use_amp}")
         print()
     
-    dataset_format = getattr(config.dataset, "format", "dota").lower()
+    dataset_format = dataset_format_name(config.dataset)
 
     if rank == 0 and dataset_format == "dota":
         print("Checking dataset directories...")
@@ -1193,104 +1224,82 @@ def main():
     
     # Create datasets
     print("Loading datasets...")
-    if dataset_format == "airbus_playground":
-        if config.dataset.annotations_file is None or config.dataset.split_file is None:
-            raise ValueError(
-                "Airbus Playground dataset format requires dataset.annotations_file "
-                "and dataset.split_file."
-            )
+    train_filter_empty = getattr(config.dataset, "filter_empty_gt", False)
+    val_filter_empty = False if dataset_format == "airbus_playground" else train_filter_empty
+    train_dataset = build_split_dataset(
+        config.dataset, "train", filter_empty_gt=train_filter_empty
+    )
+    val_dataset = build_split_dataset(
+        config.dataset, "val", filter_empty_gt=val_filter_empty
+    )
 
-        airbus_filter_empty_gt = getattr(config.dataset, "filter_empty_gt", False)
-        train_dataset = AirbusPlaygroundCSVDataset(
-            data_root=config.dataset.data_root,
-            split="train",
-            annotations_file=config.dataset.annotations_file,
-            split_file=config.dataset.split_file,
-            val_split_id=config.dataset.val_split_id,
-            train_includes_val=getattr(config.dataset, "train_includes_val", False),
-            difficult_strategy=config.dataset.difficult_strategy,
-            allowed_classes=config.dataset.allowed_classes,
-            ignore_labels=config.dataset.ignore_labels,
-            map_labels=config.dataset.map_labels,
-            filter_empty_gt=airbus_filter_empty_gt,
+    if rank == 0 and dataset_format == "airbus_playground":
+        map_labels = config.dataset.map_labels or {}
+        ignore_labels = set(config.dataset.ignore_labels or [])
+        raw_in_csv = train_dataset.get_raw_class_names_from_csv()
+        ann_path = getattr(train_dataset, "annotations_path", None)
+        print(
+            f"\nUsing Airbus Playground CSV dataset: {config.dataset.annotations_file}, "
+            f"{config.dataset.split_file} (val_split_id={config.dataset.val_split_id})"
         )
-        val_dataset = AirbusPlaygroundCSVDataset(
-            data_root=config.dataset.data_root,
-            split="val",
-            annotations_file=config.dataset.annotations_file,
-            split_file=config.dataset.split_file,
-            val_split_id=config.dataset.val_split_id,
-            difficult_strategy=config.dataset.difficult_strategy,
-            allowed_classes=config.dataset.allowed_classes,
-            ignore_labels=config.dataset.ignore_labels,
-            map_labels=config.dataset.map_labels,
-            filter_empty_gt=False,
+        if ann_path is not None:
+            print(f"  annotations path: {ann_path}")
+        print(
+            "  (val_split_id is the split.csv fold id used as validation when the split column is numeric.)"
         )
-        if rank == 0:
-            map_labels = config.dataset.map_labels or {}
-            ignore_labels = set(config.dataset.ignore_labels or [])
-            raw_in_csv = train_dataset.get_raw_class_names_from_csv()
-            ann_path = getattr(train_dataset, "annotations_path", None)
+        if getattr(config.dataset, "train_includes_val", False):
             print(
-                f"\nUsing Airbus Playground CSV dataset: {config.dataset.annotations_file}, "
-                f"{config.dataset.split_file} (val_split_id={config.dataset.val_split_id})"
+                "  train_includes_val: true — training uses all folds; "
+                f"fold {config.dataset.val_split_id} is still used for validation/monitoring only."
             )
-            if ann_path is not None:
-                print(f"  annotations path: {ann_path}")
-            print(
-                "  (val_split_id is the split.csv fold id used as validation when the split column is numeric.)"
-            )
-            if getattr(config.dataset, "train_includes_val", False):
-                print(
-                    "  train_includes_val: true — training uses all folds; "
-                    f"fold {config.dataset.val_split_id} is still used for validation/monitoring only."
-                )
-            print(f"  map_labels: {len(map_labels)} key(s). Raw labels in CSV (train): {len(raw_in_csv)} distinct — {raw_in_csv[:15]}{'...' if len(raw_in_csv) > 15 else ''}")
-            if ignore_labels:
-                print(f"  ignore_labels: {len(ignore_labels)} value(s) — entries matching these labels are dropped.")
-            if len(raw_in_csv) <= 1:
-                print(f"  ⚠ Only one raw label in CSV: check that training reads the regenerated file (config uses annotations_file: annotations.csv; not annotations.cvs).")
-            if airbus_filter_empty_gt:
-                print("Airbus filter_empty_gt (train split only; val keeps all tiles):")
-                print(format_airbus_empty_gt_filter_log(train_dataset, split="train"))
-    else:
-        if not config.dataset.has_dota_tiles_config():
-            raise ValueError(
-                "DOTA dataset format requires dataset.train_tiles_dir or "
-                "dataset.train_tiles_dirs, and dataset.val_tiles_dir or dataset.val_tiles_dirs."
-            )
-        same_folder = getattr(config.dataset, "same_folder", False)
-
-        train_dataset = build_dota_split_dataset(
-            config.dataset.get_train_tile_roots(),
-            split="train",
-            same_folder=same_folder,
-            difficult_strategy=config.dataset.difficult_strategy,
-            allowed_classes=config.dataset.allowed_classes,
-            ignore_labels=config.dataset.ignore_labels,
-            filter_empty_gt=getattr(config.dataset, "filter_empty_gt", False),
+        print(f"  map_labels: {len(map_labels)} key(s). Raw labels in CSV (train): {len(raw_in_csv)} distinct — {raw_in_csv[:15]}{'...' if len(raw_in_csv) > 15 else ''}")
+        if ignore_labels:
+            print(f"  ignore_labels: {len(ignore_labels)} value(s) — entries matching these labels are dropped.")
+        lookalike_extra = getattr(config.dataset, "lookalike_labels", None) or []
+        print(
+            "  lookalike: reserved token 'lookalike' is a hard-negative routing label "
+            "(not a semantic class); map confusers via map_labels."
         )
-
-        val_dataset = build_dota_split_dataset(
-            config.dataset.get_val_tile_roots(),
-            split="val",
-            same_folder=same_folder,
-            difficult_strategy=config.dataset.difficult_strategy,
-            allowed_classes=config.dataset.allowed_classes,
-            ignore_labels=config.dataset.ignore_labels,
-            filter_empty_gt=getattr(config.dataset, "filter_empty_gt", False),
+        if lookalike_extra:
+            print(f"  lookalike_labels aliases: {list(lookalike_extra)}")
+        if len(raw_in_csv) <= 1:
+            print(f"  ⚠ Only one raw label in CSV: check that training reads the regenerated file (config uses annotations_file: annotations.csv; not annotations.cvs).")
+        if train_filter_empty:
+            print("Airbus filter_empty_gt (train split only; val keeps all tiles):")
+            print(format_airbus_empty_gt_filter_log(train_dataset, split="train"))
+    elif rank == 0 and dataset_format == "hrsc2016":
+        print(
+            f"\nUsing HRSC2016 dataset: {config.dataset.data_root} "
+            f"(train ImageSets={getattr(train_dataset, 'split', 'trainval')}, "
+            f"val ImageSets={getattr(val_dataset, 'split', 'test')})"
         )
-
-        if rank == 0 and getattr(config.dataset, "filter_empty_gt", False):
-            print("DOTA filter_empty_gt (MMRotate-style):")
-            print(format_dota_empty_gt_filter_log(train_dataset, split="train"))
-            print(format_dota_empty_gt_filter_log(val_dataset, split="val"))
+        if train_filter_empty:
+            print("HRSC2016 filter_empty_gt:")
+            print(format_hrsc_empty_gt_filter_log(train_dataset, split="train"))
+            print(format_hrsc_empty_gt_filter_log(val_dataset, split="val"))
+    elif rank == 0 and train_filter_empty:
+        print("DOTA filter_empty_gt (MMRotate-style):")
+        print(format_dota_empty_gt_filter_log(train_dataset, split="train"))
+        print(format_dota_empty_gt_filter_log(val_dataset, split="val"))
 
     # Class list from full train split before max_* caps: a limited subset must not shrink num_classes.
-    if dataset_format != "airbus_playground":
-        class_names = dota_dataset_class_names(train_dataset)
-    else:
-        class_names = train_dataset.get_class_names()
+    class_names = split_class_names(train_dataset, config.dataset)
+
+    tile_csv = getattr(config.dataset, "tile_metrics_csv", None)
+    csv_path = Path(tile_csv) if tile_csv else None
+    drop_easy_empty = bool(getattr(config.dataset, "drop_easy_empty_tiles", False))
+    if drop_easy_empty:
+        if csv_path is None:
+            raise ValueError("dataset.drop_easy_empty_tiles requires dataset.tile_metrics_csv")
+        if not csv_path.is_file():
+            raise FileNotFoundError(f"dataset.tile_metrics_csv not found: {csv_path}")
+        n_before_drop = len(train_dataset)
+        train_dataset, n_dropped_easy_empty = _drop_easy_empty_tiles(train_dataset, csv_path)
+        if rank == 0:
+            print(
+                f"Drop easy-empty tiles: {csv_path.name}, dropped {n_dropped_easy_empty} / "
+                f"{n_before_drop} vacuous tiles (tp=fp=fn=0); {len(train_dataset)} train tiles remain"
+            )
 
     shuffle_seed = getattr(config.dataset, "max_samples_shuffle_seed", None)
     # Optionally limit to first N samples (e.g. for overfit sanity check)
@@ -1338,9 +1347,7 @@ def main():
         print(f"Class mapping: {class_map}\n")
     
     weighted_train_sampler: Optional[WeightedRandomSampler] = None
-    tile_csv = getattr(config.dataset, "tile_metrics_csv", None)
-    if tile_csv:
-        csv_path = Path(tile_csv)
+    if csv_path is not None:
         if not csv_path.is_file():
             raise FileNotFoundError(f"dataset.tile_metrics_csv not found: {csv_path}")
         metric_col = getattr(config.dataset, "hard_tile_metric_column", "f1")
@@ -1575,6 +1582,9 @@ def main():
     flip_h = getattr(prep, "enable_flip_horizontal", True) if prep is not None else True
     flip_v = getattr(prep, "enable_flip_vertical", True) if prep is not None else True
     flip_d = getattr(prep, "enable_flip_diagonal", False) if prep is not None else False
+    rotate_on = getattr(prep, "enable_random_rotate", False) if prep is not None else False
+    rotate_prob = getattr(prep, "random_rotate_prob", 0.5) if prep is not None else 0.5
+    rotate_range = getattr(prep, "random_rotate_angle_range", 180.0) if prep is not None else 180.0
 
     if config.enable_albumentation:
         train_collate_fn = create_collate_fn(
@@ -1587,9 +1597,13 @@ def main():
             enable_flip_horizontal=flip_h,
             enable_flip_vertical=flip_v,
             enable_flip_diagonal=flip_d,
+            enable_random_rotate=rotate_on,
+            random_rotate_prob=rotate_prob,
+            random_rotate_angle_range=rotate_range,
             normalize_mean=norm_mean,
             normalize_std=norm_std,
             difficult_strategy=getattr(config.dataset, "difficult_strategy", "drop"),
+            lookalike_labels=getattr(config.dataset, "lookalike_labels", None),
         )
         if rank == 0:
             print("  - Training: with Albumentations augmentation")
@@ -1604,9 +1618,13 @@ def main():
             enable_flip_horizontal=flip_h,
             enable_flip_vertical=flip_v,
             enable_flip_diagonal=flip_d,
+            enable_random_rotate=rotate_on,
+            random_rotate_prob=rotate_prob,
+            random_rotate_angle_range=rotate_range,
             normalize_mean=norm_mean,
             normalize_std=norm_std,
             difficult_strategy=getattr(config.dataset, "difficult_strategy", "drop"),
+            lookalike_labels=getattr(config.dataset, "lookalike_labels", None),
         )
         if rank == 0:
             flip_parts = []
@@ -1617,7 +1635,12 @@ def main():
             if flip_d:
                 flip_parts.append("diagonal")
             flip_msg = ", ".join(flip_parts) if flip_parts else "none"
-            print(f"  - Training: no Albumentations augmentation (flips: {flip_msg})")
+            rotate_msg = (
+                f"rotate p={rotate_prob:g} ±{rotate_range:g}°" if rotate_on else "rotate off"
+            )
+            print(
+                f"  - Training: no Albumentations augmentation (flips: {flip_msg}; {rotate_msg})"
+            )
 
     val_collate_fn = create_collate_fn(
         config.class_map,
@@ -1629,9 +1652,11 @@ def main():
         enable_flip_horizontal=False,
         enable_flip_vertical=False,
         enable_flip_diagonal=False,
+        enable_random_rotate=False,
         normalize_mean=norm_mean,
         normalize_std=norm_std,
         difficult_strategy=getattr(config.dataset, "difficult_strategy", "drop"),
+        lookalike_labels=getattr(config.dataset, "lookalike_labels", None),
         random_crop=False,
     )
     if rank == 0:
@@ -1971,16 +1996,20 @@ def main():
     else:
         # Default: MultiStepLR or StepLR
         if isinstance(lr_milestones, list) and len(lr_milestones) > 0:
-            base_lr_scheduler = optim.lr_scheduler.MultiStepLR(
-                optimizer,
-                milestones=[int(m) for m in lr_milestones],
-                gamma=config.training.lr_scheduler_gamma,
+            base_lr_scheduler, milestone_gammas = create_multistep_lr_scheduler(
+                optimizer, config.training
             )
         else:
+            step_gamma = config.training.lr_scheduler_gamma
+            if isinstance(step_gamma, (list, tuple)):
+                raise ValueError(
+                    "training.lr_scheduler_gamma as a list requires "
+                    "training.lr_scheduler_milestones (one factor per milestone)."
+                )
             base_lr_scheduler = optim.lr_scheduler.StepLR(
                 optimizer,
                 step_size=config.training.lr_scheduler_step_epochs,
-                gamma=config.training.lr_scheduler_gamma,
+                gamma=float(step_gamma),
             )
         if config.training.lr_warmup_steps > 0:
             lr_scheduler = WarmupScheduler(
@@ -1994,10 +2023,16 @@ def main():
                 else:
                     print(f"  Warmup: 0 → {config.training.learning_rate} over {config.training.lr_warmup_steps} steps")
                 if isinstance(lr_milestones, list) and len(lr_milestones) > 0:
-                    print(
-                        "  After warmup: MultiStepLR at epochs "
-                        f"{[int(m) for m in lr_milestones]}, gamma={config.training.lr_scheduler_gamma}"
-                    )
+                    if milestone_gammas is not None:
+                        print(
+                            "  After warmup: MultiStepLR at epochs "
+                            f"{[int(m) for m in lr_milestones]}, gammas={milestone_gammas}"
+                        )
+                    else:
+                        print(
+                            "  After warmup: MultiStepLR at epochs "
+                            f"{[int(m) for m in lr_milestones]}, gamma={config.training.lr_scheduler_gamma}"
+                        )
                 else:
                     print(
                         f"  After warmup: StepLR every {config.training.lr_scheduler_step_epochs} epochs, "

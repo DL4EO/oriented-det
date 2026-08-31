@@ -172,9 +172,10 @@ Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **b
 
 | File | Purpose |
 |------|---------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** — 12 epochs, lr 0.005, MultiStep @ 8/11, ProbIoU main + Smooth L1 aux 0.1, angle weight 1.0. Hub: `rotated_faster_rcnn_dota_le90_1x`. |
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** — 12 epochs, lr 0.005, MultiStep @ 8/11, ProbIoU main + Smooth L1 aux 0.1 (`roi_box_reg_aux_*`), angle weight 1.0. Hub: `rotated_faster_rcnn_dota_le90_1x`. |
 | [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Hub: `rotated_faster_rcnn_dota_le90_3x`. |
-| [`dota_le90_3x_probiou_main_angle_ft.json`](./dota_le90_3x_probiou_main_angle_ft.json) | **Angle fine-tune** — 12 epochs from `best_mAP_0.88.pth`; frozen backbone+RPN, lr 5e-4, angle weight 2.0, Smooth L1 aux **0.3** (stronger encoded angle signal for near-square GT). |
+| [`hrsc2016_le90_1x.json`](./hrsc2016_le90_1x.json) | **1× HRSC2016** — native XML, single-class ship, `keep_ratio` + pad-32, H+V+diagonal flips (rotate **off**), same ProbIoU main + Smooth L1 aux as DOTA; model/eval-val NMS **0.1**, production NMS **0.3**, `max_detections_per_image` **2000**. |
+| [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | **3× HRSC2016** — inherits 1×; 36 epochs, milestones [24, 33], `lr_scheduler_gamma` 0.1, random rotate p=0.5 **±20°**. Hub: `rotated_faster_rcnn_hrsc2016_le90_3x`. |
 
 ### First run (1× baseline)
 
@@ -186,21 +187,25 @@ python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_1x.json
 
 ```bash
 python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
+odet train --config configs/rotated_faster_rcnn/hrsc2016_le90_1x.json
+odet train --config configs/rotated_faster_rcnn/hrsc2016_le90_3x.json
 ```
 
-If training is unstable, try `roi_box_reg_smooth_l1_aux_weight` in `{0.05, 0.2}` or `roi_box_reg_norm: sampled_all`.
+If training is unstable, try `roi_box_reg_aux_weight` in `{0.05, 0.2}` (with `roi_box_reg_aux_loss_type: smooth_l1`) or `roi_box_reg_norm: sampled_all`.
 
 ### Angle fine-tune (optional polish from a 3× checkpoint)
 
 Low-risk polish for orientation alignment: RoI head only (backbone and RPN frozen), higher angle SmoothL1 weight, stronger encoded-regression aux (**0.3**). ProbIoU main loss has **zero angle gradient when w≈h** (Gaussian surrogate is rotation-invariant for squares), so aux must carry angle supervision for baseball-diamond–like classes. Update `checkpoint.load_from_checkpoint` if your source run differs.
 
 ```bash
-python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x_probiou_main_angle_ft.json
+python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
 ```
+
+Start from a 3× checkpoint (`checkpoint.load_from_checkpoint`). Set `training.freeze_backbone_epochs` high enough to keep the backbone frozen, `roi_box_reg_angle_weight: 2.0`, and `roi_box_reg_aux_weight: 0.3` (`roi_box_reg_aux_loss_type: smooth_l1`). There is no separate checked-in angle-finetune recipe.
 
 If val mAP drops more than ~0.5 pt, stop early and keep the source checkpoint. To also adapt proposals, set `training.freeze_rpn_epochs` to `0`.
 
-If training is unstable on a full 1×/3× run, try `roi_box_reg_smooth_l1_aux_weight` in `{0.05, 0.2}` or `roi_box_reg_norm: sampled_all`.
+If training is unstable on a full 1×/3× run, try `roi_box_reg_aux_weight` in `{0.05, 0.2}` or `roi_box_reg_norm: sampled_all`.
 
 ## Results and models
 
@@ -213,3 +218,11 @@ DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 
 | ResNet50 (1024,1024,200) | 75.58 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log) | `hf://rotated_faster_rcnn_dota_le90_3x_ce` |
 
 Eval reports: [`docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/model_analysis.md), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/model_analysis.md), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x_ce/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x_ce/model_analysis.md).
+
+HRSC2016 (trainval / test, 453 images). mAP = **`make eval-val`** mAP50.
+
+| Backbone | mAP (eval-val) | Angle | lr schd | Aug | Config | Final config | Final log | Download |
+| :----------------------: | :---: | :---: | :-----: | :-: | :----: | :----------: | :-------: | :----: |
+| ResNet50 (keep-ratio 800) | 88.77 | le90 | 3× | H+V+D+RR±20° | [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.json) | [`rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_hrsc2016_le90_3x-a755ae37.log) | `hf://rotated_faster_rcnn_hrsc2016_le90_3x` |
+
+Eval report: [`docs/eval-reports/rotated_faster_rcnn_hrsc2016_le90_3x/`](../../docs/eval-reports/rotated_faster_rcnn_hrsc2016_le90_3x/model_analysis.md).

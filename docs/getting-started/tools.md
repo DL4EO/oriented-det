@@ -21,6 +21,7 @@ After `uv pip install -e .`, use the **`odet`** CLI (`odet --help`). Script impl
 | `viewer` | Gradio app for browsing predictions |
 | `playground-csv` | Build Airbus Playground split CSV |
 | `playground-to-dota` | Export Playground annotations to DOTA layout |
+| `hrsc-to-dota` | Export HRSC2016 XML/BMP to DOTA PNG + labels |
 | `export-onnx` | ONNX export (`export.scripts.export_onnx`) |
 | `export-tf` | ONNX + Keras detect bundle (`export.scripts.export_tf`; needs `[export]`) |
 | `export-detect` | Keras bundle from existing ONNX (`export.scripts.build_faster_rcnn_savedmodel`) |
@@ -70,7 +71,7 @@ See the [Training Guide](../user-guide/training.md#nested-config-inheritance) fo
 
 ### Inference
 
-For config + checkpoint inference on one or more images, prefer **`odet image-demo`** or **`tools/image_demo.py`** (reads experiment JSON, sliding window when needed). Library API: `oriented_det.runtime.inference.run_inference_auto`.
+For config + checkpoint inference on one or more images, prefer **`odet image-demo`** or **`tools/image_demo.py`** (reads experiment JSON; sliding window for DOTA `fixed`/`crop` when needed; **pad** is whole-image). Library API: `oriented_det.runtime.inference.run_inference_auto`.
 
 The optional module CLI `python -m oriented_det.runtime.inference` supports legacy `--model-type oriented_rcnn|rotated_retinanet` only; production workflows use JSON configs and `odet image-demo`.
 
@@ -106,21 +107,15 @@ visualize_tiles(
 ### Data Augmentation
 
 ```python
-from oriented_det.data import HorizontalFlip, Rotate, Compose
+from oriented_det.data import apply_random_train_flips, apply_random_train_rotate
 from oriented_det.geometry import RBox
 
-# Create augmentation pipeline
-aug = Compose([
-    HorizontalFlip(p=0.5),
-    Rotate(degrees=90, p=0.3),
-])
-
-# Apply to image and boxes
-augmented_image, augmented_boxes = aug(
-    image,
-    rboxes=[RBox(100, 200, 50, 30, 0.5)],
-    image_width=512,
-    image_height=512
+rboxes = [RBox(100, 200, 50, 30, 0.5)]
+image, rboxes = apply_random_train_flips(
+    image, rboxes, image_width=512, image_height=512,
+)
+image, rboxes = apply_random_train_rotate(
+    image, rboxes, image_width=512, image_height=512,
 )
 ```
 

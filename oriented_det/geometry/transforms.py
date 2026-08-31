@@ -109,16 +109,15 @@ def flip_vertical(rbox: RBox, image_height: float) -> RBox:
 
 
 def flip_diagonal(rbox: RBox, image_width: float, image_height: float) -> RBox:
-    """Flip RBox for MMRotate ``diagonal`` direction (le90: center mirror, angle → π − θ).
+    """Flip RBox for MMRotate ``diagonal`` direction (le90: center mirror, angle unchanged).
 
     Image uses both horizontal and vertical flips (opencv/mmcv ``flipCode=-1``).
-    Box centers mirror across the image center; width/height are unchanged before
-    ``normalize_le90`` may swap them.
+    MMRotate ``RRandomFlip.bbox_flip`` for ``direction='diagonal'`` mirrors ``(cx, cy)``
+    and returns early without changing θ (unlike H/V, which use ``norm_angle(π − θ)``).
     """
     new_cx = image_width - rbox.cx
     new_cy = image_height - rbox.cy
-    new_angle = math.pi - rbox.angle
-    return RBox(new_cx, new_cy, rbox.width, rbox.height, new_angle)
+    return RBox(new_cx, new_cy, rbox.width, rbox.height, rbox.angle)
 
 
 def rotate_90(rbox: RBox, image_width: float, image_height: float, k: int = 1) -> RBox:

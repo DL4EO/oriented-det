@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover
 from ..geometry import RBox
 from ..ops import nms
 from ..ops.kfiou import mean_auxiliary_box_reg_loss
-from .oriented_roi import _normalize_main_reg_loss_type
+from .oriented_roi import _normalize_main_reg_loss_type, _split_box_reg_aux
 from ..ops.rotated_ops import rotated_nms
 from .oriented_rpn import (
     generate_oriented_anchors,
@@ -178,11 +178,10 @@ def _compute_retinanet_reg_loss_from_positives(
     *,
     main_loss_type: str,
     box_reg_loss_type: str,
-    box_reg_iou_weight: float,
-    box_reg_iou_loss_type: str,
+    box_reg_aux_weight: float,
+    box_reg_aux_loss_type: Optional[str],
     box_reg_kfiou_fun: Optional[str],
     box_reg_probiou_mode: Optional[str],
-    encoded_aux_weight: float,
     target_means: Optional[Tuple[float, float, float, float, float]],
     target_stds: Optional[Tuple[float, float, float, float, float]],
     norm_factor: Optional[float],
@@ -190,6 +189,9 @@ def _compute_retinanet_reg_loss_from_positives(
 ) -> torch.Tensor:
     """Regression loss on a positive anchor set (already matched to GT)."""
     main_lt = _normalize_main_reg_loss_type(main_loss_type)
+    decoded_aux_w, decoded_aux_type, encoded_aux_w = _split_box_reg_aux(
+        main_lt, box_reg_aux_weight, box_reg_aux_loss_type
+    )
     encoded_loss = _retinanet_encoded_reg_loss_sum(
         bbox_pred,
         regression_targets,
@@ -197,7 +199,7 @@ def _compute_retinanet_reg_loss_from_positives(
     )
     if main_lt == "smooth_l1":
         reg_loss = encoded_loss
-        if box_reg_iou_weight > 0.0:
+        if decoded_aux_w > 0.0:
             decoded_boxes = decode_oriented_boxes(
                 anchors,
                 bbox_pred,
@@ -210,11 +212,11 @@ def _compute_retinanet_reg_loss_from_positives(
             loss_iou = mean_auxiliary_box_reg_loss(
                 decoded_boxes,
                 matched_gt,
-                loss_type=box_reg_iou_loss_type,
+                loss_type=decoded_aux_type,
                 kfiou_fun=box_reg_kfiou_fun,
                 probiou_mode=box_reg_probiou_mode,
             )
-            reg_loss = reg_loss + (box_reg_iou_weight * loss_iou)
+            reg_loss = reg_loss + (decoded_aux_w * loss_iou)
         return reg_loss
 
     decoded_boxes = decode_oriented_boxes(
@@ -233,8 +235,8 @@ def _compute_retinanet_reg_loss_from_positives(
         kfiou_fun=box_reg_kfiou_fun,
         probiou_mode=box_reg_probiou_mode,
     )
-    if encoded_aux_weight > 0.0:
-        reg_loss = reg_loss + (encoded_aux_weight * encoded_loss)
+    if encoded_aux_w > 0.0:
+        reg_loss = reg_loss + (encoded_aux_w * encoded_loss)
     return reg_loss
 
 
@@ -247,6 +249,7 @@ def compute_oriented_retinanet_loss(
     image_sizes: List[Tuple[int, int]],
     num_classes: int,
     gt_boxes_ignore: Optional[List[torch.Tensor]] = None,
+    gt_boxes_lookalike: Optional[List[torch.Tensor]] = None,
     positive_iou_threshold: float = 0.5,
     negative_iou_threshold: float = 0.4,
     focal_alpha: float = 0.25,
@@ -257,14 +260,13 @@ def compute_oriented_retinanet_loss(
     target_norm_factor: Optional[float] = None,
     norm_factor: Optional[float] = None,
     edge_swap: bool = False,
-    box_reg_iou_weight: float = 0.0,
-    box_reg_iou_loss_type: str = "riou",
+    box_reg_aux_weight: float = 0.0,
+    box_reg_aux_loss_type: Optional[str] = None,
     box_reg_kfiou_fun: Optional[str] = None,
     box_reg_probiou_mode: Optional[str] = None,
     use_hbb_for_matching: bool = False,
     box_reg_loss_type: str = "smooth_l1",
     main_loss_type: str = "smooth_l1",
-    encoded_aux_weight: float = 0.0,
     reg_sample_size_per_image: Optional[int] = None,
 ) -> Dict[str, torch.Tensor]:
     """Compute Rotated RetinaNet losses for oriented object detection.
@@ -290,15 +292,16 @@ def compute_oriented_retinanet_loss(
         target_norm_factor: Optional angle scale for loss (when norm_factor used in encode; default None)
         norm_factor: Optional angle scaling for encode (MMRotate Rotated RetinaNet uses None)
         edge_swap: Whether to use edge_swap in bbox encode/decode (MMRotate uses True)
-        box_reg_iou_weight: Extra weight for auxiliary loss on decoded positive anchors.
-        box_reg_iou_loss_type: ``\"riou\"``, ``\"kfiou\"``, or ``\"probiou\"`` (see :func:`~oriented_det.ops.kfiou.mean_auxiliary_box_reg_loss`).
+        box_reg_aux_weight: Auxiliary box-reg weight (decoded when main is encoded; encoded
+            L1/Smooth L1 when main is decoded). 0 disables aux.
+        box_reg_aux_loss_type: ``probiou`` / ``riou`` / ``kfiou`` when main is encoded;
+            ``smooth_l1`` when main is decoded. Encoded flavor still follows ``box_reg_loss_type``.
         box_reg_kfiou_fun: Optional KFIoU overlap transform when using ``kfiou``.
         box_reg_probiou_mode: ``l1`` (default) or ``l2`` when using ``probiou``.
         use_hbb_for_matching: If True, use HBB (axis-aligned) IoU for anchor-GT matching (recommended for single angle).
         box_reg_loss_type: ``smooth_l1`` (default) or ``l1`` (MMRotate RetinaNet).
         main_loss_type: ``smooth_l1`` (encoded primary via ``box_reg_loss_type``) or decoded
             ``probiou`` / ``riou`` / ``kfiou``.
-        encoded_aux_weight: Weight for encoded L1/Smooth L1 aux when ``main_loss_type`` is decoded.
         reg_sample_size_per_image: Cap positive anchors **per image across all FPN levels** for
             decoded ProbIoU/rIoU/KFIoU (and encoded aux when main is decoded). ``None`` or ``<= 0``
             uses all positives. Classification still uses every matched anchor.
@@ -316,7 +319,10 @@ def compute_oriented_retinanet_loss(
     num_images = len(gt_boxes)
     num_levels = len(classification_logits)
     main_lt = _normalize_main_reg_loss_type(main_loss_type)
-    need_decoded = main_lt != "smooth_l1" or box_reg_iou_weight > 0.0
+    decoded_aux_w, decoded_aux_type, _encoded_aux_w = _split_box_reg_aux(
+        main_lt, box_reg_aux_weight, box_reg_aux_loss_type
+    )
+    need_decoded = main_lt != "smooth_l1" or decoded_aux_w > 0.0
     use_global_reg_sampling = (
         need_decoded
         and reg_sample_size_per_image is not None
@@ -324,7 +330,7 @@ def compute_oriented_retinanet_loss(
     )
     defer_reg_to_global = use_global_reg_sampling and main_lt != "smooth_l1"
     defer_decoded_only = (
-        use_global_reg_sampling and main_lt == "smooth_l1" and box_reg_iou_weight > 0.0
+        use_global_reg_sampling and main_lt == "smooth_l1" and decoded_aux_w > 0.0
     )
     
     # Process each level independently (memory-efficient approach).
@@ -416,13 +422,35 @@ def compute_oriented_retinanet_loss(
             regression_targets = torch.zeros((len(img_anchors), 5), dtype=torch.float32, device=device)
             
             if len(img_gt_boxes) == 0:
-                # No ground truth - all anchors are background (class 0)
-                labels = torch.zeros(len(img_anchors), dtype=torch.int64, device=device)
+                # No semantic GT — still apply ignore/lookalike via matcher.
+                img_gt_ignore = None
+                if gt_boxes_ignore is not None and img_idx < len(gt_boxes_ignore):
+                    img_gt_ignore = gt_boxes_ignore[img_idx].to(device).detach()
+                img_gt_lookalike = None
+                if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+                    img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
+                labels, matched_indices = match_oriented_anchors_to_gt(
+                    img_anchors,
+                    img_gt_boxes,
+                    positive_iou_threshold,
+                    negative_iou_threshold,
+                    device,
+                    use_hbb_for_matching=use_hbb_for_matching,
+                    min_pos_iou=0.0,
+                    match_low_quality=True,
+                    gt_boxes_ignore=img_gt_ignore,
+                    ignore_iou_threshold=positive_iou_threshold,
+                    gt_boxes_lookalike=img_gt_lookalike,
+                    lookalike_iou_threshold=positive_iou_threshold,
+                )
             else:
                 # Match anchors to GT (oriented IoU or HBB IoU when use_hbb_for_matching)
                 img_gt_ignore = None
                 if gt_boxes_ignore is not None and img_idx < len(gt_boxes_ignore):
                     img_gt_ignore = gt_boxes_ignore[img_idx].to(device).detach()
+                img_gt_lookalike = None
+                if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+                    img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
                 labels, matched_indices = match_oriented_anchors_to_gt(
                     img_anchors,
                     img_gt_boxes,
@@ -436,6 +464,8 @@ def compute_oriented_retinanet_loss(
                     match_low_quality=True,
                     gt_boxes_ignore=img_gt_ignore,
                     ignore_iou_threshold=positive_iou_threshold,
+                    gt_boxes_lookalike=img_gt_lookalike,
+                    lookalike_iou_threshold=positive_iou_threshold,
                 )
                 
                 # Class labels: 0 = background, 1..K = foreground (1-indexed GT labels);
@@ -516,11 +546,10 @@ def compute_oriented_retinanet_loss(
                 img_gt_boxes[matched_indices[positive_mask]],
                 main_loss_type=main_loss_type,
                 box_reg_loss_type=box_reg_loss_type,
-                box_reg_iou_weight=box_reg_iou_weight,
-                box_reg_iou_loss_type=box_reg_iou_loss_type,
+                box_reg_aux_weight=box_reg_aux_weight,
+                box_reg_aux_loss_type=box_reg_aux_loss_type,
                 box_reg_kfiou_fun=box_reg_kfiou_fun,
                 box_reg_probiou_mode=box_reg_probiou_mode,
-                encoded_aux_weight=encoded_aux_weight,
                 target_means=target_means,
                 target_stds=target_stds,
                 norm_factor=norm_factor,
@@ -551,11 +580,10 @@ def compute_oriented_retinanet_loss(
                 matched_gt[sample_idx],
                 main_loss_type=main_loss_type,
                 box_reg_loss_type=box_reg_loss_type,
-                box_reg_iou_weight=box_reg_iou_weight,
-                box_reg_iou_loss_type=box_reg_iou_loss_type,
+                box_reg_aux_weight=box_reg_aux_weight,
+                box_reg_aux_loss_type=box_reg_aux_loss_type,
                 box_reg_kfiou_fun=box_reg_kfiou_fun,
                 box_reg_probiou_mode=box_reg_probiou_mode,
-                encoded_aux_weight=encoded_aux_weight,
                 target_means=target_means,
                 target_stds=target_stds,
                 norm_factor=norm_factor,
@@ -589,11 +617,11 @@ def compute_oriented_retinanet_loss(
             loss_iou = mean_auxiliary_box_reg_loss(
                 decoded_boxes,
                 matched_gt[sample_idx],
-                loss_type=box_reg_iou_loss_type,
+                loss_type=decoded_aux_type,
                 kfiou_fun=box_reg_kfiou_fun,
                 probiou_mode=box_reg_probiou_mode,
             )
-            reg_loss_decoded_addends.append(box_reg_iou_weight * loss_iou * box_reg_weight)
+            reg_loss_decoded_addends.append(decoded_aux_w * loss_iou * box_reg_weight)
 
     # Aggregate losses across all levels.
     # Classification: total focal sum / num positive anchors (MMDet avg_factor, clamped to >= 1).
@@ -694,14 +722,14 @@ class RotatedRetinaNet(nn.Module):
         max_detections_per_image: int = 100,
         final_nms_iou_schedule_epochs: Optional[List[int]] = None,
         final_nms_iou_schedule_values: Optional[List[float]] = None,
-        roi_box_reg_iou_schedule_epochs: Optional[List[int]] = None,
-        roi_box_reg_iou_schedule_values: Optional[List[float]] = None,
+        roi_box_reg_aux_schedule_epochs: Optional[List[int]] = None,
+        roi_box_reg_aux_schedule_values: Optional[List[float]] = None,
         target_means: Optional[Tuple[float, float, float, float, float]] = None,
         target_stds: Optional[Tuple[float, float, float, float, float]] = None,
         norm_factor: Optional[float] = None,
         edge_swap: bool = True,
-        box_reg_iou_weight: float = 0.0,
-        box_reg_iou_loss_type: str = "riou",
+        box_reg_aux_weight: float = 0.0,
+        box_reg_aux_loss_type: Optional[str] = None,
         box_reg_kfiou_fun: Optional[str] = None,
         box_reg_probiou_mode: Optional[str] = None,
         use_hbb_for_matching: bool = False,
@@ -714,7 +742,6 @@ class RotatedRetinaNet(nn.Module):
         stacked_convs: int = 1,
         box_reg_loss_type: str = "smooth_l1",
         box_reg_main_loss_type: str = "smooth_l1",
-        box_reg_encoded_aux_weight: float = 0.0,
         reg_sample_size_per_image: Optional[int] = None,
     ) -> None:
         from .backbones.utils import require_torch
@@ -726,7 +753,7 @@ class RotatedRetinaNet(nn.Module):
         # Bbox coder options (MMRotate: norm_factor=None, edge_swap=True for Rotated RetinaNet)
         self.norm_factor = norm_factor
         self.edge_swap = edge_swap
-        self.box_reg_iou_loss_type = box_reg_iou_loss_type
+        self.box_reg_aux_loss_type = box_reg_aux_loss_type
         self.box_reg_kfiou_fun = box_reg_kfiou_fun
         self.box_reg_probiou_mode = box_reg_probiou_mode
         self.use_hbb_for_matching = use_hbb_for_matching
@@ -735,7 +762,6 @@ class RotatedRetinaNet(nn.Module):
         self.scales_per_octave = scales_per_octave
         self.box_reg_loss_type = box_reg_loss_type
         self.box_reg_main_loss_type = box_reg_main_loss_type
-        self.box_reg_encoded_aux_weight = float(box_reg_encoded_aux_weight)
         self.reg_sample_size_per_image = reg_sample_size_per_image
         
         # Setup backbone (P6/P7 convs on C5 when fpn_extra_level, MMRotate on_input)
@@ -787,11 +813,11 @@ class RotatedRetinaNet(nn.Module):
         self.max_detections_per_image = max_detections_per_image
         self._final_nms_iou_schedule_epochs = final_nms_iou_schedule_epochs
         self._final_nms_iou_schedule_values = final_nms_iou_schedule_values
-        self._roi_box_reg_iou_schedule_epochs = roi_box_reg_iou_schedule_epochs
-        self._roi_box_reg_iou_schedule_values = roi_box_reg_iou_schedule_values
-        self._box_reg_iou_weight_default = float(box_reg_iou_weight)
-        self.box_reg_iou_weight = float(box_reg_iou_weight)
-        self.set_box_reg_iou_weight_for_epoch(0)
+        self._roi_box_reg_aux_schedule_epochs = roi_box_reg_aux_schedule_epochs
+        self._roi_box_reg_aux_schedule_values = roi_box_reg_aux_schedule_values
+        self._box_reg_aux_weight_default = float(box_reg_aux_weight)
+        self.box_reg_aux_weight = float(box_reg_aux_weight)
+        self.set_box_reg_aux_weight_for_epoch(0)
         
         # Target normalization (MMRotate compatibility)
         self.target_means = target_means
@@ -813,15 +839,15 @@ class RotatedRetinaNet(nn.Module):
         idx = min(idx, len(self._final_nms_iou_schedule_values) - 1)
         self.final_nms_iou_threshold = self._final_nms_iou_schedule_values[idx]
 
-    def set_box_reg_iou_weight_for_epoch(self, epoch: int) -> None:
-        """Update anchor auxiliary IoU loss weight from schedule (0-based epoch index)."""
+    def set_box_reg_aux_weight_for_epoch(self, epoch: int) -> None:
+        """Update auxiliary box-reg weight from schedule (0-based epoch index)."""
         from oriented_det.train.piecewise_schedule import resolve_piecewise_schedule
 
-        self.box_reg_iou_weight = resolve_piecewise_schedule(
+        self.box_reg_aux_weight = resolve_piecewise_schedule(
             epoch,
-            self._roi_box_reg_iou_schedule_epochs,
-            self._roi_box_reg_iou_schedule_values,
-            self._box_reg_iou_weight_default,
+            self._roi_box_reg_aux_schedule_epochs,
+            self._roi_box_reg_aux_schedule_values,
+            self._box_reg_aux_weight_default,
         )
 
     def forward(
@@ -862,7 +888,9 @@ class RotatedRetinaNet(nn.Module):
             include_pool_level=not self.fpn_extra_level,
         )
         feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feature_list]
-        fpn_strides_live = derive_fpn_strides_from_grid(image_sizes[0], feature_map_sizes)
+        fpn_strides_live = derive_fpn_strides_from_grid(
+            image_sizes[0], feature_map_sizes, configured=self.fpn_strides
+        )
         warn_if_fpn_strides_mismatch(self.fpn_strides, fpn_strides_live)
         
         # Get device from first feature map (needed for device reference)
@@ -876,7 +904,7 @@ class RotatedRetinaNet(nn.Module):
                 raise ValueError("Targets required during training.")
             
             # Prepare targets using shared utility
-            gt_boxes_list, gt_labels_list, gt_boxes_ignore_list = prepare_targets(targets, device=images_tensor.device)
+            gt_boxes_list, gt_labels_list, gt_boxes_ignore_list, gt_boxes_lookalike_list = prepare_targets(targets, device=images_tensor.device)
             
             # Generate anchors for all FPN levels
             img_h, img_w = image_sizes[0]
@@ -900,6 +928,7 @@ class RotatedRetinaNet(nn.Module):
                 gt_labels=gt_labels_list,
                 image_sizes=image_sizes,
                 gt_boxes_ignore=gt_boxes_ignore_list,
+                gt_boxes_lookalike=gt_boxes_lookalike_list,
                 num_classes=self.num_classes,
                 positive_iou_threshold=self.positive_iou_threshold,
                 negative_iou_threshold=self.negative_iou_threshold,
@@ -911,14 +940,13 @@ class RotatedRetinaNet(nn.Module):
                 target_norm_factor=self.norm_factor,
                 norm_factor=self.norm_factor,
                 edge_swap=self.edge_swap,
-                box_reg_iou_weight=self.box_reg_iou_weight,
-                box_reg_iou_loss_type=self.box_reg_iou_loss_type,
+                box_reg_aux_weight=self.box_reg_aux_weight,
+                box_reg_aux_loss_type=self.box_reg_aux_loss_type,
                 box_reg_kfiou_fun=self.box_reg_kfiou_fun,
                 box_reg_probiou_mode=self.box_reg_probiou_mode,
                 use_hbb_for_matching=self.use_hbb_for_matching,
                 box_reg_loss_type=self.box_reg_loss_type,
                 main_loss_type=self.box_reg_main_loss_type,
-                encoded_aux_weight=self.box_reg_encoded_aux_weight,
                 reg_sample_size_per_image=self.reg_sample_size_per_image,
             )
             

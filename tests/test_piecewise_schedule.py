@@ -39,16 +39,16 @@ def test_rotated_faster_rcnn_iou_weight_schedule():
         backbone_name="resnet18",
         pretrained_backbone=False,
         trainable_layers=3,
-        roi_box_reg_iou_weight=0.1,
-        roi_box_reg_iou_schedule_epochs=[24, 28],
-        roi_box_reg_iou_schedule_values=[0.1, 0.05, 0.0],
+        roi_box_reg_aux_weight=0.1,
+        roi_box_reg_aux_schedule_epochs=[24, 28],
+        roi_box_reg_aux_schedule_values=[0.1, 0.05, 0.0],
     )
-    model.set_roi_box_reg_iou_weight_for_epoch(0)
-    assert model.roi_box_reg_iou_weight == pytest.approx(0.1)
-    model.set_roi_box_reg_iou_weight_for_epoch(24)
-    assert model.roi_box_reg_iou_weight == pytest.approx(0.05)
-    model.set_roi_box_reg_iou_weight_for_epoch(28)
-    assert model.roi_box_reg_iou_weight == pytest.approx(0.0)
+    model.set_roi_box_reg_aux_weight_for_epoch(0)
+    assert model.roi_box_reg_aux_weight == pytest.approx(0.1)
+    model.set_roi_box_reg_aux_weight_for_epoch(24)
+    assert model.roi_box_reg_aux_weight == pytest.approx(0.05)
+    model.set_roi_box_reg_aux_weight_for_epoch(28)
+    assert model.roi_box_reg_aux_weight == pytest.approx(0.0)
 
 
 def test_rotated_faster_rcnn_angle_weight_schedule():

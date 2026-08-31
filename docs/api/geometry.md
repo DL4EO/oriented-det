@@ -114,12 +114,13 @@ qbox = transforms.polygon_to_qbox(polygon)
 ### Transformations
 
 ```python
-from oriented_det.geometry.transforms import flip_horizontal, rotate_rbox
+from math import radians
+from oriented_det.geometry.transforms import flip_horizontal, rotate
 
 # Flip horizontally (mirror across vertical axis)
 flipped = flip_horizontal(rbox, image_width=1024)
 
-# Rotate around center
-rotated = rotate_rbox(rbox, angle=radians(90), origin=(512, 512))
+# Rotate around a point (math / y-up CCW; not PIL image-space)
+rotated = rotate(rbox, radians(90), origin_x=512, origin_y=512)
 ```
 

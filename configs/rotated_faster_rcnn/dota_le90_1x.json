@@ -67,6 +67,7 @@
   "evaluation": {
     "score_threshold": 0.05,
     "iou_threshold": 0.5,
+    "final_nms_iou_threshold": 0.1,
     "compute_map_final": false,
     "compute_map_every_n_epochs": 4,
     "extended_gt_metrics": true
@@ -83,11 +84,11 @@
     "rpn_post_nms_top_n": 2000,
     "rpn_min_size": 0,
     "rpn_nms_threshold": 0.7,
-    "final_nms_iou_threshold": 0.3,
+    "final_nms_iou_threshold": 0.1,
     "roi_box_reg_main_loss_type": "probiou",
     "roi_box_reg_probiou_mode": "l1",
-    "roi_box_reg_iou_weight": 0.0,
-    "roi_box_reg_smooth_l1_aux_weight": 0.1,
+    "roi_box_reg_aux_weight": 0.1,
+    "roi_box_reg_aux_loss_type": "smooth_l1",
     "roi_box_reg_norm": "positives_only",
     "roi_box_reg_angle_weight": 1.0,
     "final_nms_use_cpu": true,

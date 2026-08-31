@@ -65,6 +65,7 @@
   "evaluation": {
     "score_threshold": 0.05,
     "iou_threshold": 0.5,
+    "final_nms_iou_threshold": 0.1,
     "compute_map_final": false,
     "compute_map_every_n_epochs": 4,
     "extended_gt_metrics": true
@@ -83,8 +84,8 @@
     "rpn_nms_threshold": 0.8,
     "final_nms_iou_threshold": 0.1,
     "roi_box_reg_angle_weight": 1.0,
-    "roi_box_reg_iou_weight": 0.1,
-    "roi_box_reg_iou_loss_type": "probiou",
+    "roi_box_reg_aux_weight": 0.1,
+    "roi_box_reg_aux_loss_type": "probiou",
     "roi_box_reg_probiou_mode": "l1",
     "final_nms_use_cpu": true,
     "nms_class_agnostic": false,

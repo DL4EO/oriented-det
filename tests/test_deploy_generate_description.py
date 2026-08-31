@@ -43,6 +43,10 @@ def test_detect_tier_airbus():
     assert detect_tier(["A", "B"], "airbus_playground") == "airbus_playground"
 
 
+def test_detect_tier_hrsc2016():
+    assert detect_tier(["ship"], "hrsc2016") == "hrsc2016"
+
+
 def test_detect_tier_generic():
     assert detect_tier(["x"], "custom") == "generic"
 

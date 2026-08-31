@@ -187,19 +187,18 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         roi_box_reg_angle_weight: float = 1.0,
         roi_box_reg_angle_schedule_epochs: Optional[List[int]] = None,
         roi_box_reg_angle_schedule_values: Optional[List[float]] = None,
-        roi_box_reg_iou_weight: float = 0.0,
-        roi_box_reg_iou_loss_type: str = "riou",
+        roi_box_reg_aux_weight: float = 0.0,
+        roi_box_reg_aux_loss_type: Optional[str] = None,
         roi_box_reg_kfiou_fun: Optional[str] = None,
         roi_box_reg_probiou_mode: Optional[str] = None,
         roi_box_reg_main_loss_type: str = "smooth_l1",
         roi_box_reg_norm: str = "sampled_all",
-        roi_box_reg_smooth_l1_aux_weight: float = 0.0,
         use_hbb_for_matching: bool = False,
         inference_pre_nms_score_threshold: float = 0.05,
         final_nms_iou_schedule_epochs: Optional[List[int]] = None,
         final_nms_iou_schedule_values: Optional[List[float]] = None,
-        roi_box_reg_iou_schedule_epochs: Optional[List[int]] = None,
-        roi_box_reg_iou_schedule_values: Optional[List[float]] = None,
+        roi_box_reg_aux_schedule_epochs: Optional[List[int]] = None,
+        roi_box_reg_aux_schedule_values: Optional[List[float]] = None,
         nms_class_agnostic: bool = False,
         final_nms_use_cpu: bool = False,
         roi_inference_top_class_only: bool = False,
@@ -257,14 +256,15 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                 horizontal xyxy RoIs (angle 0) this is equivalent to global offsets.
             roi_box_reg_angle_weight: Weight for the angle (5th) component in ROI box regression loss.
                 Use > 1.0 (e.g. 2.0) to improve orientation alignment when predictions stick to anchor angles.
-            roi_box_reg_iou_weight: Weight for auxiliary decoded-box loss when main is Smooth L1.
-            roi_box_reg_iou_loss_type: ``riou`` (default), ``kfiou``, or ``probiou`` for decoded aux/main.
+            roi_box_reg_aux_weight: Auxiliary box-reg weight (decoded when main is Smooth L1;
+                encoded Smooth L1 when main is decoded). 0 disables aux.
+            roi_box_reg_aux_loss_type: ``probiou`` / ``riou`` / ``kfiou`` when main is Smooth L1;
+                ``smooth_l1`` when main is decoded. Required when aux weight > 0.
             roi_box_reg_kfiou_fun: Optional KFIoU overlap mapping when using ``kfiou``.
             roi_box_reg_probiou_mode: ``l1`` (default) or ``l2`` when using ``probiou``.
             roi_box_reg_main_loss_type: Primary ROI reg loss: ``smooth_l1`` (default) or decoded
                 ``probiou`` / ``riou`` / ``kfiou``.
             roi_box_reg_norm: ``sampled_all`` (MMRotate avg_factor) or ``positives_only``.
-            roi_box_reg_smooth_l1_aux_weight: Encoded Smooth L1 aux when main is decoded.
             roi_min_pos_iou: Min IoU for low-quality ROI matches when ``roi_match_low_quality`` is True.
             roi_inference_top_class_only: If True, ROI inference uses argmax fg class per proposal
                 (see ``oriented_det/models/README.md``); if False, multiclass thresholding.
@@ -285,12 +285,11 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         self.roi_norm_factor = roi_norm_factor
         self.roi_edge_swap = roi_edge_swap
         self.roi_proj_xy = roi_proj_xy
-        self.roi_box_reg_iou_loss_type = roi_box_reg_iou_loss_type
+        self.roi_box_reg_aux_loss_type = roi_box_reg_aux_loss_type
         self.roi_box_reg_kfiou_fun = roi_box_reg_kfiou_fun
         self.roi_box_reg_probiou_mode = roi_box_reg_probiou_mode
         self.roi_box_reg_main_loss_type = roi_box_reg_main_loss_type
         self.roi_box_reg_norm = roi_box_reg_norm
-        self.roi_box_reg_smooth_l1_aux_weight = float(roi_box_reg_smooth_l1_aux_weight)
         self.use_hbb_for_matching = use_hbb_for_matching
         self.inference_pre_nms_score_threshold = inference_pre_nms_score_threshold
         self._roi_box_reg_angle_schedule_epochs = roi_box_reg_angle_schedule_epochs
@@ -390,11 +389,11 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         # NMS IoU schedule for final detection NMS (optional; essential for RetinaNet, optional for R-CNN)
         self._final_nms_iou_schedule_epochs = final_nms_iou_schedule_epochs
         self._final_nms_iou_schedule_values = final_nms_iou_schedule_values
-        self._roi_box_reg_iou_schedule_epochs = roi_box_reg_iou_schedule_epochs
-        self._roi_box_reg_iou_schedule_values = roi_box_reg_iou_schedule_values
-        self._roi_box_reg_iou_weight_default = float(roi_box_reg_iou_weight)
-        self.roi_box_reg_iou_weight = float(roi_box_reg_iou_weight)
-        self.set_roi_box_reg_iou_weight_for_epoch(0)
+        self._roi_box_reg_aux_schedule_epochs = roi_box_reg_aux_schedule_epochs
+        self._roi_box_reg_aux_schedule_values = roi_box_reg_aux_schedule_values
+        self._roi_box_reg_aux_weight_default = float(roi_box_reg_aux_weight)
+        self.roi_box_reg_aux_weight = float(roi_box_reg_aux_weight)
+        self.set_roi_box_reg_aux_weight_for_epoch(0)
     
     def set_final_nms_iou_for_epoch(self, epoch: int) -> None:
         """Update final detection NMS IoU threshold from schedule. Lower = more aggressive suppression."""
@@ -410,15 +409,15 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         idx = min(idx, len(self._final_nms_iou_schedule_values) - 1)
         self.final_nms_iou_threshold = self._final_nms_iou_schedule_values[idx]
 
-    def set_roi_box_reg_iou_weight_for_epoch(self, epoch: int) -> None:
+    def set_roi_box_reg_aux_weight_for_epoch(self, epoch: int) -> None:
         """Update ROI auxiliary IoU loss weight from schedule (0-based epoch index)."""
         from oriented_det.train.piecewise_schedule import resolve_piecewise_schedule
 
-        self.roi_box_reg_iou_weight = resolve_piecewise_schedule(
+        self.roi_box_reg_aux_weight = resolve_piecewise_schedule(
             epoch,
-            self._roi_box_reg_iou_schedule_epochs,
-            self._roi_box_reg_iou_schedule_values,
-            self._roi_box_reg_iou_weight_default,
+            self._roi_box_reg_aux_schedule_epochs,
+            self._roi_box_reg_aux_schedule_values,
+            self._roi_box_reg_aux_weight_default,
         )
 
     def set_roi_box_reg_angle_weight_for_epoch(self, epoch: int) -> None:
@@ -500,7 +499,9 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
             include_pool_level=True,
         )
         feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feature_list]
-        fpn_strides_live = derive_fpn_strides_from_grid(image_sizes[0], feature_map_sizes)
+        fpn_strides_live = derive_fpn_strides_from_grid(
+            image_sizes[0], feature_map_sizes, configured=self.fpn_strides
+        )
         warn_if_fpn_strides_mismatch(self.fpn_strides, fpn_strides_live)
         roi_spatial_scales_live = [1.0 / s for s in fpn_strides_live]
         _timing_mark("backbone_fpn")
@@ -513,7 +514,7 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                 raise ValueError("Targets required during training.")
             
             # Prepare targets (preserve oriented boxes)
-            gt_boxes_list, gt_labels_list, gt_boxes_ignore_list = prepare_targets(targets, device=images_tensor.device)
+            gt_boxes_list, gt_labels_list, gt_boxes_ignore_list, gt_boxes_lookalike_list = prepare_targets(targets, device=images_tensor.device)
             _timing_mark("prepare_targets")
             
             # RPN forward
@@ -539,6 +540,7 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                 anchors=anchors,
                 gt_boxes=gt_boxes_list,
                 gt_boxes_ignore=gt_boxes_ignore_list,
+                gt_boxes_lookalike=gt_boxes_lookalike_list,
                 image_sizes=image_sizes,
                 positive_iou_threshold=self.rpn_positive_iou_threshold,
                 negative_iou_threshold=self.rpn_negative_iou_threshold,
@@ -659,7 +661,10 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                         img_gt_boxes = gt_boxes_list[img_idx]
                         img_gt_labels = gt_labels_list[img_idx]
                         
-                        if len(img_gt_boxes) > 0:
+                        if len(img_gt_boxes) > 0 or (
+                            gt_boxes_lookalike_list[img_idx] is not None
+                            and gt_boxes_lookalike_list[img_idx].numel() > 0
+                        ):
                             roi_losses = compute_horizontal_roi_loss(
                                 class_logits=img_class_logits,
                                 box_regression=img_box_regression,
@@ -667,17 +672,17 @@ class RotatedFasterRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                                 gt_boxes=img_gt_boxes,
                                 gt_labels=img_gt_labels,
                                 gt_boxes_ignore=gt_boxes_ignore_list[img_idx],
+                                gt_boxes_lookalike=gt_boxes_lookalike_list[img_idx],
                                 positive_iou_threshold=self.roi_positive_iou_threshold,
                                 negative_iou_threshold=self.roi_negative_iou_threshold,
                                 box_reg_weight=1.0,
                                 box_reg_angle_weight=self.roi_box_reg_angle_weight,
                                 main_loss_type=self.roi_box_reg_main_loss_type,
                                 reg_norm=self.roi_box_reg_norm,
-                                box_reg_iou_weight=self.roi_box_reg_iou_weight,
-                                box_reg_iou_loss_type=self.roi_box_reg_iou_loss_type,
+                                box_reg_aux_weight=self.roi_box_reg_aux_weight,
+                                box_reg_aux_loss_type=self.roi_box_reg_aux_loss_type,
                                 box_reg_kfiou_fun=self.roi_box_reg_kfiou_fun,
                                 box_reg_probiou_mode=self.roi_box_reg_probiou_mode,
-                                smooth_l1_aux_weight=self.roi_box_reg_smooth_l1_aux_weight,
                                 fg_bg_sampling_ratio=self.roi_fg_bg_sampling_ratio,
                                 batch_size_per_image=self.roi_batch_size_per_image,
                                 num_classes=self.num_classes,
@@ -814,8 +819,8 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         roi_box_reg_angle_weight: float = 1.0,
         roi_box_reg_angle_schedule_epochs: Optional[List[int]] = None,
         roi_box_reg_angle_schedule_values: Optional[List[float]] = None,
-        roi_box_reg_iou_weight: float = 0.0,
-        roi_box_reg_iou_loss_type: str = "riou",
+        roi_box_reg_aux_weight: float = 0.0,
+        roi_box_reg_aux_loss_type: Optional[str] = None,
         roi_box_reg_kfiou_fun: Optional[str] = None,
         roi_box_reg_probiou_mode: Optional[str] = None,
         roi_box_reg_norm: str = "sampled_all",
@@ -824,8 +829,8 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         inference_pre_nms_score_threshold: float = 0.05,
         final_nms_iou_schedule_epochs: Optional[List[int]] = None,
         final_nms_iou_schedule_values: Optional[List[float]] = None,
-        roi_box_reg_iou_schedule_epochs: Optional[List[int]] = None,
-        roi_box_reg_iou_schedule_values: Optional[List[float]] = None,
+        roi_box_reg_aux_schedule_epochs: Optional[List[int]] = None,
+        roi_box_reg_aux_schedule_values: Optional[List[float]] = None,
         nms_class_agnostic: bool = False,
         final_nms_use_cpu: bool = False,
         roi_inference_top_class_only: bool = False,
@@ -848,7 +853,7 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         self._roi_box_reg_angle_weight_default = float(roi_box_reg_angle_weight)
         self.roi_box_reg_angle_weight = float(roi_box_reg_angle_weight)
         self.set_roi_box_reg_angle_weight_for_epoch(0)
-        self.roi_box_reg_iou_loss_type = roi_box_reg_iou_loss_type
+        self.roi_box_reg_aux_loss_type = roi_box_reg_aux_loss_type
         self.roi_box_reg_kfiou_fun = roi_box_reg_kfiou_fun
         self.roi_box_reg_probiou_mode = roi_box_reg_probiou_mode
         self.roi_box_reg_norm = roi_box_reg_norm
@@ -919,11 +924,11 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         self._final_nms_iou_schedule_epochs = final_nms_iou_schedule_epochs
         self._final_nms_iou_schedule_values = final_nms_iou_schedule_values
         self.add_gt_as_proposals = add_gt_as_proposals
-        self._roi_box_reg_iou_schedule_epochs = roi_box_reg_iou_schedule_epochs
-        self._roi_box_reg_iou_schedule_values = roi_box_reg_iou_schedule_values
-        self._roi_box_reg_iou_weight_default = float(roi_box_reg_iou_weight)
-        self.roi_box_reg_iou_weight = float(roi_box_reg_iou_weight)
-        self.set_roi_box_reg_iou_weight_for_epoch(0)
+        self._roi_box_reg_aux_schedule_epochs = roi_box_reg_aux_schedule_epochs
+        self._roi_box_reg_aux_schedule_values = roi_box_reg_aux_schedule_values
+        self._roi_box_reg_aux_weight_default = float(roi_box_reg_aux_weight)
+        self.roi_box_reg_aux_weight = float(roi_box_reg_aux_weight)
+        self.set_roi_box_reg_aux_weight_for_epoch(0)
 
     def set_final_nms_iou_for_epoch(self, epoch: int) -> None:
         """Update final detection NMS IoU threshold from schedule. Lower = more aggressive suppression."""
@@ -939,15 +944,15 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         idx = min(idx, len(self._final_nms_iou_schedule_values) - 1)
         self.final_nms_iou_threshold = self._final_nms_iou_schedule_values[idx]
 
-    def set_roi_box_reg_iou_weight_for_epoch(self, epoch: int) -> None:
+    def set_roi_box_reg_aux_weight_for_epoch(self, epoch: int) -> None:
         """Update ROI auxiliary IoU loss weight from schedule (0-based epoch index)."""
         from oriented_det.train.piecewise_schedule import resolve_piecewise_schedule
 
-        self.roi_box_reg_iou_weight = resolve_piecewise_schedule(
+        self.roi_box_reg_aux_weight = resolve_piecewise_schedule(
             epoch,
-            self._roi_box_reg_iou_schedule_epochs,
-            self._roi_box_reg_iou_schedule_values,
-            self._roi_box_reg_iou_weight_default,
+            self._roi_box_reg_aux_schedule_epochs,
+            self._roi_box_reg_aux_schedule_values,
+            self._roi_box_reg_aux_weight_default,
         )
 
     def set_roi_box_reg_angle_weight_for_epoch(self, epoch: int) -> None:
@@ -980,7 +985,9 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
             include_pool_level=True,
         )
         feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feature_list]
-        fpn_strides_live = derive_fpn_strides_from_grid(image_sizes[0], feature_map_sizes)
+        fpn_strides_live = derive_fpn_strides_from_grid(
+            image_sizes[0], feature_map_sizes, configured=self.fpn_strides
+        )
         warn_if_fpn_strides_mismatch(self.fpn_strides, fpn_strides_live)
         roi_spatial_scales_live = [1.0 / s for s in fpn_strides_live]
         
@@ -990,7 +997,7 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
         if self.training:
             if targets is None:
                 raise ValueError("Targets required during training.")
-            gt_boxes_list, gt_labels_list, gt_boxes_ignore_list = prepare_targets(targets, device=images_tensor.device)
+            gt_boxes_list, gt_labels_list, gt_boxes_ignore_list, gt_boxes_lookalike_list = prepare_targets(targets, device=images_tensor.device)
             obj_logits, bbox_reg = self.rpn_head(feature_list)
             img_h, img_w = image_sizes[0]
             anchors = generate_oriented_anchors(
@@ -1007,6 +1014,7 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                 anchors=anchors,
                 gt_boxes=gt_boxes_list,
                 gt_boxes_ignore=gt_boxes_ignore_list,
+                gt_boxes_lookalike=gt_boxes_lookalike_list,
                 image_sizes=image_sizes,
                 positive_iou_threshold=self.rpn_positive_iou_threshold,
                 negative_iou_threshold=self.rpn_negative_iou_threshold,
@@ -1071,12 +1079,16 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                 img_reg = box_reg[mask]
                 img_gt = gt_boxes_list[img_idx]
                 img_labels = gt_labels_list[img_idx]
-                if len(img_gt) > 0:
+                if len(img_gt) > 0 or (
+                    gt_boxes_lookalike_list[img_idx] is not None
+                    and gt_boxes_lookalike_list[img_idx].numel() > 0
+                ):
                     roi_losses_list.append(
                         compute_oriented_roi_loss(
                             class_logits=img_logits, box_regression=img_reg, proposals=img_proposals,
                             gt_boxes=img_gt, gt_labels=img_labels,
                             gt_boxes_ignore=gt_boxes_ignore_list[img_idx],
+                            gt_boxes_lookalike=gt_boxes_lookalike_list[img_idx],
                             positive_iou_threshold=self.roi_positive_iou_threshold,
                             negative_iou_threshold=self.roi_negative_iou_threshold,
                             box_reg_weight=1.0,
@@ -1089,8 +1101,8 @@ class OrientedRCNN(ClassWeightsMixin, GroupedCeMixin, nn.Module):
                             target_means=self.target_means, target_stds=self.target_stds,
                             norm_factor=self.roi_norm_factor, edge_swap=self.roi_edge_swap,
                             proj_xy=self.roi_proj_xy,
-                            box_reg_iou_weight=self.roi_box_reg_iou_weight,
-                            box_reg_iou_loss_type=self.roi_box_reg_iou_loss_type,
+                            box_reg_aux_weight=self.roi_box_reg_aux_weight,
+                            box_reg_aux_loss_type=self.roi_box_reg_aux_loss_type,
                             box_reg_kfiou_fun=self.roi_box_reg_kfiou_fun,
                             box_reg_probiou_mode=self.roi_box_reg_probiou_mode,
                             use_hbb_for_matching=self.roi_use_hbb_for_matching,

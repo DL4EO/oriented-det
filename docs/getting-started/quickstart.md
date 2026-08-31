@@ -116,7 +116,7 @@ For a single demo image:
 odet image-demo demo/ runs/<model>/<timestamp>/config.json runs/.../checkpoints/checkpoint_best.pth --out-dir demo/out
 ```
 
-Large images are handled with **sliding-window** inference inside `save_predictions.py` when they exceed the model canvas (`production.overlap_pixels` in config).
+Large images use **sliding-window** inference when `resize_mode` is `fixed` or `crop` (`production.overlap_pixels`). **`pad`** (HRSC2016) always uses one whole-image forward, matching training.
 
 ## Next Steps
 

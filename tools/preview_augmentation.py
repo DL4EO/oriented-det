@@ -2,7 +2,7 @@
 """Preview training augmentations from an experiment config.
 
 Loads the train split, applies the same collate path as training (Albumentations,
-random flips, resize), and writes comparison grids so you can sanity-check
+random flips, random rotate, resize), and writes comparison grids so you can sanity-check
 augmentation.json / recipe overrides before a long run.
 
 Usage (from odet-planes/, with oriented-det venv active):
@@ -25,7 +25,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from dataclasses import fields
 
-from oriented_det.data import AirbusPlaygroundCSVDataset, build_dota_split_dataset, dota_dataset_class_names
+from oriented_det.data import build_split_dataset, split_class_names
 from oriented_det.geometry.rbox import RBox
 from oriented_det.runtime.collate import create_collate_fn, create_train_augmentation
 from oriented_det.train.config import (
@@ -104,10 +104,7 @@ def resolve_class_map(
     if config.class_map:
         names = list(config.class_names or [])
         return dict(config.class_map), names
-    if hasattr(dataset, "get_class_names"):
-        names = dataset.get_class_names()
-    else:
-        names = dota_dataset_class_names(dataset)
+    names = split_class_names(dataset, config.dataset)
     class_map = {name: i + 1 for i, name in enumerate(names)}
     return class_map, names
 
@@ -125,49 +122,12 @@ def resolve_config_path(config_arg: str) -> Path:
 
 def build_dataset_from_config(config: TrainingExperimentConfig, split: str):
     """Build train or val dataset (same logic as tools/train.py / dataset_stats.py)."""
-    dataset_format = getattr(config.dataset, "format", "dota").lower()
-    filter_empty = getattr(config.dataset, "filter_empty_gt", False) if split == "train" else False
+    from oriented_det.data import dataset_format_name
 
-    if dataset_format == "airbus_playground":
-        if config.dataset.annotations_file is None or config.dataset.split_file is None:
-            raise ValueError(
-                "Airbus Playground requires dataset.annotations_file and dataset.split_file."
-            )
-        return AirbusPlaygroundCSVDataset(
-            data_root=config.dataset.data_root,
-            split=split,
-            annotations_file=config.dataset.annotations_file,
-            split_file=config.dataset.split_file,
-            val_split_id=config.dataset.val_split_id,
-            train_includes_val=(
-                getattr(config.dataset, "train_includes_val", False) if split == "train" else False
-            ),
-            difficult_strategy=config.dataset.difficult_strategy,
-            allowed_classes=config.dataset.allowed_classes,
-            ignore_labels=config.dataset.ignore_labels,
-            map_labels=config.dataset.map_labels,
-            filter_empty_gt=filter_empty,
-        )
-
-    if not config.dataset.has_dota_tiles_config():
-        raise ValueError(
-            "DOTA format requires dataset.train_tiles_dir(s) and dataset.val_tiles_dir(s)."
-        )
-    tile_roots = (
-        config.dataset.get_train_tile_roots()
-        if split == "train"
-        else config.dataset.get_val_tile_roots()
-    )
-    same_folder = getattr(config.dataset, "same_folder", False)
-    return build_dota_split_dataset(
-        tile_roots,
-        split=split,
-        same_folder=same_folder,
-        difficult_strategy=config.dataset.difficult_strategy,
-        allowed_classes=config.dataset.allowed_classes,
-        ignore_labels=config.dataset.ignore_labels,
-        filter_empty_gt=filter_empty,
-    )
+    filter_empty = getattr(config.dataset, "filter_empty_gt", False)
+    if split != "train" and dataset_format_name(config.dataset) == "airbus_playground":
+        filter_empty = False
+    return build_split_dataset(config.dataset, split, filter_empty_gt=filter_empty)
 
 
 def get_resize_and_flips(config: TrainingExperimentConfig) -> tuple[str, tuple[int, int], bool, bool, bool, int]:
@@ -214,11 +174,14 @@ def make_collate_fn(
     enable_flip_horizontal: bool,
     enable_flip_vertical: bool,
     enable_flip_diagonal: bool,
+    enable_random_rotate: bool = False,
 ):
     resize_mode, resize_to, _, _, _, pad_div = get_resize_and_flips(config)
     prep = getattr(config, "preprocessing", None)
     norm_mean = getattr(prep, "normalize_mean", None) if prep is not None else None
     norm_std = getattr(prep, "normalize_std", None) if prep is not None else None
+    rotate_prob = getattr(prep, "random_rotate_prob", 0.5) if prep is not None else 0.5
+    rotate_range = getattr(prep, "random_rotate_angle_range", 180.0) if prep is not None else 180.0
     return create_collate_fn(
         config.class_map,
         augmentation=augmentation,
@@ -229,9 +192,13 @@ def make_collate_fn(
         enable_flip_horizontal=enable_flip_horizontal,
         enable_flip_vertical=enable_flip_vertical,
         enable_flip_diagonal=enable_flip_diagonal,
+        enable_random_rotate=enable_random_rotate,
+        random_rotate_prob=rotate_prob,
+        random_rotate_angle_range=rotate_range,
         normalize_mean=norm_mean,
         normalize_std=norm_std,
         difficult_strategy=getattr(config.dataset, "difficult_strategy", "drop"),
+        lookalike_labels=getattr(config.dataset, "lookalike_labels", None),
     )
 
 
@@ -323,6 +290,12 @@ def print_augmentation_summary(config: TrainingExperimentConfig, resize_to: tupl
     print(f"  resize_mode: {resize_mode}")
     print(f"  resize_to (H×W): {resize_to[0]}×{resize_to[1]}")
     print(f"  flips: horizontal={flip_h}, vertical={flip_v}, diagonal={flip_d}")
+    rotate_on = getattr(prep, "enable_random_rotate", False) if prep is not None else False
+    rotate_prob = getattr(prep, "random_rotate_prob", 0.5) if prep is not None else 0.5
+    rotate_range = getattr(prep, "random_rotate_angle_range", 180.0) if prep is not None else 180.0
+    print(
+        f"  random_rotate: {rotate_on} (p={rotate_prob:g}, ±{rotate_range:g}°)"
+    )
     if config.enable_albumentation:
         aug = config.augmentation
         print("  augmentation:")
@@ -416,12 +389,15 @@ def main() -> None:
         enable_flip_vertical=False,
         enable_flip_diagonal=False,
     )
+    prep = getattr(config, "preprocessing", None)
+    rotate_on = getattr(prep, "enable_random_rotate", False) if prep is not None else False
     collate_train = make_collate_fn(
         config,
         augmentation=train_aug,
         enable_flip_horizontal=flip_h,
         enable_flip_vertical=flip_v,
         enable_flip_diagonal=flip_d,
+        enable_random_rotate=rotate_on,
     )
     collate_albu_only = None
     if args.include_albumentations_only and train_aug is not None:

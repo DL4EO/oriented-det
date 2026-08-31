@@ -7,6 +7,6 @@ Rotated-detection primitives: polygons, quadrilateral boxes (`QBox`), rotated bo
 | `poly.py` | `Polygon` — DOTA eight-point format, area, transforms |
 | `qbox.py` | `QBox` — four corner points |
 | `rbox.py` | `RBox` — center, size, angle; le90 normalization |
-| `transforms.py` | Conversions polygon ↔ qbox ↔ rbox ↔ axis-aligned box |
+| `transforms.py` | Conversions polygon ↔ qbox ↔ rbox ↔ axis-aligned box; rbox-only `flip_*` / `rotate` (math / y-up). Image+box flips and rotates are in `oriented_det.data.flips` / `rotates`. |
 
 User guide: [Geometry](../../docs/user-guide/geometry.md). API: [Geometry API](../../docs/api/geometry.md).

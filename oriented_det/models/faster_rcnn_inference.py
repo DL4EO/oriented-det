@@ -306,7 +306,9 @@ def faster_rcnn_inference(
     feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feature_list]
     from .utils import derive_fpn_strides_from_grid
 
-    fpn_strides_live = derive_fpn_strides_from_grid(image_sizes[0], feature_map_sizes)
+    fpn_strides_live = derive_fpn_strides_from_grid(
+        image_sizes[0], feature_map_sizes, configured=model.fpn_strides
+    )
     roi_spatial_scales_live = [1.0 / s for s in fpn_strides_live]
 
     objectness_logits, bbox_regression = model.rpn_head(feature_list)

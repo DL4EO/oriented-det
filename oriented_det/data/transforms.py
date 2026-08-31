@@ -1,14 +1,13 @@
-"""Efficient data augmentation transforms for oriented detection."""
+"""Non-geometric (photometric) augmentations for oriented detection.
+
+Geometric flips and rotates live in ``flips.py`` and ``rotates.py``. Albumentations
+does not support oriented boxes, so this module only wraps color / noise / blur.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
 import math
 import random
-
-from ..geometry import Polygon, RBox, transforms
 
 try:
     from PIL import Image
@@ -17,171 +16,8 @@ except ImportError:
 
 try:
     import albumentations as A
-    from albumentations.pytorch import ToTensorV2
 except ImportError:
     A = None  # type: ignore
-    ToTensorV2 = None  # type: ignore
-
-
-@dataclass
-class OrientedTransform:
-    """Base class for transforms that modify both image and oriented boxes."""
-
-    def apply_to_image(self, image) -> any:  # type: ignore
-        """Apply transform to image. Returns transformed image."""
-        raise NotImplementedError
-    
-    def apply_to_rbox(self, rbox: RBox, image_width: int, image_height: int) -> RBox:
-        """Apply transform to RBox. Returns transformed RBox."""
-        raise NotImplementedError
-
-
-class HorizontalFlip(OrientedTransform):
-    """Horizontal flip transform for oriented boxes."""
-
-    def __init__(self, p: float = 0.5):
-        if not 0 <= p <= 1:
-            raise ValueError("Probability p must be in [0, 1]")
-        self.p = p
-    
-    def apply_to_image(self, image) -> any:  # type: ignore
-        if Image is None:
-            raise RuntimeError("PIL/Pillow is required for image transforms.")
-        from PIL import Image as PILImage
-        if isinstance(image, PILImage.Image):
-            return image.transpose(PILImage.FLIP_LEFT_RIGHT)
-        return image
-    
-    def apply_to_rbox(self, rbox: RBox, image_width: int, image_height: int) -> RBox:
-        """Flip RBox horizontally."""
-        return transforms.flip_horizontal(rbox, float(image_width))
-    
-    def __call__(self, image, rboxes: Sequence[RBox], image_width: int, image_height: int) -> Tuple[any, List[RBox]]:  # type: ignore
-        if random.random() < self.p:
-            flipped_image = self.apply_to_image(image)
-            flipped_boxes = [self.apply_to_rbox(box, image_width, image_height) for box in rboxes]
-            return flipped_image, flipped_boxes
-        return image, list(rboxes)
-
-
-class VerticalFlip(OrientedTransform):
-    """Vertical flip transform for oriented boxes."""
-
-    def __init__(self, p: float = 0.5):
-        if not 0 <= p <= 1:
-            raise ValueError("Probability p must be in [0, 1]")
-        self.p = p
-    
-    def apply_to_image(self, image) -> any:  # type: ignore
-        if Image is None:
-            raise RuntimeError("PIL/Pillow is required for image transforms.")
-        from PIL import Image as PILImage
-        if isinstance(image, PILImage.Image):
-            return image.transpose(PILImage.FLIP_TOP_BOTTOM)
-        return image
-    
-    def apply_to_rbox(self, rbox: RBox, image_width: int, image_height: int) -> RBox:
-        """Flip RBox vertically."""
-        return transforms.flip_vertical(rbox, float(image_height))
-    
-    def __call__(self, image, rboxes: Sequence[RBox], image_width: int, image_height: int) -> Tuple[any, List[RBox]]:  # type: ignore
-        if random.random() < self.p:
-            flipped_image = self.apply_to_image(image)
-            flipped_boxes = [self.apply_to_rbox(box, image_width, image_height) for box in rboxes]
-            return flipped_image, flipped_boxes
-        return image, list(rboxes)
-
-
-class DiagonalFlip(OrientedTransform):
-    """Diagonal flip (MMRotate ``direction='diagonal'``, le90 angle π − θ)."""
-
-    def __init__(self, p: float = 0.5):
-        if not 0 <= p <= 1:
-            raise ValueError("Probability p must be in [0, 1]")
-        self.p = p
-
-    def apply_to_image(self, image) -> any:  # type: ignore
-        if Image is None:
-            raise RuntimeError("PIL/Pillow is required for image transforms.")
-        from PIL import Image as PILImage
-        if isinstance(image, PILImage.Image):
-            return image.transpose(PILImage.FLIP_LEFT_RIGHT).transpose(PILImage.FLIP_TOP_BOTTOM)
-        return image
-
-    def apply_to_rbox(self, rbox: RBox, image_width: int, image_height: int) -> RBox:
-        return transforms.flip_diagonal(rbox, float(image_width), float(image_height))
-
-    def __call__(self, image, rboxes: Sequence[RBox], image_width: int, image_height: int) -> Tuple[any, List[RBox]]:  # type: ignore
-        if random.random() < self.p:
-            flipped_image = self.apply_to_image(image)
-            flipped_boxes = [self.apply_to_rbox(box, image_width, image_height) for box in rboxes]
-            return flipped_image, flipped_boxes
-        return image, list(rboxes)
-
-
-class Rotate(OrientedTransform):
-    """Rotation transform for oriented boxes."""
-
-    def __init__(self, degrees: float, p: float = 1.0):
-        if not 0 <= p <= 1:
-            raise ValueError("Probability p must be in [0, 1]")
-        self.degrees = degrees
-        self.radians = math.radians(degrees)
-        self.p = p
-    
-    def apply_to_image(self, image) -> any:  # type: ignore
-        if Image is None:
-            raise RuntimeError("PIL/Pillow is required for image transforms.")
-        from PIL import Image as PILImage
-        if isinstance(image, PILImage.Image):
-            return image.rotate(self.degrees, expand=False)
-        return image
-    
-    def apply_to_rbox(self, rbox: RBox, image_width: int, image_height: int) -> RBox:
-        """Rotate RBox around image center."""
-        center_x, center_y = image_width / 2.0, image_height / 2.0
-        
-        # Translate to origin
-        dx = rbox.cx - center_x
-        dy = rbox.cy - center_y
-        
-        # Rotate
-        cos_a = math.cos(self.radians)
-        sin_a = math.sin(self.radians)
-        new_dx = dx * cos_a - dy * sin_a
-        new_dy = dx * sin_a + dy * cos_a
-        
-        # Translate back
-        new_cx = center_x + new_dx
-        new_cy = center_y + new_dy
-        new_angle = rbox.angle + self.radians
-        
-        return RBox(new_cx, new_cy, rbox.width, rbox.height, new_angle)
-    
-    def __call__(self, image, rboxes: Sequence[RBox], image_width: int, image_height: int) -> Tuple[any, List[RBox]]:  # type: ignore
-        if random.random() < self.p:
-            rotated_image = self.apply_to_image(image)
-            rotated_boxes = [self.apply_to_rbox(box, image_width, image_height) for box in rboxes]
-            return rotated_image, rotated_boxes
-        return image, list(rboxes)
-
-
-class Compose:
-    """Compose multiple transforms."""
-
-    def __init__(self, transforms: Sequence[OrientedTransform]):
-        self.transforms = transforms
-    
-    def __call__(self, image, rboxes: Sequence[RBox], image_width: int, image_height: int) -> Tuple[any, List[RBox]]:  # type: ignore
-        current_image = image
-        current_boxes = list(rboxes)
-        
-        for transform in self.transforms:
-            current_image, current_boxes = transform(
-                current_image, current_boxes, image_width, image_height
-            )
-        
-        return current_image, current_boxes
 
 
 class AlbumentationsTransform:
@@ -366,12 +202,6 @@ def create_albumentations_augmentation(
 
 
 __all__ = [
-    "OrientedTransform",
-    "HorizontalFlip",
-    "VerticalFlip",
-    "DiagonalFlip",
-    "Rotate",
-    "Compose",
     "AlbumentationsTransform",
     "create_albumentations_augmentation",
 ]

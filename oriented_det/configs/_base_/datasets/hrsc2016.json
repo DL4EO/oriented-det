@@ -1,0 +1,15 @@
+{
+  "dataset": {
+    "format": "hrsc2016",
+    "data_root": "/path/to/data/HRSC2016",
+    "train_split": "trainval",
+    "val_split": "test",
+    "overlap": 0,
+    "difficult_strategy": "keep",
+    "filter_empty_gt": true
+  },
+  "preprocessing": {
+    "resize_mode": "pad",
+    "target_size": [800, 800]
+  }
+}

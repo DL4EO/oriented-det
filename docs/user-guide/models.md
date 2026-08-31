@@ -17,7 +17,7 @@ All detectors:
 - Preserve angle information through training and inference
 - Use oriented IoU for matching and oriented NMS for post-processing
 
-Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_3x` (79.40% eval-val mAP50), `rotated_faster_rcnn_dota_le90_3x` (83.42%), `rotated_fcos_dota_le90_3x_riou` (81.58%), `oriented_rcnn_dota_le90_1x`, `rotated_faster_rcnn_dota_le90_1x` (77.57%), `rotated_retinanet_dota_le90_1x`, and `rotated_retinanet_dota_le90_3x`. See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
+Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_3x` (79.40% eval-val mAP50), `rotated_faster_rcnn_dota_le90_3x` (83.42%), `rotated_fcos_dota_le90_3x` (81.58%), `oriented_rcnn_dota_le90_1x`, `rotated_faster_rcnn_dota_le90_1x` (77.57%), `rotated_retinanet_dota_le90_1x`, and `rotated_retinanet_dota_le90_3x`. HRSC2016: `oriented_rcnn_hrsc2016_le90_3x` (90.41%), `rotated_faster_rcnn_hrsc2016_le90_3x` (88.77%), `rotated_fcos_hrsc2016_le90_3x` (88.34%). See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
 
 ## Training vs inference paths (two-stage models)
 

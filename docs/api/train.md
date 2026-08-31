@@ -113,7 +113,7 @@ When using **`tools/train.py`** with a JSON config, set `training.lr_scheduler_t
 - **`multistep` / `step`** (default) — MultiStepLR or StepLR; optional warmup via `lr_warmup_steps`.
 - **`reduce_on_plateau`** — ReduceLROnPlateau; configure `lr_scheduler_plateau_metric`, `lr_scheduler_plateau_factor`, `lr_scheduler_plateau_patience`.
 - **`one_cycle`** — OneCycleLR (stepped every optimizer step); configure `lr_scheduler_one_cycle_*` options.
-- **`cosine_annealing` / `cosine`** — PyTorch CosineAnnealingLR (`lr_scheduler_cosine_t_max` / `lr_scheduler_cosine_epochs`).
+- **`cosine_annealing` / `cosine`** — PyTorch CosineAnnealingLR (`lr_scheduler_cosine_epochs`; legacy `lr_scheduler_cosine_t_max` remaps).
 - **`cosine_annealing_with_tail` / `cosine_with_tail`** — Cosine then fixed `lr_scheduler_cosine_tail_lr`.
 
 See the [Training user guide — Learning rate scheduling](../user-guide/training.md#learning-rate-scheduling) for config examples and usage.

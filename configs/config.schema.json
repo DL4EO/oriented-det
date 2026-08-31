@@ -83,8 +83,8 @@
         "format": {
           "type": "string",
           "default": "dota",
-          "enum": ["dota", "airbus_playground"],
-          "description": "Dataset format. 'dota' expects train_tiles_dir/val_tiles_dir or train_tiles_dirs/val_tiles_dirs. 'airbus_playground' expects annotations_file/split_file."
+          "enum": ["dota", "airbus_playground", "hrsc2016"],
+          "description": "Dataset format. 'dota' expects train_tiles_dir/val_tiles_dir or train_tiles_dirs/val_tiles_dirs. 'airbus_playground' expects annotations_file/split_file. 'hrsc2016' expects official FullDataSet + ImageSets under data_root."
         },
         "data_root": { "type": "string", "description": "Root directory of the dataset." },
         "train_tiles_dir": { "type": "string", "description": "Directory containing training tiles (DOTA format)." },
@@ -126,13 +126,18 @@
           "items": { "type": "string" },
           "description": "Labels to ignore for Airbus Playground CSV generation/loading."
         },
+        "lookalike_labels": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "Optional extra aliases treated as hard-negative lookalikes. The reserved name 'lookalike' is always included. Map confusers via map_labels, e.g. {\"Confuser\":\"lookalike\"}."
+        },
         "map_labels": {
           "type": ["object", "null"],
           "additionalProperties": { "type": "string" },
-          "description": "Label remapping dictionary for Airbus Playground, e.g. {\"taxi\":\"car\"}."
+          "description": "Label remapping dictionary for Airbus Playground, e.g. {\"taxi\":\"car\", \"Confuser\":\"lookalike\"}."
         },
         "difficult_strategy": { "type": "string", "enum": ["drop", "ignore", "keep"], "default": "drop", "description": "How to handle DOTA 'difficult' annotations: drop at read-time, ignore (MMRotate-style don't-care), or keep as normal GT." },
-        "filter_empty_gt": { "type": "boolean", "default": false, "description": "DOTA only: drop tiles with no ground truth after difficult_strategy, allowed_classes, and ignore_labels (MMRotate DOTADataset filter_empty_gt parity). Default false keeps empty tiles." },
+        "filter_empty_gt": { "type": "boolean", "default": false, "description": "Drop samples with no ground truth after difficult_strategy, allowed_classes, and ignore_labels (MMRotate filter_empty_gt parity). Used for DOTA tiles and HRSC2016 images. Default false keeps empty samples." },
         "max_train_samples": { "type": ["integer", "null"], "description": "Cap training samples (for overfitting sanity checks)." },
         "max_val_samples": { "type": ["integer", "null"], "description": "Cap validation samples." },
         "max_samples_shuffle_seed": {
@@ -144,13 +149,26 @@
           "items": { "type": "string" },
           "description": "Restrict to these class names. null = all classes."
         },
+        "train_split": {
+          "type": ["string", "null"],
+          "description": "HRSC2016 ImageSets name for the training-loop train role. null → trainval (MMRotate). Ignored for DOTA / Airbus."
+        },
+        "val_split": {
+          "type": ["string", "null"],
+          "description": "HRSC2016 ImageSets name for the training-loop val role. null → test (MMRotate). Ignored for DOTA / Airbus."
+        },
         "tile_metrics_csv": {
           "type": ["string", "null"],
           "description": "CSV from save_predictions tile metrics; join on image_id (stem) to oversample hard tiles."
         },
         "hard_tile_metric_column": { "type": "string", "default": "f1", "description": "Column in tile_metrics_csv compared to hard_tile_threshold." },
         "hard_tile_threshold": { "type": "number", "default": 0.8, "description": "Tiles with metric strictly below this are oversampled." },
-        "hard_tile_oversample_factor": { "type": "number", "default": 2.0, "description": "Sampling weight multiplier for hard tiles (WeightedRandomSampler)." }
+        "hard_tile_oversample_factor": { "type": "number", "default": 2.0, "description": "Sampling weight multiplier for hard tiles (WeightedRandomSampler)." },
+        "drop_easy_empty_tiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "When tile_metrics_csv is set, drop train tiles with tp=fp=fn=0 (no GT and no preds) before capping and hard-tile oversampling. Empty tiles with false positives stay. Requires dataset.tile_metrics_csv. Keep filter_empty_gt false so hard empty tiles remain in the loader."
+        }
       }
     },
     "data_loader": {
@@ -197,15 +215,14 @@
         "roi_box_reg_angle_weight": { "type": "number", "default": 1.0, "description": "Weight for angle (5th) in ROI box regression; use > 1 for better alignment." },
         "roi_box_reg_angle_schedule_epochs": { "type": ["array", "null"], "items": { "type": "integer" }, "description": "0-based epoch boundaries for roi_box_reg_angle_weight schedule." },
         "roi_box_reg_angle_schedule_values": { "type": ["array", "null"], "items": { "type": "number" }, "description": "Angle SmoothL1 weight per schedule segment. When null, roi_box_reg_angle_weight is constant." },
-        "roi_box_reg_iou_weight": { "type": "number", "default": 0.0, "description": "Extra auxiliary loss weight on decoded ROI positives; see roi_box_reg_iou_loss_type." },
-        "roi_box_reg_iou_schedule_epochs": { "type": ["array", "null"], "items": { "type": "integer" }, "description": "0-based epoch boundaries for roi_box_reg_iou_weight schedule (same convention as final_nms_iou_schedule_epochs)." },
-        "roi_box_reg_iou_schedule_values": { "type": ["array", "null"], "items": { "type": "number" }, "description": "Auxiliary IoU loss weight per schedule segment. When null, roi_box_reg_iou_weight is constant." },
-        "roi_box_reg_iou_loss_type": { "type": "string", "default": "riou", "enum": ["riou", "kfiou", "probiou"], "description": "Auxiliary regression term when roi_box_reg_iou_weight > 0: riou = mean(1 - rIoU); kfiou = Kalman-filter IoU surrogate; probiou = mean ProbIoU (Gaussian BBox)." },
-        "roi_box_reg_kfiou_fun": { "type": ["string", "null"], "default": null, "enum": [null, "none", "ln", "exp"], "description": "When roi_box_reg_iou_loss_type is kfiou, overlap mapping: none → 1-KFIoU; ln → -log(KFIoU); exp → exp(1-KFIoU)-1." },
-        "roi_box_reg_probiou_mode": { "type": ["string", "null"], "default": null, "enum": [null, "l1", "l2"], "description": "When roi_box_reg_iou_loss_type is probiou, metric variant: l1 (bounded, default) or l2 (-log(1-l1^2))." },
+        "roi_box_reg_aux_weight": { "type": "number", "default": 0.0, "description": "Auxiliary ROI box-reg weight. When main is smooth_l1, this scales a decoded term (roi_box_reg_aux_loss_type: probiou/riou/kfiou). When main is decoded, this scales encoded Smooth L1 (aux_loss_type: smooth_l1). 0 disables aux." },
+        "roi_box_reg_aux_schedule_epochs": { "type": ["array", "null"], "items": { "type": "integer" }, "description": "0-based epoch boundaries for roi_box_reg_aux_weight schedule (same convention as final_nms_iou_schedule_epochs)." },
+        "roi_box_reg_aux_schedule_values": { "type": ["array", "null"], "items": { "type": "number" }, "description": "Auxiliary box-reg weight per schedule segment. When null, roi_box_reg_aux_weight is constant." },
+        "roi_box_reg_aux_loss_type": { "type": ["string", "null"], "default": null, "enum": [null, "smooth_l1", "riou", "kfiou", "probiou"], "description": "Auxiliary ROI box-reg term when roi_box_reg_aux_weight > 0. Must differ from roi_box_reg_main_loss_type: decoded (riou/kfiou/probiou) when main is smooth_l1; smooth_l1 when main is decoded." },
+        "roi_box_reg_kfiou_fun": { "type": ["string", "null"], "default": null, "enum": [null, "none", "ln", "exp"], "description": "When a decoded ROI term is kfiou (main or aux), overlap mapping: none → 1-KFIoU; ln → -log(KFIoU); exp → exp(1-KFIoU)-1." },
+        "roi_box_reg_probiou_mode": { "type": ["string", "null"], "default": null, "enum": [null, "l1", "l2"], "description": "When a decoded ROI term is probiou (main or aux), metric variant: l1 (bounded, default) or l2 (-log(1-l1^2))." },
         "roi_box_reg_main_loss_type": { "type": "string", "default": "smooth_l1", "enum": ["smooth_l1", "probiou", "riou", "kfiou"], "description": "Primary ROI box regression loss for Rotated Faster R-CNN: smooth_l1 (encoded) or decoded probiou/riou/kfiou." },
         "roi_box_reg_norm": { "type": "string", "default": "sampled_all", "enum": ["sampled_all", "positives_only"], "description": "Smooth L1 normalization: sampled_all (MMDet avg_factor over pos+neg) or positives_only (mean over positives)." },
-        "roi_box_reg_smooth_l1_aux_weight": { "type": "number", "default": 0.0, "description": "Encoded Smooth L1 aux weight when roi_box_reg_main_loss_type is probiou/riou/kfiou." },
         "retinanet_stacked_convs": { "type": "integer", "default": 1, "minimum": 1, "description": "RetinaNet shared 3x3 conv depth before cls/reg (MMRotate: 4)." },
         "box_reg_loss_type": { "type": "string", "default": "smooth_l1", "enum": ["smooth_l1", "l1", "kfiou", "riou"], "description": "RetinaNet: smooth_l1/l1 encoded. FCOS: l1 (encoded), kfiou (decoded KFIoU), or riou (decoded differentiable polygon IoU, 1-IoU). FCOS riou is not sampling pairwise_rotated_iou." },
         "box_reg_weight": { "type": "number", "default": 1.0, "description": "RetinaNet/FCOS box regression loss weight." },
@@ -264,16 +281,15 @@
         "lr_scheduler_type": { "type": ["string", "null"], "description": "LR scheduler: null/'multistep'/'step' = MultiStepLR/StepLR; 'reduce_on_plateau' = ReduceLROnPlateau; 'one_cycle' = OneCycleLR (per-step); 'cosine_annealing'/'cosine' = PyTorch CosineAnnealingLR (SGDR restarts if num_epochs > T_max); 'cosine_annealing_with_tail'/'cosine_with_tail' = cosine phase then fixed tail_lr." },
         "lr_scheduler_step_epochs": { "type": "integer", "default": 8, "description": "StepLR period in epochs (LR *= gamma every N epochs). Distinct from lr_warmup_steps (optimizer steps)." },
         "lr_scheduler_milestones": { "type": ["array", "null"], "items": { "type": "integer" }, "description": "Optional MultiStepLR milestones in epochs. When set, takes precedence over lr_scheduler_step_epochs." },
-        "lr_scheduler_gamma": { "type": "number", "default": 0.1, "description": "Factor by which LR is multiplied at each step (StepLR) or milestone (MultiStepLR)." },
+        "lr_scheduler_gamma": { "default": 0.1, "description": "LR drop factor. Number: same factor at every StepLR/MultiStepLR drop. Array: one factor per lr_scheduler_milestones entry.", "oneOf": [ { "type": "number" }, { "type": "array", "items": { "type": "number" } } ] },
         "lr_scheduler_plateau_metric": { "type": "string", "default": "total_loss", "description": "Metric to monitor for ReduceLROnPlateau. Use 'mAP' (mode=max) or 'total_loss' (mode=min)." },
         "lr_scheduler_plateau_factor": { "type": "number", "default": 0.1, "description": "ReduceLROnPlateau: factor by which LR is multiplied when metric plateaus." },
         "lr_scheduler_plateau_patience": { "type": "integer", "default": 5, "description": "ReduceLROnPlateau: number of epochs with no improvement before reducing LR." },
         "lr_scheduler_one_cycle_pct_start": { "type": "number", "default": 0.3, "description": "OneCycleLR: fraction of total steps for warmup phase." },
         "lr_scheduler_one_cycle_div_factor": { "type": "number", "default": 25.0, "description": "OneCycleLR: initial_lr = max_lr / div_factor." },
         "lr_scheduler_one_cycle_final_div_factor": { "type": "number", "default": 1e4, "description": "OneCycleLR: min_lr = initial_lr / final_div_factor." },
-        "lr_scheduler_cosine_t_max": { "type": ["integer", "null"], "description": "Legacy alias for cosine phase length when lr_scheduler_cosine_epochs is unset. Same meaning as CosineAnnealingLR T_max." },
         "lr_scheduler_cosine_eta_min": { "type": "number", "default": 1e-6, "description": "Minimum LR at end of cosine phase (eta_min)." },
-        "lr_scheduler_cosine_epochs": { "type": ["integer", "null"], "minimum": 1, "description": "Cosine decay length in epochs. With tail settings, num_epochs should equal cosine_epochs + tail_epochs." },
+        "lr_scheduler_cosine_epochs": { "type": ["integer", "null"], "minimum": 1, "description": "Cosine decay length in epochs (PyTorch CosineAnnealingLR T_max). With tail settings, num_epochs should equal cosine_epochs + tail_epochs. Legacy lr_scheduler_cosine_t_max remaps onto this key." },
         "lr_scheduler_cosine_tail_epochs": { "type": "integer", "default": 0, "minimum": 0, "description": "Fixed-LR tail after cosine (0 = auto from num_epochs - cosine_epochs when longer)." },
         "lr_scheduler_cosine_tail_lr": { "type": ["number", "null"], "description": "Constant LR during tail; default lr_scheduler_cosine_eta_min." },
         "lr_warmup_steps": { "type": "integer", "default": 500, "description": "Number of optimizer steps for linear warmup." },
@@ -315,7 +331,8 @@
           "additionalProperties": { "type": "number" },
           "description": "Optional class_name -> min score; classes not listed use score_threshold."
         },
-        "iou_threshold": { "type": "number", "default": 0.5, "description": "IoU threshold for mAP." },
+        "iou_threshold": { "type": "number", "default": 0.5, "description": "IoU threshold for mAP matching (not detection NMS)." },
+        "final_nms_iou_threshold": { "type": ["number", "null"], "default": null, "description": "Final detection NMS IoU for odet preds / make eval-val only (MMRotate test parity). When set, overrides production.final_nms_iou_threshold on that path. Deploy / image_demo keep production.*; training val uses model.final_nms_iou_threshold." },
         "compute_map_every_n_epochs": { "type": "integer", "default": 0, "description": "If >0, compute mAP every N epochs during training (current model). 0 = only at end; final mAP uses best checkpoint when compute_map_final is true." },
         "compute_map_final": { "type": "boolean", "default": true, "description": "If true, after training load the best checkpoint and compute mAP once (final mAP uses best model)." },
         "extended_gt_metrics": { "type": "boolean", "default": false, "description": "If true, compute expensive GT–IoU histogram diagnostics (mean/median/buckets, 0% best-IoU GT count, wrong-class counts) and class-agnostic duplicate rate on post-threshold detections (same schedule as mAP during training)." },
@@ -325,7 +342,7 @@
     },
     "production": {
       "type": "object",
-      "description": "Production overrides (deploy, save_predictions): score_threshold and per_class_score_threshold (merge with evaluation); mAP IoU is evaluation.iou_threshold only. Decode/NMS patch model only in load_model_from_checkpoint / deploy / image_demo — not during tools/train.py. Sliding-window: overlap, margin, canvas. Null fields fall back to evaluation/model/dataset or deploy defaults.",
+      "description": "Production overrides (deploy, image_demo): score_threshold and per_class_score_threshold (merge with evaluation); mAP IoU is evaluation.iou_threshold only. Decode/NMS patch model in load_model_from_checkpoint / deploy / image_demo — not during tools/train.py. odet preds / make eval-val prefer evaluation.final_nms_iou_threshold when set. Sliding-window: overlap, margin, canvas. Null fields fall back to evaluation/model/dataset or deploy defaults.",
       "patternProperties": {
         "^_muted_": true
       },
@@ -337,7 +354,7 @@
           "additionalProperties": { "type": "number" },
           "description": "Per-class floors merged after evaluation.per_class_score_threshold (same keys update/override)."
         },
-        "final_nms_iou_threshold": { "type": ["number", "null"], "default": null, "description": "Same meaning as model.final_nms_iou_threshold; when set, patches the live model after checkpoint load." },
+        "final_nms_iou_threshold": { "type": ["number", "null"], "default": null, "description": "Deploy / image_demo final detection NMS IoU; when set, patches the live model after checkpoint load. odet preds / make eval-val use evaluation.final_nms_iou_threshold when that field is set." },
         "final_nms_use_cpu": { "type": ["boolean", "null"], "default": null, "description": "When set, patches model.final_nms_use_cpu (exact polygon NMS on CPU)." },
         "inference_pre_nms_score_threshold": { "type": ["number", "null"], "default": null, "description": "Decoder pre-NMS score floor; when set, patches model.inference_pre_nms_score_threshold (or RetinaNet score_threshold)." },
         "max_detections_per_image": { "type": ["integer", "null"], "default": null, "description": "When set, patches model.max_detections_per_image." },
@@ -415,20 +432,23 @@
     },
     "preprocessing": {
       "type": "object",
-      "description": "Image preprocessing. Keys: resize_mode (switch) first, then target_size, normalize_*, pad_*, enable_flip_*.",
+      "description": "Image preprocessing. Keys: resize_mode (switch) first, then target_size, normalize_*, pad_*, enable_flip_*, enable_random_rotate / random_rotate_*.",
       "patternProperties": {
         "^_muted_": true
       },
       "additionalProperties": false,
       "properties": {
-        "resize_mode": { "type": "string", "default": "fixed", "description": "\"fixed\" = stretch to (H,W); \"pad\" = uniform scale so longer edge equals max(H,W) then zero-pad; \"crop\" = native-res crop/pad to (H,W)." },
+        "resize_mode": { "type": "string", "default": "fixed", "description": "\"fixed\" = stretch to (H,W); \"pad\" = uniform scale so longer edge equals max(H,W) then zero-pad to target_size; \"keep_ratio\" = same scale without square pad (then pad_size_divisor; MMRotate RResize+Pad); \"crop\" = native-res crop/pad to (H,W)." },
         "target_size": { "type": "array", "items": { "type": "integer" }, "minItems": 1, "maxItems": 2, "description": "[H, W] canvas for fixed/pad/crop, or [size] for square canvas (pad/crop)." },
         "normalize_mean": { "type": "array", "items": { "type": "number" }, "description": "RGB mean for normalization ([0,1] scale). Default: MMDetection-style." },
         "normalize_std": { "type": "array", "items": { "type": "number" }, "description": "RGB std for normalization ([0,1] scale)." },
         "pad_size_divisor": { "type": "integer", "default": 32, "description": "Pad image to multiple of this (training)." },
         "enable_flip_horizontal": { "type": "boolean", "default": true, "description": "Apply random horizontal flip during training." },
         "enable_flip_vertical": { "type": "boolean", "default": true, "description": "Apply random vertical flip during training." },
-        "enable_flip_diagonal": { "type": "boolean", "default": false, "description": "Apply random diagonal flip (MMRotate RRandomFlip direction=diagonal). With H+V+D enabled, each flip has 25% probability and 25% no flip." }
+        "enable_flip_diagonal": { "type": "boolean", "default": false, "description": "Apply random diagonal flip (MMRotate RRandomFlip direction=diagonal). With H+V+D enabled, each flip has 25% probability and 25% no flip." },
+        "enable_random_rotate": { "type": "boolean", "default": false, "description": "Apply MMRotate-style PolyRandomRotate after flips during training (train only). FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°." },
+        "random_rotate_prob": { "type": "number", "default": 0.5, "description": "Probability of applying a random rotate when enable_random_rotate is true." },
+        "random_rotate_angle_range": { "type": "number", "default": 180, "description": "Half-range in degrees. Angle is sampled uniformly from [-range, +range]. FCOS HRSC uses 20; MMRotate RR recipes use 180." }
       }
     },
     "augmentation": {

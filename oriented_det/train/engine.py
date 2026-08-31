@@ -2273,10 +2273,10 @@ def train(
         # Update NMS IoU threshold from schedule (e.g. Rotated RetinaNet: lower = more suppression)
         if hasattr(train_model, "set_final_nms_iou_for_epoch"):
             train_model.set_final_nms_iou_for_epoch(epoch)
-        if hasattr(train_model, "set_roi_box_reg_iou_weight_for_epoch"):
-            train_model.set_roi_box_reg_iou_weight_for_epoch(epoch)
-        elif hasattr(train_model, "set_box_reg_iou_weight_for_epoch"):
-            train_model.set_box_reg_iou_weight_for_epoch(epoch)
+        if hasattr(train_model, "set_roi_box_reg_aux_weight_for_epoch"):
+            train_model.set_roi_box_reg_aux_weight_for_epoch(epoch)
+        elif hasattr(train_model, "set_box_reg_aux_weight_for_epoch"):
+            train_model.set_box_reg_aux_weight_for_epoch(epoch)
         if hasattr(train_model, "set_roi_box_reg_angle_weight_for_epoch"):
             train_model.set_roi_box_reg_angle_weight_for_epoch(epoch)
         # Update ROI class weights from schedule (optional; supports ramp-up to avoid early classifier collapse).

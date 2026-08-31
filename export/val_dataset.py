@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from oriented_det.data.airbus_playground import AirbusPlaygroundCSVDataset
+from oriented_det.data.build import build_split_dataset, dataset_format_name
 from oriented_det.data.dota import collect_dota_split_image_paths
 from oriented_det.train.config import TrainingExperimentConfig
 
@@ -24,29 +24,28 @@ def collect_split_images(
     ``tools/save_predictions.py`` (``make preds`` / ``make metrics``) always passes ``False``
     so inference includes all tiles; training still uses the config flag.
     """
-    dataset_format = getattr(getattr(config, "dataset", None), "format", None) or "dota"
+    dataset_format = dataset_format_name(getattr(config, "dataset", None))
     data_root = Path(data_root)
 
-    if dataset_format == "airbus_playground":
+    if dataset_format in ("airbus_playground", "hrsc2016"):
+        from dataclasses import replace
+
         ds_config = config.dataset
-        if not getattr(ds_config, "annotations_file", None) or not getattr(ds_config, "split_file", None):
-            raise ValueError(
-                "Airbus Playground format requires dataset.annotations_file and dataset.split_file."
-            )
-        if data_split not in ("train", "val"):
-            raise ValueError(f"Airbus dataset supports only train or val split, got {data_split!r}.")
-        airbus_dataset = AirbusPlaygroundCSVDataset(
-            data_root=data_root,
-            split=data_split,
-            annotations_file=ds_config.annotations_file,
-            split_file=ds_config.split_file,
-            val_split_id=getattr(ds_config, "val_split_id", 0),
-            difficult_strategy=ds_config.difficult_strategy,
-            allowed_classes=getattr(ds_config, "allowed_classes", None),
-            ignore_labels=getattr(ds_config, "ignore_labels", None) or [],
-            map_labels=getattr(ds_config, "map_labels", None) or {},
-        )
-        split_images = [Path(airbus_dataset[idx].image_path) for idx in range(len(airbus_dataset))]
+        if dataset_format == "airbus_playground":
+            if not getattr(ds_config, "annotations_file", None) or not getattr(ds_config, "split_file", None):
+                raise ValueError(
+                    "Airbus Playground format requires dataset.annotations_file and dataset.split_file."
+                )
+            if data_split not in ("train", "val"):
+                raise ValueError(f"Airbus dataset supports only train or val split, got {data_split!r}.")
+        ds_cfg = replace(ds_config, data_root=data_root)
+        if filter_empty_gt is None:
+            if dataset_format == "airbus_playground":
+                filter_empty_gt = False
+            else:
+                filter_empty_gt = bool(getattr(ds_config, "filter_empty_gt", False))
+        dataset = build_split_dataset(ds_cfg, data_split, filter_empty_gt=filter_empty_gt)
+        split_images = [Path(dataset[idx].image_path) for idx in range(len(dataset))]
         return split_images, None, dataset_format
 
     if getattr(config, "dataset", None):

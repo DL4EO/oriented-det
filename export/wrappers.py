@@ -120,7 +120,9 @@ class RotatedFasterRCNNPreNmsExportWrapper(nn.Module):
             )
             feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feat_list]
             fpn_strides_live = derive_fpn_strides_from_grid(
-                (self.height, self.width), feature_map_sizes
+                (self.height, self.width),
+                feature_map_sizes,
+                configured=model.fpn_strides,
             )
             anchors = generate_oriented_anchors(
                 image_size=(self.height, self.width),
@@ -184,7 +186,9 @@ class OrientedRCNNPreNmsExportWrapper(nn.Module):
             )
             feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feat_list]
             fpn_strides_live = derive_fpn_strides_from_grid(
-                (self.height, self.width), feature_map_sizes
+                (self.height, self.width),
+                feature_map_sizes,
+                configured=model.fpn_strides,
             )
             anchors = generate_oriented_anchors(
                 image_size=(self.height, self.width),

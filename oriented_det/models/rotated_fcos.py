@@ -104,6 +104,7 @@ def assign_fcos_targets_single(
     center_sampling: bool = True,
     center_sample_radius: float = 1.5,
     gt_bboxes_ignore: Optional[torch.Tensor] = None,
+    gt_bboxes_lookalike: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Assign labels / bbox / angle targets for one image (all FPN points).
 
@@ -116,6 +117,8 @@ def assign_fcos_targets_single(
         strides: stride per level
         num_classes: foreground class count K; background label = K (0-indexed scheme)
         gt_bboxes_ignore: optional [I, 5]
+        gt_bboxes_lookalike: optional [L, 5] hard-negative lookalikes; non-fg points inside
+            stay background ``K`` (not ignore ``-1``).
 
     Returns:
         labels [P] in {0..K-1 fg, K bg, -1 ignore},
@@ -135,6 +138,10 @@ def assign_fcos_targets_single(
         if gt_bboxes_ignore is not None and gt_bboxes_ignore.numel() > 0:
             ignore_mask = _points_inside_any_obb(points, gt_bboxes_ignore)
             labels[ignore_mask] = -1
+        if gt_bboxes_lookalike is not None and gt_bboxes_lookalike.numel() > 0:
+            look_mask = _points_inside_any_obb(points, gt_bboxes_lookalike)
+            # Lookalike wins over ignore: force background (trainable negative).
+            labels = torch.where(look_mask, torch.full_like(labels, bg), labels)
         return labels, bbox_targets, angle_targets, torch.zeros(num_points, dtype=torch.bool, device=device)
 
     areas = (gt_bboxes[:, 2] * gt_bboxes[:, 3]).unsqueeze(0).repeat(num_points, 1)
@@ -185,6 +192,20 @@ def assign_fcos_targets_single(
         labels = torch.where(
             ignore_mask & (labels == bg),
             torch.full_like(labels, -1),
+            labels,
+        )
+
+    if gt_bboxes_lookalike is not None and gt_bboxes_lookalike.numel() > 0:
+        look_mask = _points_inside_any_obb(points, gt_bboxes_lookalike)
+        # Never override foreground; lookalike wins over ignore → background K.
+        labels = torch.where(
+            look_mask & (labels < 0),
+            torch.full_like(labels, bg),
+            labels,
+        )
+        labels = torch.where(
+            look_mask & (labels == bg),
+            torch.full_like(labels, bg),
             labels,
         )
 
@@ -458,6 +479,7 @@ def compute_rotated_fcos_loss(
     aux_loss_weight: float = 0.0,
     aux_angle_weight: float = 1.0,
     aux_angle_lambda: float = 1.0,
+    gt_boxes_lookalike: Optional[List[torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """Focal cls + box regression (L1 / KFIoU / decoded rIoU) + optional decoded aux + centerness BCE."""
     device = cls_scores[0].device
@@ -487,6 +509,9 @@ def compute_rotated_fcos_loss(
         ignore = None
         if gt_boxes_ignore is not None and img_idx < len(gt_boxes_ignore):
             ignore = gt_boxes_ignore[img_idx]
+        lookalike = None
+        if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+            lookalike = gt_boxes_lookalike[img_idx]
         labels_i, bbox_i, angle_i, _ = assign_fcos_targets_single(
             points=concat_points,
             gt_bboxes=gt_boxes[img_idx],
@@ -498,6 +523,7 @@ def compute_rotated_fcos_loss(
             center_sampling=center_sampling,
             center_sample_radius=center_sample_radius,
             gt_bboxes_ignore=ignore,
+            gt_bboxes_lookalike=lookalike,
         )
         # Split per level then re-concat per-level across images later
         label_list.append(list(labels_i.split(num_points_per_lvl, 0)))
@@ -761,7 +787,9 @@ class RotatedFCOS(nn.Module):
             include_pool_level=not self.fpn_extra_level,
         )
         feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feature_list]
-        fpn_strides_live = derive_fpn_strides_from_grid(image_sizes[0], feature_map_sizes)
+        fpn_strides_live = derive_fpn_strides_from_grid(
+            image_sizes[0], feature_map_sizes, configured=self.fpn_strides
+        )
         warn_if_fpn_strides_mismatch(self.fpn_strides, fpn_strides_live)
 
         images_tensor = torch.stack(images, dim=0)
@@ -780,7 +808,7 @@ class RotatedFCOS(nn.Module):
         if self.training:
             if targets is None:
                 raise ValueError("Targets required during training.")
-            gt_boxes_list, gt_labels_list, gt_boxes_ignore_list = prepare_targets(
+            gt_boxes_list, gt_labels_list, gt_boxes_ignore_list, gt_boxes_lookalike_list = prepare_targets(
                 targets, device=device
             )
             return compute_rotated_fcos_loss(
@@ -793,6 +821,7 @@ class RotatedFCOS(nn.Module):
                 gt_boxes=gt_boxes_list,
                 gt_labels=gt_labels_list,
                 gt_boxes_ignore=gt_boxes_ignore_list,
+                gt_boxes_lookalike=gt_boxes_lookalike_list,
                 num_classes=self.num_classes,
                 regress_ranges=self.regress_ranges,
                 center_sampling=self.center_sampling,
@@ -991,7 +1020,9 @@ def rotated_fcos_inference_pre_nms_padded(
         include_pool_level=not model.fpn_extra_level,
     )
     feature_map_sizes = [(f.shape[2], f.shape[3]) for f in feature_list]
-    fpn_strides_live = derive_fpn_strides_from_grid(image_sizes[0], feature_map_sizes)
+    fpn_strides_live = derive_fpn_strides_from_grid(
+        image_sizes[0], feature_map_sizes, configured=model.fpn_strides
+    )
     cls_scores, bbox_preds, angle_preds, centernesses = model.head(
         feature_list, strides=fpn_strides_live
     )

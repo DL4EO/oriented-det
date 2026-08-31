@@ -6,7 +6,7 @@ This folder holds base schedule configs that set `training.num_epochs` and LR sc
 
 - **1x.json** — 12 epochs, StepLR/MultiStepLR milestones `[8, 11]`
 - **3x.json** — 36 epochs, milestones `[24, 33]`
-- **6x.json** — extends 3x with more epochs (see file)
+- **6x.json** — 72 epochs, milestones `[48, 66]`.
 
 Keep this folder limited to generic schedule bases. Dataset-specific settings belong in `configs/_base_/datasets/`, and AMP is composed separately with `configs/_base_/fp16.json`.
 
@@ -21,8 +21,8 @@ You can override the scheduler by setting `training.lr_scheduler_type` in your c
 | (none) / `multistep` / `step` | **MultiStepLR** or **StepLR** (default). Use `lr_scheduler_milestones` for MultiStepLR, else StepLR. Supports `lr_warmup_steps`. |
 | `reduce_on_plateau`    | **ReduceLROnPlateau**. Reduces LR when the monitored metric stops improving. Use `lr_scheduler_plateau_metric` (`"total_loss"` → minimize, `"mAP"` → maximize), `lr_scheduler_plateau_factor`, `lr_scheduler_plateau_patience`. No warmup. |
 | `one_cycle` / `onecycle` | **OneCycleLR**. LR is updated every optimizer step (warmup then decay). Uses `lr_scheduler_one_cycle_pct_start`, `lr_scheduler_one_cycle_div_factor`, `lr_scheduler_one_cycle_final_div_factor`. No warmup (built-in). |
-| `cosine_annealing` / `cosine` | **PyTorch CosineAnnealingLR**. `T_max` from `lr_scheduler_cosine_epochs` or `lr_scheduler_cosine_t_max` (else `num_epochs`). If `num_epochs` > `T_max`, LR **restarts** after each minimum (SGDR-style). Tail keys are ignored. |
-| `cosine_annealing_with_tail` / `cosine_with_tail` | **CosineAnnealingWithFixedTailLR**: cosine for `cosine_epochs` (or `t_max`), then constant `tail_lr` for `tail_epochs` (`cosine + tail` must equal `num_epochs`). |
+| `cosine_annealing` / `cosine` | **PyTorch CosineAnnealingLR**. `T_max` from `lr_scheduler_cosine_epochs` (else `num_epochs`). If `num_epochs` > `T_max`, LR **restarts** after each minimum (SGDR-style). Tail keys are ignored. Legacy `lr_scheduler_cosine_t_max` remaps to `cosine_epochs`. |
+| `cosine_annealing_with_tail` / `cosine_with_tail` | **CosineAnnealingWithFixedTailLR**: cosine for `cosine_epochs`, then constant `tail_lr` for `tail_epochs` (`cosine + tail` must equal `num_epochs`). |
 
 ### Example: cosine 20 epochs + fixed tail 4 epochs
 

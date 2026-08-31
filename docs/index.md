@@ -83,7 +83,7 @@ See [Installation](getting-started/installation.md) for CUDA, macOS, and CPU set
 
 ## Roadmap
 
-**v0.2** is shipped (four ResNet detectors including Rotated FCOS, DOTA, Hub). Next: HRSC2016/FAIR1M (v0.3), RTMDet-R + native YOLO-OBB (v0.4), Swin-FPN backbones (v0.5+). Details: **[Roadmap](roadmap.md)**.
+**v0.2** is shipped (four ResNet detectors including Rotated FCOS, DOTA, Hub). HRSC2016 loader and 3× Hub zoo are in; next: FAIR1M (v0.3), RTMDet-R + native YOLO-OBB (v0.4), Swin-FPN backbones (v0.5+). Details: **[Roadmap](roadmap.md)**.
 
 ## Important Notes
 

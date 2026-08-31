@@ -20,6 +20,7 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "viewer": ("tools.app", "odet-viewer"),
     "playground-csv": ("tools.generate_airbus_playground_csv", "odet-playground-csv"),
     "playground-to-dota": ("tools.playground_to_dota", "odet-playground-to-dota"),
+    "hrsc-to-dota": ("tools.hrsc_to_dota", "odet-hrsc-to-dota"),
     "export-onnx": ("export.scripts.export_onnx", "odet-export-onnx"),
     "export-tf": ("export.scripts.export_tf", "odet-export-tf"),
     "export-detect": ("export.scripts.build_faster_rcnn_savedmodel", "odet-export-detect"),

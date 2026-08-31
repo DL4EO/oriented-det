@@ -41,51 +41,16 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from oriented_det.data import DOTADataset, AirbusPlaygroundCSVDataset, build_dota_split_dataset
+from oriented_det.data import build_split_dataset
 from oriented_det.train.config import TrainingExperimentConfig
 
 
 def build_dataset_from_config(config: TrainingExperimentConfig, split: str):
     """Build train or val dataset from config (same logic as tools/train.py)."""
-    dataset_format = getattr(config.dataset, "format", "dota").lower()
-    if dataset_format == "airbus_playground":
-        if config.dataset.annotations_file is None or config.dataset.split_file is None:
-            raise ValueError(
-                "Airbus Playground requires dataset.annotations_file and dataset.split_file."
-            )
-        return AirbusPlaygroundCSVDataset(
-            data_root=config.dataset.data_root,
-            split=split,
-            annotations_file=config.dataset.annotations_file,
-            split_file=config.dataset.split_file,
-            val_split_id=config.dataset.val_split_id,
-            train_includes_val=(
-                getattr(config.dataset, "train_includes_val", False) if split == "train" else False
-            ),
-            difficult_strategy=config.dataset.difficult_strategy,
-            allowed_classes=config.dataset.allowed_classes,
-            ignore_labels=config.dataset.ignore_labels,
-            map_labels=config.dataset.map_labels,
-        )
-    if not config.dataset.has_dota_tiles_config():
-        raise ValueError(
-            "DOTA format requires dataset.train_tiles_dir(s) and dataset.val_tiles_dir(s)."
-        )
-    tile_roots = (
-        config.dataset.get_train_tile_roots()
-        if split == "train"
-        else config.dataset.get_val_tile_roots()
-    )
-    same_folder = getattr(config.dataset, "same_folder", False)
-    return build_dota_split_dataset(
-        tile_roots,
-        split=split,
-        same_folder=same_folder,
-        difficult_strategy=config.dataset.difficult_strategy,
-        allowed_classes=config.dataset.allowed_classes,
-        ignore_labels=config.dataset.ignore_labels,
-        filter_empty_gt=getattr(config.dataset, "filter_empty_gt", False),
-    )
+    filter_empty = getattr(config.dataset, "filter_empty_gt", False)
+    if split != "train" and getattr(config.dataset, "format", "dota").lower() == "airbus_playground":
+        filter_empty = False
+    return build_split_dataset(config.dataset, split, filter_empty_gt=filter_empty)
 
 
 def get_target_size(config: TrainingExperimentConfig) -> tuple[int, int]:

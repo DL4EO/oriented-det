@@ -740,6 +740,8 @@ def match_oriented_anchors_to_gt(
     match_low_quality: bool = True,
     gt_boxes_ignore: Optional[torch.Tensor] = None,
     ignore_iou_threshold: Optional[float] = None,
+    gt_boxes_lookalike: Optional[torch.Tensor] = None,
+    lookalike_iou_threshold: Optional[float] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Match oriented anchors to ground truth boxes using oriented IoU or HBB IoU.
     
@@ -758,6 +760,8 @@ def match_oriented_anchors_to_gt(
         negative_iou_threshold: IoU threshold for negative matches
         device: Optional device for computation
         use_hbb_for_matching: If True, use HBB (axis-aligned) IoU for matching instead of rotated IoU.
+        gt_boxes_lookalike: Optional hard-negative lookalike boxes; non-positives overlapping
+            these are forced to background (label 0) after ignore regions.
     
     Returns:
         Tuple of (labels, matched_gt_indices):
@@ -801,6 +805,22 @@ def match_oriented_anchors_to_gt(
             ign_mask = (labels <= 0) & (max_iou_ign >= thr)
             labels[ign_mask] = -1
             matched_gt_indices[ign_mask] = -1
+        if gt_boxes_lookalike is not None and gt_boxes_lookalike.numel() > 0:
+            from .utils import force_lookalike_to_background
+            look_thr = (
+                float(lookalike_iou_threshold)
+                if lookalike_iou_threshold is not None
+                else float(positive_iou_threshold)
+            )
+            force_lookalike_to_background(
+                labels,
+                anchors,
+                gt_boxes_lookalike,
+                iou_threshold=look_thr,
+                use_hbb_for_matching=use_hbb_for_matching,
+                matched_gt_indices=matched_gt_indices,
+                positive_mask=(labels == 1),
+            )
         return labels, matched_gt_indices
     else:
         labels = None
@@ -817,6 +837,22 @@ def match_oriented_anchors_to_gt(
         matched_gt_indices = torch.full((N,), -1, dtype=torch.int64, device=device)
         if M == 0:
             labels.fill_(0)
+            if gt_boxes_lookalike is not None and gt_boxes_lookalike.numel() > 0:
+                from .utils import force_lookalike_to_background
+                look_thr = (
+                    float(lookalike_iou_threshold)
+                    if lookalike_iou_threshold is not None
+                    else float(positive_iou_threshold)
+                )
+                force_lookalike_to_background(
+                    labels,
+                    anchors,
+                    gt_boxes_lookalike,
+                    iou_threshold=look_thr,
+                    use_hbb_for_matching=True,
+                    matched_gt_indices=matched_gt_indices,
+                    positive_mask=(labels == 1),
+                )
             return labels, matched_gt_indices
         max_iou_per_anchor, best_gt_per_anchor = iou_matrix.max(dim=1)
         max_iou_per_gt, best_anchor_per_gt = iou_matrix.max(dim=0)
@@ -843,6 +879,22 @@ def match_oriented_anchors_to_gt(
                 ign_mask = (labels <= 0) & (max_iou_ign >= thr)
                 labels[ign_mask] = -1
                 matched_gt_indices[ign_mask] = -1
+        if gt_boxes_lookalike is not None and gt_boxes_lookalike.numel() > 0:
+            from .utils import force_lookalike_to_background
+            look_thr = (
+                float(lookalike_iou_threshold)
+                if lookalike_iou_threshold is not None
+                else float(positive_iou_threshold)
+            )
+            force_lookalike_to_background(
+                labels,
+                anchors,
+                gt_boxes_lookalike,
+                iou_threshold=look_thr,
+                use_hbb_for_matching=True,
+                matched_gt_indices=matched_gt_indices,
+                positive_mask=(labels == 1),
+            )
         return labels, matched_gt_indices
     
     # Fallback: Python loop version for oriented IoU (slow, for debugging only)
@@ -855,6 +907,22 @@ def match_oriented_anchors_to_gt(
     
     if num_gt == 0:
         labels.fill_(0)
+        if gt_boxes_lookalike is not None and gt_boxes_lookalike.numel() > 0:
+            from .utils import force_lookalike_to_background
+            look_thr = (
+                float(lookalike_iou_threshold)
+                if lookalike_iou_threshold is not None
+                else float(positive_iou_threshold)
+            )
+            force_lookalike_to_background(
+                labels,
+                anchors,
+                gt_boxes_lookalike,
+                iou_threshold=look_thr,
+                use_hbb_for_matching=use_hbb_for_matching,
+                matched_gt_indices=matched_gt_indices,
+                positive_mask=(labels == 1),
+            )
         return labels, matched_gt_indices
     
     # Matching doesn't need gradients
@@ -983,6 +1051,23 @@ def match_oriented_anchors_to_gt(
         labels[ign_mask] = -1
         matched_gt_indices[ign_mask] = -1
 
+    if gt_boxes_lookalike is not None and gt_boxes_lookalike.numel() > 0:
+        from .utils import force_lookalike_to_background
+        look_thr = (
+            float(lookalike_iou_threshold)
+            if lookalike_iou_threshold is not None
+            else float(positive_iou_threshold)
+        )
+        force_lookalike_to_background(
+            labels,
+            anchors,
+            gt_boxes_lookalike,
+            iou_threshold=look_thr,
+            use_hbb_for_matching=use_hbb_for_matching,
+            matched_gt_indices=matched_gt_indices,
+            positive_mask=(labels == 1),
+        )
+
     return labels, matched_gt_indices
 
 
@@ -993,6 +1078,7 @@ def compute_oriented_rpn_loss(
     gt_boxes: List[torch.Tensor],
     image_sizes: List[Tuple[int, int]],
     gt_boxes_ignore: Optional[List[torch.Tensor]] = None,
+    gt_boxes_lookalike: Optional[List[torch.Tensor]] = None,
     positive_iou_threshold: float = 0.7,
     negative_iou_threshold: float = 0.3,
     box_reg_weight: float = 1.0,
@@ -1020,6 +1106,7 @@ def compute_oriented_rpn_loss(
         anchors: List of anchor tensors for each level
         gt_boxes: List of ground truth boxes per image (each as [M, 5] tensor)
         gt_boxes_ignore: Optional list of ignored GT boxes per image (each as [I, 5] tensor).
+        gt_boxes_lookalike: Optional list of hard-negative lookalike boxes per image.
         image_sizes: List of (height, width) for each image
         positive_iou_threshold: IoU threshold for positive anchors
         negative_iou_threshold: IoU threshold for negative anchors
@@ -1077,6 +1164,7 @@ def compute_oriented_rpn_loss(
     level_pred: List[torch.Tensor] = []
     level_labels: List[torch.Tensor] = []
     level_targets: List[torch.Tensor] = []
+    level_anchors_store: List[torch.Tensor] = []
     anchors_per_image_per_level: List[int] = []
     all_loss_objectness: List[torch.Tensor] = []
     all_loss_rpn_box_reg: List[torch.Tensor] = []
@@ -1170,15 +1258,37 @@ def compute_oriented_rpn_loss(
             total_gt_boxes += len(img_gt_boxes)
             
             if len(img_gt_boxes) == 0:
-                # No ground truth - all anchors are background
-                labels = torch.zeros(len(img_anchors), dtype=torch.int64, device=device)
+                # No semantic GT — still match ignore/lookalike against empty GT list.
+                img_gt_ignore = None
+                if gt_boxes_ignore is not None and img_idx < len(gt_boxes_ignore):
+                    img_gt_ignore = gt_boxes_ignore[img_idx].to(device).detach()
+                img_gt_lookalike = None
+                if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+                    img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
+                labels, matched_indices = match_oriented_anchors_to_gt(
+                    img_anchors,
+                    img_gt_boxes,
+                    positive_iou_threshold,
+                    negative_iou_threshold,
+                    device,
+                    use_hbb_for_matching=use_hbb_for_matching,
+                    min_pos_iou=min_pos_iou,
+                    match_low_quality=match_low_quality,
+                    gt_boxes_ignore=img_gt_ignore,
+                    ignore_iou_threshold=positive_iou_threshold,
+                    gt_boxes_lookalike=img_gt_lookalike,
+                    lookalike_iou_threshold=positive_iou_threshold,
+                )
                 regression_targets = torch.zeros((len(img_anchors), 4), dtype=torch.float32, device=device)
-                total_negative += len(img_anchors)
+                total_negative += int((labels == 0).sum().item())
             else:
                 # Match anchors to GT for this level
                 img_gt_ignore = None
                 if gt_boxes_ignore is not None and img_idx < len(gt_boxes_ignore):
                     img_gt_ignore = gt_boxes_ignore[img_idx].to(device).detach()
+                img_gt_lookalike = None
+                if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+                    img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
                 img_t0 = _sync_and_time() if timing_enabled else 0.0
                 if timing_enabled and (img_idx < 3 or img_idx % 10 == 0):
                     print(
@@ -1198,6 +1308,8 @@ def compute_oriented_rpn_loss(
                     match_low_quality=match_low_quality,
                     gt_boxes_ignore=img_gt_ignore,
                     ignore_iou_threshold=positive_iou_threshold,
+                    gt_boxes_lookalike=img_gt_lookalike,
+                    lookalike_iou_threshold=positive_iou_threshold,
                 )
                 if timing_enabled and (img_idx < 3 or img_idx % 10 == 0):
                     img_t1 = _sync_and_time()
@@ -1264,6 +1376,7 @@ def compute_oriented_rpn_loss(
         level_pred.append(bbox_pred)
         level_labels.append(labels_level)
         level_targets.append(regression_targets_level)
+        level_anchors_store.append(level_anchors)  # [B*anchors_per_image, 5]
         anchors_per_image_per_level.append(anchors_per_image)
         
         if not sample_from_all_levels:
@@ -1336,18 +1449,30 @@ def compute_oriented_rpn_loss(
                 for l in range(num_levels)],
                 dim=0,
             )
+            anchors_i = torch.cat(
+                [level_anchors_store[l][img_idx * anchors_per_image_per_level[l] : (img_idx + 1) * anchors_per_image_per_level[l]]
+                for l in range(num_levels)],
+                dim=0,
+            )
+            img_gt_lookalike = None
+            if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+                img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
+            from .utils import sample_fg_bg_indices
+            num_fg = min(int((labels_i == 1).sum().item()), int(batch_size_per_image * fg_bg_sampling_ratio))
+            num_bg = batch_size_per_image - num_fg
+            sampled_fg, sampled_bg = sample_fg_bg_indices(
+                labels_i,
+                num_fg=num_fg,
+                num_bg=num_bg,
+                device=device,
+                fg_selector=(labels_i == 1),
+                bg_selector=(labels_i == 0),
+                boxes=anchors_i,
+                gt_boxes_lookalike=img_gt_lookalike,
+                lookalike_iou_threshold=positive_iou_threshold,
+                use_hbb_for_matching=use_hbb_for_matching,
+            )
             fg_i = (labels_i == 1).nonzero(as_tuple=True)[0]
-            bg_i = (labels_i == 0).nonzero(as_tuple=True)[0]
-            num_fg = min(len(fg_i), int(batch_size_per_image * fg_bg_sampling_ratio))
-            num_bg = min(len(bg_i), batch_size_per_image - num_fg)
-            if num_fg > 0:
-                sampled_fg = fg_i[torch.randperm(len(fg_i), device=device)[:num_fg]]
-            else:
-                sampled_fg = torch.tensor([], dtype=torch.int64, device=device)
-            if num_bg > 0:
-                sampled_bg = bg_i[torch.randperm(len(bg_i), device=device)[:num_bg]]
-            else:
-                sampled_bg = torch.tensor([], dtype=torch.int64, device=device)
             sampled_idx = torch.cat([sampled_fg, sampled_bg], dim=0)
             if len(sampled_idx) > 0:
                 valid = labels_i[sampled_idx] >= 0
@@ -1834,6 +1959,7 @@ def compute_midpoint_rpn_loss(
     gt_boxes: List[torch.Tensor],
     image_sizes: List[Tuple[int, int]],
     gt_boxes_ignore: Optional[List[torch.Tensor]] = None,
+    gt_boxes_lookalike: Optional[List[torch.Tensor]] = None,
     *,
     positive_iou_threshold: float = 0.7,
     negative_iou_threshold: float = 0.3,
@@ -1863,6 +1989,7 @@ def compute_midpoint_rpn_loss(
     level_pred: List[torch.Tensor] = []
     level_labels: List[torch.Tensor] = []
     level_targets: List[torch.Tensor] = []
+    level_anchors_store: List[torch.Tensor] = []
     anchors_per_image_per_level: List[int] = []
     all_loss_objectness: List[torch.Tensor] = []
     all_loss_rpn_box_reg: List[torch.Tensor] = []
@@ -1901,32 +2028,32 @@ def compute_midpoint_rpn_loss(
         for img_idx in range(B):
             img_anchors = level_anchors[img_idx * anchors_per_image : (img_idx + 1) * anchors_per_image].detach()
             img_gt = gt_boxes[img_idx].to(device).detach()
-
-            if img_gt.numel() == 0:
-                labels = torch.zeros((len(img_anchors),), dtype=torch.int64, device=device)
-                targets = torch.zeros((len(img_anchors), 6), dtype=torch.float32, device=device)
-            else:
-                img_gt_ignore = None
-                if gt_boxes_ignore is not None and img_idx < len(gt_boxes_ignore):
-                    img_gt_ignore = gt_boxes_ignore[img_idx].to(device).detach()
-                labels, matched = match_oriented_anchors_to_gt(
-                    img_anchors,
-                    img_gt,
-                    positive_iou_threshold,
-                    negative_iou_threshold,
-                    device,
-                    use_hbb_for_matching=use_hbb_for_matching,
-                    min_pos_iou=min_pos_iou,
-                    match_low_quality=match_low_quality,
-                    gt_boxes_ignore=img_gt_ignore,
-                    ignore_iou_threshold=positive_iou_threshold,
-                )
-                pos = labels == 1
-                targets = torch.zeros((len(img_anchors), 6), dtype=torch.float32, device=device)
-                if pos.any():
-                    matched_gt = img_gt[matched[pos]]
-                    rois_xyxy = _cxcywh_to_xyxy(img_anchors[pos])
-                    targets[pos] = coder.encode(rois_xyxy, matched_gt)
+            img_gt_ignore = None
+            if gt_boxes_ignore is not None and img_idx < len(gt_boxes_ignore):
+                img_gt_ignore = gt_boxes_ignore[img_idx].to(device).detach()
+            img_gt_lookalike = None
+            if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+                img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
+            labels, matched = match_oriented_anchors_to_gt(
+                img_anchors,
+                img_gt,
+                positive_iou_threshold,
+                negative_iou_threshold,
+                device,
+                use_hbb_for_matching=use_hbb_for_matching,
+                min_pos_iou=min_pos_iou,
+                match_low_quality=match_low_quality,
+                gt_boxes_ignore=img_gt_ignore,
+                ignore_iou_threshold=positive_iou_threshold,
+                gt_boxes_lookalike=img_gt_lookalike,
+                lookalike_iou_threshold=positive_iou_threshold,
+            )
+            pos = labels == 1
+            targets = torch.zeros((len(img_anchors), 6), dtype=torch.float32, device=device)
+            if pos.any() and img_gt.numel() > 0:
+                matched_gt = img_gt[matched[pos]]
+                rois_xyxy = _cxcywh_to_xyxy(img_anchors[pos])
+                targets[pos] = coder.encode(rois_xyxy, matched_gt)
 
             img_labels_list.append(labels)
             img_targets_list.append(targets)
@@ -1940,6 +2067,7 @@ def compute_midpoint_rpn_loss(
         level_pred.append(bbox_pred)
         level_labels.append(labels_level)
         level_targets.append(targets_level)
+        level_anchors_store.append(level_anchors)
         anchors_per_image_per_level.append(anchors_per_image)
 
     if sample_from_all_levels:
@@ -1960,12 +2088,28 @@ def compute_midpoint_rpn_loss(
                 [level_targets[l][img_idx * anchors_per_image_per_level[l] : (img_idx + 1) * anchors_per_image_per_level[l]] for l in range(num_levels)],
                 dim=0,
             )
-            fg_i = (labels_i == 1).nonzero(as_tuple=True)[0]
-            bg_i = (labels_i == 0).nonzero(as_tuple=True)[0]
-            num_fg = min(len(fg_i), int(batch_size_per_image * fg_bg_sampling_ratio))
-            num_bg = min(len(bg_i), batch_size_per_image - num_fg)
-            sampled_fg = fg_i[torch.randperm(len(fg_i), device=device)[:num_fg]] if num_fg > 0 else torch.zeros((0,), dtype=torch.long, device=device)
-            sampled_bg = bg_i[torch.randperm(len(bg_i), device=device)[:num_bg]] if num_bg > 0 else torch.zeros((0,), dtype=torch.long, device=device)
+            anchors_i = torch.cat(
+                [level_anchors_store[l][img_idx * anchors_per_image_per_level[l] : (img_idx + 1) * anchors_per_image_per_level[l]] for l in range(num_levels)],
+                dim=0,
+            )
+            img_gt_lookalike = None
+            if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+                img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
+            from .utils import sample_fg_bg_indices
+            num_fg = min(int((labels_i == 1).sum().item()), int(batch_size_per_image * fg_bg_sampling_ratio))
+            num_bg = batch_size_per_image - num_fg
+            sampled_fg, sampled_bg = sample_fg_bg_indices(
+                labels_i,
+                num_fg=num_fg,
+                num_bg=num_bg,
+                device=device,
+                fg_selector=(labels_i == 1),
+                bg_selector=(labels_i == 0),
+                boxes=anchors_i,
+                gt_boxes_lookalike=img_gt_lookalike,
+                lookalike_iou_threshold=positive_iou_threshold,
+                use_hbb_for_matching=use_hbb_for_matching,
+            )
             sampled = torch.cat([sampled_fg, sampled_bg], dim=0)
             if sampled.numel() > 0:
                 valid = labels_i[sampled] >= 0

@@ -28,6 +28,8 @@ def detect_tier(class_names: List[str], dataset_format: str) -> str:
     fmt = str(dataset_format or "").lower()
     if fmt == "airbus_playground":
         return "airbus_playground"
+    if fmt == "hrsc2016":
+        return "hrsc2016"
     if fmt == "dota":
         if list(class_names) == list(DOTA_V1_CLASSES):
             return "dota_v1_full"

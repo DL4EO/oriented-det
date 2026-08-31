@@ -1,0 +1,99 @@
+{
+  "_base_": [
+    "../_base_/datasets/hrsc2016.json",
+    "../_base_/models/rotated_fcos_r50.json",
+    "../_base_/schedules/1x.json",
+    "../_base_/preprocessing.json"
+  ],
+  "data_loader": {
+    "batch_size": 2,
+    "num_workers": 4,
+    "shuffle": true,
+    "pin_memory": true
+  },
+  "checkpoint": {
+    "load_from_checkpoint": null,
+    "load_from_experiment": null,
+    "discover_previous_run": false,
+    "resume_from_checkpoint_epoch": false,
+    "load_optimizer_state": false,
+    "load_scheduler_state": false,
+    "start_epoch": 0,
+    "best_metric": "mAP",
+    "higher_is_better": true
+  },
+  "training": {
+    "num_epochs": 12,
+    "learning_rate": 0.0025,
+    "momentum": 0.9,
+    "weight_decay": 0.0001,
+    "use_amp": false,
+    "gradient_accumulation_steps": 1,
+    "max_grad_norm": 35.0,
+    "lr_scheduler_milestones": [8, 11],
+    "lr_scheduler_gamma": 0.1,
+    "lr_warmup_steps": 500,
+    "lr_scaling_with_accumulation": "linear",
+    "lr_scale_with_world_size": false,
+    "use_lr_param_groups": false
+  },
+  "loss": {
+    "loss_type": "focal",
+    "focal_alpha": 0.25,
+    "focal_gamma": 2.0
+  },
+  "preprocessing": {
+    "resize_mode": "keep_ratio",
+    "target_size": [800, 800],
+    "pad_size_divisor": 32,
+    "enable_flip_diagonal": true,
+    "enable_random_rotate": true,
+    "random_rotate_prob": 0.5,
+    "random_rotate_angle_range": 20
+  },
+  "evaluation": {
+    "score_threshold": 0.05,
+    "iou_threshold": 0.5,
+    "final_nms_iou_threshold": 0.1,
+    "compute_map_final": false,
+    "compute_map_every_n_epochs": 4,
+    "extended_gt_metrics": true,
+    "use_exact_rotated_iou": false
+  },
+  "tensorboard": {
+    "log_debug_anchors_proposals": false,
+    "vis_score_threshold": 0.5
+  },
+  "model": {
+    "pretrained_backbone": true,
+    "frozen_stages": 1,
+    "fpn_returned_layers": [2, 3, 4],
+    "fpn_strides": [8, 16, 32, 64, 128],
+    "fpn_extra_level": true,
+    "fcos_stacked_convs": 4,
+    "fcos_center_sampling": true,
+    "fcos_center_sample_radius": 1.5,
+    "fcos_norm_on_bbox": true,
+    "fcos_centerness_on_reg": true,
+    "fcos_scale_angle": true,
+    "fcos_angle_weight": 1.0,
+    "box_reg_loss_type": "riou",
+    "aux_loss_type": null,
+    "aux_loss_weight": 0.0,
+    "final_nms_use_cpu": false,
+    "inference_pre_nms_score_threshold": 0.05,
+    "final_nms_iou_threshold": 0.1,
+    "max_detections_per_image": 2000
+  },
+  "production": {
+    "score_threshold": 0.05,
+    "inference_pre_nms_score_threshold": 0.05,
+    "final_nms_iou_threshold": 0.3,
+    "max_detections_per_image": 2000,
+    "overlap_pixels": 0,
+    "ignore_margin_pixels": 0,
+    "use_first_image_canvas": false,
+    "stick_to_model_canvas": true,
+    "final_nms_use_cpu": true
+  }
+}

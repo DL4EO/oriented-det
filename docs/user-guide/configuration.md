@@ -71,7 +71,7 @@ Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_f
 |---------|---------|
 | `model_type` | Which detector `train.py` builds |
 | `dataset` | Paths, format, tiling overlap, difficult GT, caps, hard-tile oversampling |
-| `preprocessing` | Resize, normalize (MMDet-style RGB mean/std on [0,1]), pad, train flips |
+| `preprocessing` | Resize, normalize (MMDet-style RGB mean/std on [0,1]), pad, train flips, optional random rotate |
 | `data_loader` | `batch_size`, `num_workers`, `shuffle`, `pin_memory` |
 | `model` | Backbone, FPN, anchors, RPN/ROI/NMS, inference thresholds |
 | `training` | Epochs, LR, schedulers, AMP, grad accum, freeze phases, early stopping |
@@ -94,13 +94,16 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 
 | Key | Default | Notes |
 |-----|---------|--------|
-| `format` | `dota` | `dota` → `train_tiles_dir` / `val_tiles_dir`; `airbus_playground` → `annotations_file` + `split_file` |
+| `format` | `dota` | `dota` → `train_tiles_dir` / `val_tiles_dir`; `airbus_playground` → `annotations_file` + `split_file`; `hrsc2016` → official `FullDataSet` + `ImageSets` under `data_root` |
+| `train_split` / `val_split` | null | HRSC2016 ImageSets names for the train/val roles. null → `trainval` / `test` |
 | `same_folder` | `false` | If true, images and `.txt` labels live directly under tile dirs |
 | `overlap` | `16` | Tile overlap (px, even); `0` = none. Deploy margin defaults to `overlap/2` when `production.ignore_margin_pixels` is null |
 | `difficult_strategy` | `drop` | `drop` \| `ignore` \| `keep` for DOTA difficult flag |
-| `filter_empty_gt` | `false` | DOTA only: drop tiles with no GT after difficult/class filters (MMRotate parity) |
+| `filter_empty_gt` | `false` | Drop samples with no GT after difficult/class filters (DOTA tiles and HRSC2016 images; MMRotate parity) |
 | `max_train_samples` / `max_val_samples` | null | Cap dataset size; use `max_samples_shuffle_seed` for spread sampling |
 | `tile_metrics_csv` | null | From `save_predictions --save-tile-metrics-csv`; enables hard-tile oversampling |
+| `hard_tile_metric_column` / `hard_tile_threshold` / `hard_tile_oversample_factor` | `f1` / `0.8` / `2.0` | Tiles with metric strictly below the threshold are oversampled |
+| `drop_easy_empty_tiles` | `false` | Requires `tile_metrics_csv`. Drops train tiles with `tp=fp=fn=0` (no GT, no preds) before `max_train_samples` and oversampling. Empty tiles with FPs stay and can be oversampled. Keep `filter_empty_gt: false` so those hard empties remain in the loader |
 
 ### `model` (by detector)
 
@@ -120,13 +123,13 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 
 `roi_box_reg_angle_weight` scales the angle (5th encoded dim) SmoothL1 term in ROI box regression (two-stage models only). Optional `roi_box_reg_angle_schedule_epochs` / `roi_box_reg_angle_schedule_values` piecewise-schedule that weight by 0-based epoch (`values` length = `len(epochs) + 1`; when either field is null, `roi_box_reg_angle_weight` stays constant). The engine calls `set_roi_box_reg_angle_weight_for_epoch(epoch)` each epoch.
 
-`roi_box_reg_iou_weight` > 0 enables auxiliary rIoU, KFIoU, or ProbIoU when **`roi_box_reg_main_loss_type`** is `smooth_l1` (default). Use `roi_box_reg_iou_loss_type`, `roi_box_reg_kfiou_fun`, `roi_box_reg_probiou_mode`. Optional `roi_box_reg_iou_schedule_epochs` / `roi_box_reg_iou_schedule_values` piecewise-schedule that weight by 0-based epoch.
+`roi_box_reg_aux_weight` > 0 enables an auxiliary box-reg term that is **not** the primary loss. Set **`roi_box_reg_aux_loss_type`** (`probiou` / `riou` / `kfiou` when main is `smooth_l1`; `smooth_l1` when main is decoded). Optional `roi_box_reg_aux_schedule_epochs` / `roi_box_reg_aux_schedule_values` piecewise-schedule that weight by 0-based epoch. Use `roi_box_reg_kfiou_fun` / `roi_box_reg_probiou_mode` for the decoded metric, whichever side it is on.
 
-For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set `roi_box_reg_main_loss_type` and add encoded Smooth L1 aux with `roi_box_reg_smooth_l1_aux_weight`. Control Smooth L1 scale with `roi_box_reg_norm` (`sampled_all` = MMRotate, `positives_only` = mean over positives). Recipe: [`configs/rotated_faster_rcnn/dota_le90_1x.json`](../../configs/rotated_faster_rcnn/dota_le90_1x.json) (3× via [`dota_le90_3x.json`](../../configs/rotated_faster_rcnn/dota_le90_3x.json)).
+For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set `roi_box_reg_main_loss_type` and add encoded Smooth L1 aux with `roi_box_reg_aux_weight` / `roi_box_reg_aux_loss_type: smooth_l1`. Control Smooth L1 scale with `roi_box_reg_norm` (`sampled_all` = MMRotate, `positives_only` = mean over positives). Recipe: [`configs/rotated_faster_rcnn/dota_le90_1x.json`](../../configs/rotated_faster_rcnn/dota_le90_1x.json) (3× via [`dota_le90_3x.json`](../../configs/rotated_faster_rcnn/dota_le90_3x.json)). Legacy keys `roi_box_reg_iou_weight` / `roi_box_reg_smooth_l1_aux_weight` still load with a deprecation warning.
 
 ### `training`
 
-- **`lr_scheduler_type`**: `multistep`/`step`, `reduce_on_plateau`, `one_cycle`, `cosine_annealing`, `cosine_annealing_with_tail` — see `configs/_base_/schedules/README.md` and [Training — Learning rate scheduling](training.md#learning-rate-scheduling).
+- **`lr_scheduler_type`**: `multistep`/`step`, `reduce_on_plateau`, `one_cycle`, `cosine_annealing`, `cosine_annealing_with_tail` — see `configs/_base_/schedules/README.md` and [Training — Learning rate scheduling](training.md#learning-rate-scheduling). **`lr_scheduler_gamma`** is a number (same factor every drop) or a list (one factor per milestone). Cosine phase length is **`lr_scheduler_cosine_epochs`** (legacy `lr_scheduler_cosine_t_max` remaps).
 - **`freeze_backbone_epochs` / `freeze_rpn_epochs`**: Freeze modules for early epochs (ROI still trains).
 - **`early_stop_*`**: Optional stop when metric plateaus.
 
@@ -141,13 +144,13 @@ For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set
 
 ### `evaluation` vs `production`
 
-| Context | Score threshold | IoU for mAP | NMS / decode on live model |
-|---------|-----------------|-------------|----------------------------|
-| Training loop | `evaluation.*` | `evaluation.iou_threshold` | **`model.*` only** — `production` is **not** applied in `train.py` |
-| Val mAP / `save_predictions` | `production.score_threshold` overrides `evaluation` when set; per-class maps merge | Always `evaluation.iou_threshold` | Checkpoint load may call `apply_inference_config_to_model` |
-| Deploy / sliding window | Same as production + `evaluation` merge | Same | `production` + `dataset.overlap` for margins |
+| Context | Score threshold | IoU for mAP | Final detection NMS |
+|---------|-----------------|-------------|---------------------|
+| Training loop | `evaluation.*` (score may use `production.score_threshold` via merge) | `evaluation.iou_threshold` | **`model.final_nms_iou_threshold`** (recipes: **0.1**) — `production` is **not** applied in `train.py` |
+| `odet preds` / `make eval-val` | `production.score_threshold` overrides `evaluation` when set; per-class maps merge | Always `evaluation.iou_threshold` | **`evaluation.final_nms_iou_threshold`** when set (recipes: **0.1**), else production/model |
+| Deploy / `image_demo` | Same score merge | n/a | **`production.final_nms_iou_threshold`** (recipes: **0.3**) via `apply_inference_config_to_model` |
 
-`production.overlap_pixels` (default 200 when null) and `ignore_margin_pixels` (default `dataset.overlap / 2`) control sliding-window inference in `oriented_det.runtime.inference` (used by `odet preds`, `save_predictions`, deploy).
+`production.overlap_pixels` (default 200 when null) and `ignore_margin_pixels` (default `dataset.overlap / 2`) control native sliding-window inference for `fixed`/`crop` in `oriented_det.runtime.inference` (`odet preds`, `save_predictions`, deploy). `resize_mode: pad` / `keep_ratio` do not native-tile; they use the training whole-image scale path (`keep_ratio` then `pad_size_divisor`).
 
 ### `checkpoint`
 
@@ -167,12 +170,15 @@ Top-level configs (inherit bases under `configs/_base_/`):
 | `configs/oriented_rcnn/dota_le90_3x.json` | Oriented R-CNN | 3× pretrain (inherits 1×) |
 | `configs/rotated_faster_rcnn/dota_le90_1x.json` | Rotated Faster R-CNN | **1× DOTA pretrain** (full recipe) |
 | `configs/rotated_faster_rcnn/dota_le90_3x.json` | Rotated Faster R-CNN | 3× pretrain (inherits 1×) |
+| `configs/rotated_faster_rcnn/hrsc2016_le90_1x.json` | Rotated Faster R-CNN | 1× HRSC2016 (keep-ratio, rotate off) |
+| `configs/rotated_faster_rcnn/hrsc2016_le90_3x.json` | Rotated Faster R-CNN | 3× HRSC2016 (inherits 1×, ±20° rotate) |
 | `configs/rotated_retinanet/dota_le90_1x.json` | RetinaNet | **1× DOTA pretrain** (full recipe) |
 | `configs/rotated_retinanet/dota_le90_3x.json` | RetinaNet | 3× DOTA pretrain (inherits 1×) |
-| `configs/rotated_fcos/dota_le90_1x.json` | Rotated FCOS | 1× DOTA L1 baseline |
-| `configs/rotated_fcos/dota_le90_3x.json` | Rotated FCOS | 3× DOTA L1 (inherits 1×) |
-| `configs/rotated_fcos/dota_le90_3x_riou.json` | Rotated FCOS | **Hub** 3× decoded rIoU |
-| `configs/rotated_fcos/dota_le90_3x_kfiou_aux.json` | Rotated FCOS | Hub 3× L1 + KFIoU aux |
+| `configs/rotated_fcos/dota_le90_1x.json` | Rotated FCOS | 1× DOTA decoded rIoU |
+| `configs/rotated_fcos/dota_le90_3x.json` | Rotated FCOS | **Hub** 3× decoded rIoU |
+| `configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json` | Rotated FCOS | 1× L1 + KFIoU aux |
+| `configs/rotated_fcos/hrsc2016_le90_1x.json` | Rotated FCOS | 1× HRSC2016 rIoU |
+| `configs/rotated_fcos/hrsc2016_le90_3x.json` | Rotated FCOS | 3× HRSC2016 rIoU |
 
 **Bases (not run directly):** `configs/_base_/datasets/`, `configs/_base_/schedules/{1x,3x,6x}.json`, `fp16`, `preprocessing`, `augmentation`.
 
