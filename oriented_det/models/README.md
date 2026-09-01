@@ -11,22 +11,22 @@ Training JSON / `ModelConfig` does **not** expose `anchor_angles` (horizontal RP
 | Mode | Code path | Notes |
 |------|-----------|--------|
 | **Training** (`model.train()`) | `RotatedFasterRCNN.forward` → `self.roi_align` → eager `horizontal_roi_align` (per-FPN loop) | Never calls `faster_rcnn_inference.py`. `torch.onnx.is_in_onnx_export()` is false. |
-| **Eval / deploy (Faster)** | `faster_rcnn_inference.faster_rcnn_inference()` | Shared with PyTorch inference and export wrappers. |
+| **Eval / deploy (Faster)** | `faster_rcnn_inference.faster_rcnn_inference()` | Shared with PyTorch inference. |
 | **ONNX export (Faster)** | Same as eval + `horizontal_roi_align` **masked** branch when `is_in_onnx_export()` | Fixed-shape RoIAlign for traceability; numerically equivalent to eager path (see `tests/test_roi.py::test_horizontal_roi_align_eager_matches_onnx_export_path`). |
-| **Eval (Oriented R-CNN)** | Inline in `OrientedRCNN.forward` (midpoint RPN + `OrientedROIAlign`) | Set `model._deterministic_rpn = True` for export-parity comparisons. |
-| **ONNX export (Oriented)** | `oriented_rcnn_inference_pre_nms_padded` + `oriented_roi_align` **masked** branch | Packed `grid_sample` (no feature `Expand`); always-on proposal `cat` pad; same Keras detect bundle as Faster. |
-| **Eval (FCOS)** | `rotated_fcos_decode_pre_nms` + class-aware rotated NMS | Anchor-free decode (`DistanceAnglePointCoder`). |
-| **ONNX / TF export (FCOS)** | `rotated_fcos_inference_pre_nms_padded` | Same pre-NMS tensors as two-stage; Keras detect bundle does NMS. Mode: `rotated_fcos_pre_nms`. |
+| **Eval (Oriented R-CNN)** | Inline in `OrientedRCNN.forward` (midpoint RPN + `OrientedROIAlign`) | Set `model._deterministic_rpn = True` for deterministic RPN top-k. |
+| **ONNX export (Oriented)** | `oriented_rcnn_inference_pre_nms_padded` + `oriented_roi_align` **masked** branch | Packed `grid_sample` (no feature `Expand`); always-on proposal `cat` pad. |
+| **Eval (FCOS)** | `rotated_fcos_decode_pre_nms` + rotated NMS (`model.nms_class_agnostic`, default class-aware) | Anchor-free decode (`DistanceAnglePointCoder`). |
+| **ONNX export (FCOS)** | `rotated_fcos_inference_pre_nms_padded` | Backbone + head + decode, padded to `nms_pre ×` FPN levels. |
 
-Regression guards: `tests/test_roi.py` (eager vs export RoIAlign), `tests/test_models.py::TestRotatedFasterRCNN::test_full_training_forward_and_backward`, `export/tests/test_faster_rcnn_export_parity.py`, `export/tests/test_oriented_rcnn_export_parity.py`, `export/tests/test_rotated_fcos_export_parity.py`.
+Regression guards: `tests/test_roi.py` (eager vs ONNX-export RoIAlign), `tests/test_models.py::TestRotatedFasterRCNN::test_full_training_forward_and_backward`.
 
 ## Shared inference (`faster_rcnn_inference.py` / `oriented_rcnn_inference.py`)
 
-`RotatedFasterRCNN` eval forwards through `faster_rcnn_inference()` (decode + rotated NMS). The same module powers ONNX export (`export/wrappers.RotatedFasterRCNNPreNmsExportWrapper`) with deterministic RPN top-k and padded proposals for traceable ROI align.
+`RotatedFasterRCNN` eval forwards through `faster_rcnn_inference()` (decode + rotated NMS). The same path is used when `torch.onnx.is_in_onnx_export()` is true (deterministic RPN top-k and padded proposals for traceable ROI align).
 
-`OrientedRCNN` export uses `oriented_rcnn_inference_pre_nms_padded` (`export/wrappers.OrientedRCNNPreNmsExportWrapper`) with deterministic midpoint RPN and padded oriented proposals.
+`OrientedRCNN` ONNX export uses `oriented_rcnn_inference_pre_nms_padded` with deterministic midpoint RPN and padded oriented proposals.
 
-`RotatedFCOS` export uses `rotated_fcos_inference_pre_nms_padded` (`export/wrappers.RotatedFCOSPreNmsExportWrapper`): backbone + head + decode, padded to `nms_pre ×` FPN levels. Same Keras detect bundle as the two-stage models.
+`RotatedFCOS` ONNX export uses `rotated_fcos_inference_pre_nms_padded`: backbone + head + decode, padded to `nms_pre ×` FPN levels.
 
 ## Rotated Faster R-CNN Proposal Filtering
 
@@ -85,7 +85,7 @@ add in-repo CUDA kernels behind the same abstraction after the first release.
 
 - The head outputs **`num_anchors * num_classes`** classification channels (K independent binary classifiers per anchor, **no background channel**). Bias init is `-log((1-π)/π)` with π=0.01 so every class starts at sigmoid ≈ 0.01.
 - Training uses **sigmoid focal loss** (`sigmoid_focal_loss_sum`): one-hot binary targets per anchor, `alpha` (default 0.25) weighting positive entries and `1-alpha` weighting negatives, summed over all anchors/levels and normalized by the **total number of positive anchors** in the batch (MMDet `avg_factor`).
-- Inference scores are **`sigmoid(logits)`** per class; the best class per anchor is kept (labels stay 1-indexed downstream).
+- Inference scores are **`sigmoid(logits)`** per class; the best class per anchor is kept (labels stay 1-indexed downstream). Final NMS is **class-aware** by default (`model.nms_class_agnostic: false`). Set **`model.nms_class_agnostic: true`** (and **`production.nms_class_agnostic`** if deploy should match) for one NMS over all classes.
 
 This replaced an earlier softmax background+K formulation whose background-bias init plus uniform-alpha focal loss starved the classification head of gradients (cls grad norm ~1000x smaller than bbox), producing 0 detections after 12 epochs.
 
@@ -101,11 +101,11 @@ This replaced an earlier softmax background+K formulation whose background-bias 
   - **`kfiou`**: decode to absolute OBBs (×stride when `norm_on_bbox`), then centerness-weighted [`kfiou_loss_per_box`](../ops/kfiou.py).
   - **`riou`**: same decode path, then centerness-weighted [`riou_loss_per_box`](../ops/diff_iou_rotated.py) (`1 -` differentiable polygon IoU). Not sampling `pairwise_rotated_iou`.
 - **Aux:** **`aux_loss_type`** (`kfiou` / `probiou`) + **`aux_loss_weight`** (0 disables). Decoded, centerness-weighted; logged as `loss_box_reg_aux`. Gaussian overlap plus an aspect-gated heading term (`aux_angle_weight`, default 1.0; `aux_angle_lambda` default 1.0). Prefer L1 primary + aux 0.1. Aux `riou` is rejected.
-- **Inference:** `sigmoid(cls) * sigmoid(centerness)` → decode → class-aware rotated NMS. Recipes: **`model` / `evaluation.final_nms_iou_threshold: 0.1`** for train val and `odet preds` / eval-val; **`production.final_nms_iou_threshold: 0.3`** for deploy / `image_demo`.
+- **Inference:** `sigmoid(cls) * sigmoid(centerness)` → decode → rotated NMS. Default is **class-aware** (`model.nms_class_agnostic: false`, DOTA / HRSC). Set **`model.nms_class_agnostic: true`** (and **`production.nms_class_agnostic`** if deploy should match) for one NMS over all classes (lookalike vehicles). Recipes: **`model` / `evaluation.final_nms_iou_threshold: 0.1`** for train val and `odet preds` / eval-val; **`production.final_nms_iou_threshold: 0.3`** for deploy / `image_demo`.
 
 Configs: `configs/rotated_fcos/dota_le90_1x.json` (rIoU 1×), `dota_le90_3x.json` (rIoU 3× Hub recipe), `dota_le90_1x_l1_kfiou_aux.json` (L1 + KFIoU aux 1×). Results: [`configs/rotated_fcos/README.md`](../../configs/rotated_fcos/README.md).
 
-**1× L1 recipe:** `learning_rate=2.5e-4`, `max_detections_per_image=2000`, NMS IoU **0.1**. L1 **3×** eval-val **73.92%** (local baseline). **Hub:** 3× decoded rIoU **81.58%** (`rotated_fcos_dota_le90_3x`, `runs/rotated_fcos/20260822-153943`); report [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md). 3× L1 + KFIoU aux **77.18%** remains as `rotated_fcos_dota_le90_3x_kfiou_aux`.
+**1× L1 recipe:** `learning_rate=2.5e-4`, `max_detections_per_image=2000`, NMS IoU **0.1**. L1 **3×** eval-val **73.92%** (local baseline). **Hub:** 3× decoded rIoU **82.32%** (`rotated_fcos_dota_le90_3x`, `runs/rotated_fcos/20260831-052647`); report [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md). 3× L1 + KFIoU aux **77.18%** remains as `rotated_fcos_dota_le90_3x_kfiou_aux`.
 
 **Checkpoint break (v0.1.1):** RetinaNet now uses MMRotate-style **separate cls/reg 4-conv towers** with **3×3 prediction heads** and **P6/P7 convs on C5** (`LastLevelP6P7`). Pre-change checkpoints (`head.convs`, 1×1 `conv_cls`/`conv_bbox`, `extra_fpn_conv`) are incompatible.
 

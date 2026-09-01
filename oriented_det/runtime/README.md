@@ -1,6 +1,6 @@
 # Runtime (inference, checkpoints, collate)
 
-Shared logic used by `odet` CLIs, deploy, and export — not tied to a top-level `tools/` package path.
+Shared logic used by `odet` CLIs and deploy — not tied to a top-level `tools/` package path.
 
 | Module | Role |
 |--------|------|
@@ -10,6 +10,6 @@ Shared logic used by `odet` CLIs, deploy, and export — not tied to a top-level
 
 Import as `from oriented_det.runtime.inference import run_inference_auto`, etc.
 
-When inference loads a registered checkpoint from `pretrained/` with that checkpoint's manifest `source_recipe`, `checkpoint.py` prefers the checkpoint sidecar JSON (`<weight-stem>.json`) if present. A different user-provided config is kept as-is. This preserves the exact shipped class names and production settings for `odet image-demo`, `odet preds`, deploy, and export callers.
+When inference loads a registered checkpoint from `pretrained/` with that checkpoint's manifest `source_recipe`, `checkpoint.py` prefers the checkpoint sidecar JSON (`<weight-stem>.json`) if present. A different user-provided config is kept as-is. This preserves the exact shipped class names and production settings for `odet image-demo`, `odet preds`, and deploy.
 
 For image demos, use **`odet image-demo`** (config + checkpoint). The module CLI `python -m oriented_det.runtime.inference` is a legacy helper with limited `--model-type` choices (`oriented_rcnn`, `rotated_retinanet` only).

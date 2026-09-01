@@ -797,6 +797,60 @@ class TestRotatedRetinaNet:
             outputs = model(images)
             assert len(outputs) == 2
 
+    def test_exposes_nms_class_agnostic_for_inference_overrides(self):
+        from oriented_det.train.config import ProductionConfig, apply_inference_config_to_model
+
+        model = RotatedRetinaNet(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+        )
+        assert hasattr(model, "nms_class_agnostic")
+        assert model.nms_class_agnostic is False
+        apply_inference_config_to_model(model, ProductionConfig(nms_class_agnostic=True))
+        assert model.nms_class_agnostic is True
+
+    def test_final_nms_class_aware_keeps_overlapping_car_and_truck(self):
+        from oriented_det.models.rotated_retinanet import _apply_retinanet_nms
+
+        boxes = torch.tensor(
+            [[100.0, 100.0, 40.0, 20.0, 0.0], [100.0, 100.0, 40.0, 20.0, 0.0]]
+        )
+        scores = torch.tensor([0.9, 0.8])
+        labels = torch.tensor([1, 2])  # car, truck
+        keep = _apply_retinanet_nms(
+            boxes,
+            scores,
+            labels,
+            iou_threshold=0.1,
+            max_detections_per_image=100,
+            use_gpu_nms=False,
+            class_agnostic=False,
+        )
+        assert keep.numel() == 2
+        assert set(labels[keep].tolist()) == {1, 2}
+
+    def test_final_nms_class_agnostic_suppresses_overlapping_car_and_truck(self):
+        from oriented_det.models.rotated_retinanet import _apply_retinanet_nms
+
+        boxes = torch.tensor(
+            [[100.0, 100.0, 40.0, 20.0, 0.0], [100.0, 100.0, 40.0, 20.0, 0.0]]
+        )
+        scores = torch.tensor([0.9, 0.8])
+        labels = torch.tensor([1, 2])  # car, truck
+        keep = _apply_retinanet_nms(
+            boxes,
+            scores,
+            labels,
+            iou_threshold=0.1,
+            max_detections_per_image=100,
+            use_gpu_nms=False,
+            class_agnostic=True,
+        )
+        assert keep.numel() == 1
+        assert labels[keep].tolist() == [1]
+        assert scores[keep].tolist() == pytest.approx([0.9])
+
 
 class TestRotatedFasterRCNN:
     """Test that RotatedFasterRCNN works correctly."""
@@ -1333,3 +1387,61 @@ class TestRotatedFCOS:
         outs = model(images)
         assert len(outs) == 2
         assert "rboxes" in outs[0] and "rboxes" in outs[1]
+
+    def test_exposes_nms_class_agnostic_for_inference_overrides(self):
+        from oriented_det.models import RotatedFCOS
+        from oriented_det.train.config import ProductionConfig, apply_inference_config_to_model
+
+        model = RotatedFCOS(
+            num_classes=2,
+            backbone_name="resnet18",
+            pretrained_backbone=False,
+            returned_layers=[2, 3, 4],
+            fpn_extra_level=True,
+            fpn_strides=[8, 16, 32, 64, 128],
+        )
+        assert hasattr(model, "nms_class_agnostic")
+        assert model.nms_class_agnostic is False
+        apply_inference_config_to_model(model, ProductionConfig(nms_class_agnostic=True))
+        assert model.nms_class_agnostic is True
+
+    def test_final_nms_class_aware_keeps_overlapping_car_and_truck(self):
+        from oriented_det.models.rotated_fcos import _apply_fcos_nms
+
+        boxes = torch.tensor(
+            [[100.0, 100.0, 40.0, 20.0, 0.0], [100.0, 100.0, 40.0, 20.0, 0.0]]
+        )
+        scores = torch.tensor([0.9, 0.8])
+        labels = torch.tensor([1, 2])  # car, truck
+        out_boxes, out_scores, out_labels = _apply_fcos_nms(
+            boxes,
+            scores,
+            labels,
+            iou_threshold=0.1,
+            max_detections_per_image=2000,
+            final_nms_use_cpu=True,
+            class_agnostic=False,
+        )
+        assert out_boxes.size(0) == 2
+        assert set(out_labels.tolist()) == {1, 2}
+
+    def test_final_nms_class_agnostic_suppresses_overlapping_car_and_truck(self):
+        from oriented_det.models.rotated_fcos import _apply_fcos_nms
+
+        boxes = torch.tensor(
+            [[100.0, 100.0, 40.0, 20.0, 0.0], [100.0, 100.0, 40.0, 20.0, 0.0]]
+        )
+        scores = torch.tensor([0.9, 0.8])
+        labels = torch.tensor([1, 2])  # car, truck
+        out_boxes, out_scores, out_labels = _apply_fcos_nms(
+            boxes,
+            scores,
+            labels,
+            iou_threshold=0.1,
+            max_detections_per_image=2000,
+            final_nms_use_cpu=True,
+            class_agnostic=True,
+        )
+        assert out_boxes.size(0) == 1
+        assert out_scores.tolist() == pytest.approx([0.9])
+        assert out_labels.tolist() == [1]

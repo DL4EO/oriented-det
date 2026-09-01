@@ -155,7 +155,7 @@ Rotated RetinaNet uses a 5-parameter encoding scheme for oriented bounding boxes
 - **FPN extra levels**: `LastLevelP6P7` convs on C5 (`fpn_extra_level: true`), not max-pool P6
 - **Assigner**: rotated IoU (`use_hbb_for_matching: false`), pos 0.5 / neg 0.4, `min_pos_iou=0` with low-quality matching
 - **Evaluation**: mAP every 4 epochs (`compute_map_every_n_epochs: 4`); non-mAP val epochs skip CPU GT–IoU matching (forward + detection counts only)
-- **Inference (val/train)**: GPU sampling NMS (`model.final_nms_use_cpu: false`); pre-NMS score filter at `inference_pre_nms_score_threshold` (0.05)
+- **Inference (val/train)**: GPU sampling NMS (`model.final_nms_use_cpu: false`); class-aware by default (`model.nms_class_agnostic: false`); set `model.nms_class_agnostic: true` (and `production.nms_class_agnostic` if deploy should match) for lookalike vehicle classes; pre-NMS score filter at `inference_pre_nms_score_threshold` (0.05)
 - **Box coder**: `roi_norm_factor: null`, `roi_edge_swap: true`, L1 regression loss
 - **Schedule**: 12 epochs, lr 0.0025, milestones [8, 11], batch 2, trainval tiles, diagonal flips
 - **Inference**: score 0.05, NMS IoU **0.1**, max 2000 dets/image

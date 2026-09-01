@@ -122,6 +122,46 @@ def _normalize_dota_coords(coords: Sequence[float]) -> str:
     return " ".join(f"{float(value):.3f}" for value in coords)
 
 
+def _split_playground_tags(class_name: str) -> List[str]:
+    """Split a Playground concatenated class_name on commas into stripped tags."""
+    return [p.strip() for p in str(class_name).split(",") if p.strip()]
+
+
+def apply_airbus_difficult_tags(
+    class_name: str,
+    *,
+    difficult_tags: Optional[Sequence[str]] = None,
+    base_difficult: int = 0,
+) -> Tuple[str, int]:
+    """Strip configured difficult tags and set difficult=1 when any match.
+
+    Playground stores multi-tag objects as ``", ".join(sorted(tags))``. Exact tag
+    match (not substring): if any part is in ``difficult_tags``, set difficult=1
+    (OR with ``base_difficult``) and rejoin remaining parts with ``", "``.
+
+    Raises:
+        ValueError: if stripping leaves an empty semantic name.
+    """
+    tags = _split_playground_tags(class_name)
+    if not tags:
+        raise ValueError(f"Empty class_name after tag split: {class_name!r}")
+
+    difficult_set = {str(t).strip() for t in (difficult_tags or []) if str(t).strip()}
+    if not difficult_set:
+        return str(class_name).strip(), int(base_difficult)
+
+    has_difficult = any(t in difficult_set for t in tags)
+    remaining = [t for t in tags if t not in difficult_set]
+    if not remaining:
+        raise ValueError(
+            f"class_name {class_name!r} has only difficult_tags {sorted(difficult_set)}; "
+            "no semantic class left after stripping. Map or filter this label explicitly."
+        )
+    semantic = ", ".join(remaining)
+    difficult = 1 if has_difficult else 0
+    return semantic, int(base_difficult) | difficult
+
+
 def discover_airbus_tiles(data_root: str | Path) -> List[TileRecord]:
     """Discover all tiles in Airbus Playground export folders.
 
@@ -165,11 +205,16 @@ def _load_airbus_label_rows(
     difficulty: int = 0,
     ignore_labels: Optional[set[str]] = None,
     map_labels: Optional[Dict[str, str]] = None,
+    difficult_tags: Optional[Sequence[str]] = None,
     stats: Optional[Dict[str, Any]] = None,
 ) -> List[Tuple[str, str, int]]:
     """Parse one Airbus label JSON into DOTA coordinate rows.
 
     Returns list of tuples: (dota_coords, class_name, difficult).
+
+    When ``difficult_tags`` is set (e.g. ``["Partially Hidden"]``), matching tags
+    are stripped from the semantic class name and ``difficult`` is set to 1.
+    ``map_labels`` is applied to the remaining concatenated name (exact match).
     """
     if not label_path.exists():
         return []
@@ -182,6 +227,7 @@ def _load_airbus_label_rows(
     content = json.loads(label_path.read_text(encoding="utf-8"))
     features = content.get("features", [])
     rows: List[Tuple[str, str, int]] = []
+    difficult_set = {str(t).strip() for t in (difficult_tags or []) if str(t).strip()}
 
     for feature in features:
         properties = feature.get("properties", {}) or {}
@@ -194,12 +240,23 @@ def _load_airbus_label_rows(
         tags = properties.get("tags", [])
         if not tags:
             continue
-        # Airbus uses many tags per object; sort then concatenate with ", " for stable labels
-        class_name = ", ".join(sorted(str(t).strip() for t in tags)).strip()
-        if not class_name:
+        raw_tags = sorted(str(t).strip() for t in tags if str(t).strip())
+        if not raw_tags:
             continue
+        # Airbus uses many tags per object; sort then concatenate with ", " for stable labels
+        raw_class_name = ", ".join(raw_tags)
         if stats is not None:
-            stats["raw_label_counts"][class_name] += 1
+            stats["raw_label_counts"][raw_class_name] += 1
+
+        has_difficult = any(t in difficult_set for t in raw_tags)
+        semantic_tags = [t for t in raw_tags if t not in difficult_set]
+        if has_difficult and not semantic_tags:
+            raise ValueError(
+                f"{label_path}: tags {raw_tags} have only difficult_tags "
+                f"{sorted(difficult_set)}; no semantic class left after stripping."
+            )
+        class_name = ", ".join(semantic_tags) if semantic_tags else raw_class_name
+        object_difficult = 1 if has_difficult else int(difficulty)
 
         if ignore_labels is not None and class_name in ignore_labels:
             if stats is not None:
@@ -225,7 +282,7 @@ def _load_airbus_label_rows(
             continue
 
         flat = [float(v) for xy in coords for v in xy]
-        rows.append((_normalize_dota_coords(flat), mapped_name, int(difficulty)))
+        rows.append((_normalize_dota_coords(flat), mapped_name, int(object_difficult)))
         if stats is not None:
             stats["final_label_counts"][mapped_name] += 1
             stats["kept_objects"] += 1
@@ -271,6 +328,7 @@ def generate_airbus_playground_csvs(
     seed: int = 42,
     ignore_labels: Optional[Sequence[str]] = None,
     map_labels: Optional[Dict[str, str]] = None,
+    difficult_tags: Optional[Sequence[str]] = None,
     include_stats: bool = False,
 ) -> Tuple[Path, Path] | Tuple[Path, Path, Dict[str, Any]]:
     """Generate annotations.csv and split.csv from Airbus export folders.
@@ -279,6 +337,9 @@ def generate_airbus_playground_csvs(
     ``0 .. num_splits-1`` (balanced round-robin on a shuffled group list). The ``split`` column
     stores that integer as text. By convention fold ``0`` is the default validation fold; set
     ``dataset.val_split_id`` in the training config to use another fold as validation.
+
+    When ``difficult_tags`` is set (e.g. ``["Partially Hidden"]``), matching tags are stripped
+    from ``class_name`` and the CSV ``difficult`` column is set to 1.
     """
     if num_splits < 2:
         raise ValueError("num_splits must be at least 2.")
@@ -328,6 +389,7 @@ def generate_airbus_playground_csvs(
             root / tile.label_relpath,
             ignore_labels=ignore_set,
             map_labels=map_dict,
+            difficult_tags=difficult_tags,
             stats=stats,
         )
         for dota_coords, class_name, difficult in label_rows:
@@ -417,6 +479,7 @@ class AirbusPlaygroundCSVDataset:
         ignore_labels: Optional[Sequence[str]] = None,
         lookalike_labels: Optional[Sequence[str]] = None,
         map_labels: Optional[Dict[str, str]] = None,
+        difficult_tags: Optional[Sequence[str]] = None,
         filter_empty_gt: bool = False,
     ):
         from .lookalike import resolve_lookalike_label_set
@@ -445,6 +508,7 @@ class AirbusPlaygroundCSVDataset:
         # Lookalike wins over ignore_labels.
         self.ignore_labels -= self._lookalike_set
         self.map_labels = dict(map_labels or {})
+        self.difficult_tags = [str(t).strip() for t in (difficult_tags or []) if str(t).strip()]
         self.filter_empty_gt = bool(filter_empty_gt)
 
         self.annotations_path = _resolve_csv_path(self.data_root, annotations_file)
@@ -518,9 +582,30 @@ class AirbusPlaygroundCSVDataset:
                 if tile_relpath not in selected_tiles:
                     continue
 
-                class_name = str(row.get("class_name", "")).strip()
-                if not class_name:
+                raw_class_name = str(row.get("class_name", "")).strip()
+                if not raw_class_name:
                     continue
+
+                try:
+                    base_difficult = int(str(row.get("difficult", "0")).strip() or "0")
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Invalid difficult value in {self.annotations_path} "
+                        f"for tile {tile_relpath!r}: {row.get('difficult')!r}"
+                    ) from exc
+
+                try:
+                    class_name, difficult = apply_airbus_difficult_tags(
+                        raw_class_name,
+                        difficult_tags=self.difficult_tags,
+                        base_difficult=base_difficult,
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        f"Failed to apply difficult_tags for tile {tile_relpath!r} "
+                        f"class_name={raw_class_name!r}: {exc}"
+                    ) from exc
+
                 class_name = self.map_labels.get(class_name, class_name)
                 is_lookalike = class_name in self._lookalike_set
                 # Lookalike wins over ignore_labels (checked after map_labels).
@@ -531,20 +616,29 @@ class AirbusPlaygroundCSVDataset:
                     and class_name not in self.allowed_classes
                     and not is_lookalike
                 ):
-                    continue
+                    raise ValueError(
+                        f"Unknown class_name {class_name!r} (from CSV {raw_class_name!r}) "
+                        f"on tile {tile_relpath!r} is not in allowed_classes={sorted(self.allowed_classes)}. "
+                        "Add a dataset.map_labels entry for the full concatenated string, "
+                        "or include it in allowed_classes. Do not silently drop."
+                    )
 
-                difficult = int(str(row.get("difficult", "0")).strip() or "0")
                 if self.difficult_strategy == "drop" and difficult == 1:
                     continue
 
                 coords = str(row.get("dota_coords", "")).strip()
                 if not coords:
                     continue
-                line = f"{coords} {class_name} {difficult}"
                 try:
-                    ann = DOTAAnnotation.from_line(line)
-                except Exception:
-                    continue
+                    coord_vals = [float(x) for x in coords.split()]
+                    if len(coord_vals) != 8:
+                        raise ValueError(f"expected 8 floats, got {len(coord_vals)}")
+                    ann = DOTAAnnotation.from_corners(coord_vals, class_name, difficult)
+                except Exception as exc:
+                    raise ValueError(
+                        f"Failed to parse annotation for tile {tile_relpath!r} "
+                        f"class_name={class_name!r} dota_coords={coords!r}: {exc}"
+                    ) from exc
                 annotations_by_tile[tile_relpath].append(ann)
 
         return annotations_by_tile
@@ -628,6 +722,7 @@ __all__ = [
     "resolve_playground_csv_filenames",
     "timestamped_annotations_filename",
     "timestamped_split_filename",
+    "apply_airbus_difficult_tags",
     "AirbusPlaygroundCSVDataset",
     "format_airbus_empty_gt_filter_log",
 ]

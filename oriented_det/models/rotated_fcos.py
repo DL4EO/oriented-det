@@ -692,6 +692,7 @@ class RotatedFCOS(nn.Module):
         nms_pre: int = 2000,
         min_bbox_size: float = 0.0,
         final_nms_use_cpu: bool = False,
+        nms_class_agnostic: bool = False,
         final_nms_iou_schedule_epochs: Optional[List[int]] = None,
         final_nms_iou_schedule_values: Optional[List[float]] = None,
         **kwargs: Any,
@@ -736,6 +737,7 @@ class RotatedFCOS(nn.Module):
         self.nms_pre = int(nms_pre)
         self.min_bbox_size = float(min_bbox_size)
         self.final_nms_use_cpu = bool(final_nms_use_cpu)
+        self.nms_class_agnostic = bool(nms_class_agnostic)
         self._final_nms_iou_schedule_epochs = final_nms_iou_schedule_epochs
         self._final_nms_iou_schedule_values = final_nms_iou_schedule_values
 
@@ -882,13 +884,14 @@ class RotatedFCOS(nn.Module):
                     }
                 )
                 continue
-            boxes, scores, labels = _apply_fcos_class_aware_nms(
+            boxes, scores, labels = _apply_fcos_nms(
                 boxes,
                 scores,
                 labels,
                 iou_threshold=self.final_nms_iou_threshold,
                 max_detections_per_image=self.max_detections_per_image,
                 final_nms_use_cpu=self.final_nms_use_cpu,
+                class_agnostic=self.nms_class_agnostic,
             )
             outputs.append(
                 {
@@ -1073,7 +1076,7 @@ def rotated_fcos_inference_pre_nms_padded(
     return boxes, scores, labels, count
 
 
-def _apply_fcos_class_aware_nms(
+def _apply_fcos_nms(
     boxes: torch.Tensor,
     scores: torch.Tensor,
     labels: torch.Tensor,
@@ -1081,8 +1084,29 @@ def _apply_fcos_class_aware_nms(
     iou_threshold: float,
     max_detections_per_image: int,
     final_nms_use_cpu: bool,
+    class_agnostic: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Class-aware rotated NMS + global top-k (eval path; not exported)."""
+    """Rotated NMS + global top-k (eval path; not exported).
+
+    Class-aware (default): NMS per label, then global top-k.
+    Class-agnostic: one ``rotated_nms`` over all boxes, then score sort.
+    """
+    if boxes.numel() == 0:
+        return boxes, scores, labels
+
+    if class_agnostic:
+        keep_indices = rotated_nms(
+            boxes,
+            scores,
+            iou_threshold=iou_threshold,
+            max_detections=max_detections_per_image,
+            force_cpu=final_nms_use_cpu,
+        )
+        if len(keep_indices) > 0:
+            _, order = scores[keep_indices].sort(descending=True)
+            keep_indices = keep_indices[order]
+        return boxes[keep_indices], scores[keep_indices], labels[keep_indices]
+
     keep_indices = []
     for cls_id in labels.unique():
         cls_mask = labels == cls_id
@@ -1115,3 +1139,24 @@ def _apply_fcos_class_aware_nms(
         scores = scores[topk]
         labels = labels[topk]
     return boxes, scores, labels
+
+
+def _apply_fcos_class_aware_nms(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    *,
+    iou_threshold: float,
+    max_detections_per_image: int,
+    final_nms_use_cpu: bool,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Backward-compatible alias for class-aware ``_apply_fcos_nms``."""
+    return _apply_fcos_nms(
+        boxes,
+        scores,
+        labels,
+        iou_threshold=iou_threshold,
+        max_detections_per_image=max_detections_per_image,
+        final_nms_use_cpu=final_nms_use_cpu,
+        class_agnostic=False,
+    )

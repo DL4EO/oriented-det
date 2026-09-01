@@ -42,6 +42,39 @@ def test_dota_annotation_parsing_comma_format():
     assert ann2.difficult == 1
 
 
+def test_dota_from_line_space_separated_class_with_comma():
+    """Space-separated lines keep commas inside class_name (Airbus synthetic line)."""
+    line = "0 0 10 0 10 10 0 10 car, van and pickup 0"
+    ann = DOTAAnnotation.from_line(line)
+    assert ann.class_name == "car, van and pickup"
+    assert ann.difficult == 0
+
+
+def test_dota_from_line_does_not_use_comma_path_for_space_coords():
+    """A comma in the category must not force the official 10-field comma grammar."""
+    line = "10.0 20.0 30.0 20.0 30.0 40.0 10.0 40.0 Partially Hidden, car 1"
+    ann = DOTAAnnotation.from_line(line)
+    assert ann.class_name == "Partially Hidden, car"
+    assert ann.difficult == 1
+
+
+def test_dota_from_corners_builds_annotation():
+    coords = [0.0, 0.0, 10.0, 0.0, 10.0, 10.0, 0.0, 10.0]
+    ann = DOTAAnnotation.from_corners(coords, "car, van and pickup", difficult=1)
+    assert ann.class_name == "car, van and pickup"
+    assert ann.difficult == 1
+    assert len(ann.polygon) == 4
+    assert isinstance(ann.rbox, RBox)
+
+
+def test_dota_from_line_official_comma_with_comma_in_category():
+    """Official comma lines with extra category fields join category parts."""
+    line = "0, 0, 10, 0, 10, 10, 0, 10, car, van and pickup, 0"
+    ann = DOTAAnnotation.from_line(line)
+    assert ann.class_name == "car, van and pickup"
+    assert ann.difficult == 0
+
+
 def test_dota_sample_filtering():
     """Test filtering of DOTA samples by class and difficulty."""
     annotations = [

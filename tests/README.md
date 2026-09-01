@@ -26,12 +26,6 @@ With coverage:
 pytest --cov=oriented_det tests/
 ```
 
-Export tests (separate):
-
-```bash
-cd export && make test
-```
-
 CI runs `pytest tests/` on push/PR (see `.github/workflows/test.yml`).
 
 ## Test modules

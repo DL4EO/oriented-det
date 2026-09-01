@@ -87,7 +87,7 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 
 | Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
 |------|--------|----------------|--------|--------------|-----------|
-| `rotated_fcos_dota_le90_3x` | 3× decoded rIoU primary | 81.58% | [`dota_le90_3x.json`](../configs/rotated_fcos/dota_le90_3x.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.json`](./rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.log`](./rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.log) |
+| `rotated_fcos_dota_le90_3x` | 3× decoded rIoU primary | 82.32% | [`dota_le90_3x.json`](../configs/rotated_fcos/dota_le90_3x.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log) |
 | `rotated_fcos_dota_le90_3x_kfiou_aux` | 3× L1 + KFIoU aux 0.1 | 77.18% | [`dota_le90_1x_l1_kfiou_aux.json`](../configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json) (1× lineage; 3× recipe retired) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log) |
 
 ## HRSC2016 le90 zoo

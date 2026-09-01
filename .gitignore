@@ -15,9 +15,6 @@ tools/test_*
 # Local deploy overrides (copy from description_overrides.example.json in each deploy tree)
 deploy/description_overrides.json
 
-# Export artifacts (ONNX / SavedModel / TFLite)
-export/artifacts/
-
 # Training and prediction folders
 runs/
 runs.*/

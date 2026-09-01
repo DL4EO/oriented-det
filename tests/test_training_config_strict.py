@@ -21,6 +21,7 @@ from oriented_det.train.config import (
     TrainingConfig,
     resolve_inference_score_threshold,
     resolve_inference_sliding_window_overlap_pixels,
+    resolve_preds_score_threshold,
     resolve_preds_final_nms_iou_threshold,
     effective_eval_metric_thresholds,
     apply_inference_config_to_model,
@@ -154,6 +155,49 @@ def test_apply_inference_config_to_model_sets_existing_attrs():
     assert m.inference_pre_nms_score_threshold == 0.12
     assert m.rpn_pre_nms_top_n == 4000
     assert m.final_nms_iou_threshold == 0.35
+
+
+def test_resolve_preds_score_ignores_production_and_train_eval_floor(tmp_path: Path):
+    p = tmp_path / "preds_score.json"
+    p.write_text(
+        json.dumps(
+            {
+                "model_type": "rotated_fcos",
+                "dataset": {"data_root": str(tmp_path)},
+                "evaluation": {"score_threshold": 0.3},
+                "production": {"score_threshold": 0.3},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = TrainingExperimentConfig.load(p)
+    sc, src = resolve_preds_score_threshold(cfg)
+    assert sc == pytest.approx(0.05)
+    assert "0.05" in src
+    assert resolve_inference_score_threshold(cfg) == pytest.approx(0.3)
+    train_sc, _, _ = effective_eval_metric_thresholds(cfg)
+    assert train_sc == pytest.approx(0.3)
+
+    sc_cli, src_cli = resolve_preds_score_threshold(cfg, cli_score_threshold=0.12)
+    assert sc_cli == pytest.approx(0.12)
+    assert "CLI" in src_cli
+
+    p_set = tmp_path / "preds_score_set.json"
+    p_set.write_text(
+        json.dumps(
+            {
+                "model_type": "rotated_fcos",
+                "dataset": {"data_root": str(tmp_path)},
+                "evaluation": {"score_threshold": 0.3, "preds_score_threshold": 0.08},
+                "production": {"score_threshold": 0.3},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg_set = TrainingExperimentConfig.load(p_set)
+    sc_set, src_set = resolve_preds_score_threshold(cfg_set)
+    assert sc_set == pytest.approx(0.08)
+    assert "preds_score_threshold" in src_set
 
 
 def test_resolve_preds_final_nms_prefers_evaluation_over_production(tmp_path: Path):

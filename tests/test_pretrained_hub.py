@@ -47,7 +47,7 @@ def test_list_assets():
         "rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.pth"
     )
     assert assets["rotated_fcos_dota_le90_3x"] == (
-        "rotated_fcos_r50_fpn_dota_le90_3x_riou-a39c80c1.pth"
+        "rotated_fcos_r50_fpn_dota_le90_3x-6e383331.pth"
     )
     assert assets["rotated_fcos_dota_le90_3x_kfiou_aux"] == (
         "rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.pth"

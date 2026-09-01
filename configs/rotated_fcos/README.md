@@ -25,15 +25,15 @@ DOTA1.0 (pretrain: **train+val / val**). Published mAP = **`make eval-val`** mAP
 | 1× L1 + KFIoU aux | [`dota_le90_1x_l1_kfiou_aux.json`](./dota_le90_1x_l1_kfiou_aux.json) | `runs/rotated_fcos/20260814-074221` | `best_mAP_0.77.pth` | **76.53%** | **69.62%** | `predictions/20260814_181423/` |
 | 1× rIoU | [`dota_le90_1x.json`](./dota_le90_1x.json) | `runs/rotated_fcos/20260821-071344` | `best_mAP_0.80.pth` | **80.43%** | **74.04%** | `predictions/20260822_152147/` |
 | 3× L1 + KFIoU aux | — (Hub weights only) | `runs/rotated_fcos/20260818-100049` | `best_mAP_0.84.pth` | **84.07%** | **77.18%** | Hub `rotated_fcos_dota_le90_3x_kfiou_aux`; [`docs/eval-reports/rotated_fcos_dota_le90_3x_kfiou_aux/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x_kfiou_aux/model_analysis.md) |
-| **3× rIoU** | [`dota_le90_3x.json`](./dota_le90_3x.json) | `runs/rotated_fcos/20260822-153943` | `best_mAP_0.88.pth` | **88.03%** | **81.58%** | Hub `rotated_fcos_dota_le90_3x`; [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md) |
+| **3× rIoU** | [`dota_le90_3x.json`](./dota_le90_3x.json) | `runs/rotated_fcos/20260831-052647` | `best_mAP_0.82.pth` | **82.49%** | **82.32%** | Hub `rotated_fcos_dota_le90_3x`; [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md) |
 
 † Training periodic/final mAP uses `evaluation.score_threshold: 0.3` and non-empty tiles only.  
 ‡ 1× L1 eval-val was measured with production NMS **0.3**; re-run with NMS **0.1** before comparing to 3×.
 
-**3× rIoU** is **+7.7** eval-val mAP50 vs this repo’s **3× L1** (81.58% vs 73.92%) and **+4.4** vs Hub **3× KFIoU aux** (77.18%). Viewer:
+**3× rIoU** is **+8.4** eval-val mAP50 vs this repo’s **3× L1** (82.32% vs 73.92%) and **+5.1** vs Hub **3× KFIoU aux** (77.18%). Viewer:
 
 ```bash
-make viewer VIEWER_PRED_DIR=predictions/20260824_212907 DOTA_DATA_ROOT=/path/to/DOTA-v1.0-tiled
+make viewer VIEWER_PRED_DIR=predictions/20260901_053115 DOTA_DATA_ROOT=/path/to/DOTA-v1.0-tiled
 ```
 
 HRSC2016 (ImageSets **trainval / test**, 453 images). Whole-image `keep_ratio` + pad-32, decoded rIoU, rotate p=0.5 ±20°.
@@ -49,7 +49,7 @@ odet pretrained download rotated_fcos_hrsc2016_le90_3x
 
 ## Eval NMS (dense scenes)
 
-`model.final_nms_iou_threshold` and **`evaluation.final_nms_iou_threshold`** are **0.1** (MMRotate FCOS test NMS); **`production.final_nms_iou_threshold`** is **0.3** for deploy / `image_demo`. `make eval-val` / `odet preds` prefer `evaluation.final_nms_iou_threshold`.
+`model.final_nms_iou_threshold` and **`evaluation.final_nms_iou_threshold`** are **0.1** (MMRotate FCOS test NMS); **`production.final_nms_iou_threshold`** is **0.3** for deploy / `image_demo`. `make eval-val` / `odet preds` prefer `evaluation.final_nms_iou_threshold`. Default NMS is class-aware; set `model.nms_class_agnostic: true` (and `production.nms_class_agnostic` if deploy should match) for lookalike vehicle classes.
 
 ## L1 vs rIoU recipe notes
 
@@ -70,6 +70,4 @@ odet train --config configs/rotated_fcos/hrsc2016_le90_3x.json
 make wizard CONFIG=configs/rotated_fcos/dota_le90_3x.json
 ```
 
-`production.score_threshold` stays **0.05** (from 1×) so `make eval-val` matches the published protocol. Periodic train mAP uses `evaluation.score_threshold: 0.3` for speed.
-
-TF/ONNX detect export: `odet export-tf --mode rotated_fcos_pre_nms --config … --checkpoint …` (see [`export/README.md`](../../export/README.md)).
+`make eval-val` / `odet preds` use **`evaluation.preds_score_threshold`** or **0.05** (published protocol), not `production.score_threshold` or train-val `evaluation.score_threshold: 0.3`. Deploy / `image_demo` still use `production.score_threshold`.

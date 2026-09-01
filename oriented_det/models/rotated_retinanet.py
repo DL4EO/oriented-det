@@ -691,7 +691,8 @@ class RotatedRetinaNet(nn.Module):
         norm_factor: Optional angle scaling for encode/decode (MMRotate Rotated RetinaNet uses None)
         edge_swap: Whether to use edge_swap in bbox coder (MMRotate uses True)
         use_hbb_for_matching: If True, use HBB IoU for anchor-GT matching (optional; priors use a single reference angle).
-        final_nms_use_cpu: If True, skip GPU sampling NMS and run final class-aware NMS with exact polygon IoU on CPU.
+        final_nms_use_cpu: If True, skip GPU sampling NMS and run final NMS with exact polygon IoU on CPU.
+        nms_class_agnostic: If True, one oriented NMS over all classes (default False = per-class).
     
     Example:
         >>> model = RotatedRetinaNet(num_classes=15, backbone_name="resnet50")
@@ -734,6 +735,7 @@ class RotatedRetinaNet(nn.Module):
         box_reg_probiou_mode: Optional[str] = None,
         use_hbb_for_matching: bool = False,
         final_nms_use_cpu: bool = False,
+        nms_class_agnostic: bool = False,
         returned_layers: Optional[List[int]] = None,
         fpn_strides: Optional[List[int]] = None,
         fpn_extra_level: bool = False,
@@ -758,6 +760,7 @@ class RotatedRetinaNet(nn.Module):
         self.box_reg_probiou_mode = box_reg_probiou_mode
         self.use_hbb_for_matching = use_hbb_for_matching
         self.final_nms_use_cpu = final_nms_use_cpu
+        self.nms_class_agnostic = bool(nms_class_agnostic)
         self.octave_base_scale = octave_base_scale
         self.scales_per_octave = scales_per_octave
         self.box_reg_loss_type = box_reg_loss_type
@@ -1062,9 +1065,6 @@ class RotatedRetinaNet(nn.Module):
                 # Save decoded boxes before NMS for debug logging (RetinaNet "proposals" analogue)
                 proposals_for_debug = all_boxes.detach().cpu() if return_debug else None
                 
-                # Apply oriented NMS (class-aware)
-                # Use GPU-accelerated NMS when available (much faster)
-                # Use GPU NMS on CUDA or MPS (Apple Silicon)
                 device_type = images_tensor.device.type
                 use_gpu_nms = (
                     not self.final_nms_use_cpu
@@ -1079,109 +1079,19 @@ class RotatedRetinaNet(nn.Module):
                         )
                     )
                 )
-                
-                keep_indices_tensor = None
-                if use_gpu_nms:
-                    # GPU-accelerated NMS: handle class-aware NMS by grouping by class
-                    # Group boxes by class and run NMS per class
-                    unique_labels = torch.unique(all_labels)
-                    all_keep_indices = []
-                    
-                    for label in unique_labels:
-                        class_mask = all_labels == label
-                        class_boxes = all_boxes[class_mask]
-                        class_scores = all_scores[class_mask]
-                        class_indices = torch.where(class_mask)[0]
-                        
-                        if len(class_boxes) > 0:
-                            # Pre-filter: limit to top boxes per class to avoid memory issues
-                            # Use a reasonable limit (e.g., 2000 boxes) before NMS to prevent OOM
-                            # This is much larger than the final global limit but prevents huge IoU matrices
-                            max_boxes_per_class = 2000
-                            if len(class_boxes) > max_boxes_per_class:
-                                # Sort by score and take top N
-                                _, top_indices = class_scores.sort(descending=True)
-                                top_indices = top_indices[:max_boxes_per_class]
-                                class_boxes = class_boxes[top_indices]
-                                class_scores = class_scores[top_indices]
-                                class_indices = class_indices[top_indices]
-                            
-                            # Run GPU NMS for this class
-                            # Pass None to let NMS keep all results, we'll apply global limit later
-                            class_keep = rotated_nms(
-                                class_boxes,
-                                class_scores,
-                                iou_threshold=self.final_nms_iou_threshold,
-                                max_detections=None,  # No per-class limit - apply globally later
-                            )
-                            # Map back to original indices
-                            all_keep_indices.append(class_indices[class_keep])
-                    
-                    if all_keep_indices:
-                        # Filter out empty tensors before concatenating
-                        non_empty_indices = [idx for idx in all_keep_indices if len(idx) > 0]
-                        if non_empty_indices:
-                            keep_indices_tensor = torch.cat(non_empty_indices)
-                            # Sort by score to maintain order
-                            keep_scores = all_scores[keep_indices_tensor]
-                            _, sort_order = keep_scores.sort(descending=True)
-                            keep_indices_tensor = keep_indices_tensor[sort_order]
-                            
-                            # Apply max_detections limit across all classes
-                            if self.max_detections_per_image is not None:
-                                keep_indices_tensor = keep_indices_tensor[:self.max_detections_per_image]
-                        else:
-                            # All classes had empty results after NMS
-                            keep_indices_tensor = None
-                else:
-                    # Fall back to CPU NMS (class-aware). Pre-filter per class like the GPU path.
-                    keep_indices: list[int] = []
-                    unique_labels = torch.unique(all_labels)
-                    max_boxes_per_class = 2000
-                    for label in unique_labels:
-                        class_mask = all_labels == label
-                        class_boxes = all_boxes[class_mask]
-                        class_scores = all_scores[class_mask]
-                        class_indices = torch.where(class_mask)[0]
-                        if len(class_boxes) == 0:
-                            continue
-                        if len(class_boxes) > max_boxes_per_class:
-                            _, top_indices = class_scores.sort(descending=True)
-                            top_indices = top_indices[:max_boxes_per_class]
-                            class_boxes = class_boxes[top_indices]
-                            class_scores = class_scores[top_indices]
-                            class_indices = class_indices[top_indices]
-                        rboxes = tensor_to_rboxes(class_boxes)
-                        class_keep = nms.oriented_nms(
-                            boxes=rboxes,
-                            scores=class_scores.cpu().tolist(),
-                            labels=[int(label.item())] * len(rboxes),
-                            iou_threshold=self.final_nms_iou_threshold,
-                            max_detections=None,
-                        )
-                        keep_indices.extend(class_indices[class_keep].tolist())
-                    if keep_indices:
-                        keep_tensor = torch.tensor(keep_indices, dtype=torch.long, device=all_boxes.device)
-                        keep_scores = all_scores[keep_tensor]
-                        _, sort_order = keep_scores.sort(descending=True)
-                        keep_indices = keep_tensor[sort_order].tolist()
-                        if self.max_detections_per_image is not None:
-                            keep_indices = keep_indices[: self.max_detections_per_image]
-                    else:
-                        keep_indices = []
-                
-                # Filter results
-                if use_gpu_nms and keep_indices_tensor is not None and len(keep_indices_tensor) > 0:
-                    # GPU path: use tensor indices directly
-                    output_rboxes = tensor_to_rboxes(all_boxes[keep_indices_tensor])
-                    output_labels = all_labels[keep_indices_tensor]
-                    output_scores = all_scores[keep_indices_tensor]
-                elif not use_gpu_nms and keep_indices:
-                    # CPU path: convert from list indices
-                    rboxes = tensor_to_rboxes(all_boxes)
-                    output_rboxes = [rboxes[i] for i in keep_indices]
-                    output_labels = all_labels[keep_indices]
-                    output_scores = all_scores[keep_indices]
+                keep = _apply_retinanet_nms(
+                    all_boxes,
+                    all_scores,
+                    all_labels,
+                    iou_threshold=self.final_nms_iou_threshold,
+                    max_detections_per_image=self.max_detections_per_image,
+                    use_gpu_nms=use_gpu_nms,
+                    class_agnostic=self.nms_class_agnostic,
+                )
+                if keep.numel() > 0:
+                    output_rboxes = tensor_to_rboxes(all_boxes[keep])
+                    output_labels = all_labels[keep]
+                    output_scores = all_scores[keep]
                 else:
                     output_rboxes = []
                     output_labels = torch.zeros((0,), dtype=torch.int64, device=images_tensor.device)
@@ -1198,6 +1108,104 @@ class RotatedRetinaNet(nn.Module):
                 outputs.append(out)
             
             return outputs
+
+
+_RETINANET_NMS_PREFILTER = 2000
+
+
+def _apply_retinanet_nms(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    *,
+    iou_threshold: float,
+    max_detections_per_image: Optional[int],
+    use_gpu_nms: bool,
+    class_agnostic: bool = False,
+) -> torch.Tensor:
+    """Return keep indices after rotated NMS (eval path).
+
+    Class-aware (default): NMS per label, then global score sort / top-k.
+    Class-agnostic: one NMS over all boxes, then score sort / top-k.
+    """
+    empty = boxes.new_zeros((0,), dtype=torch.long)
+    if boxes.numel() == 0:
+        return empty
+
+    def _prefilter(
+        cls_boxes: torch.Tensor, cls_scores: torch.Tensor, cls_indices: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if cls_boxes.size(0) <= _RETINANET_NMS_PREFILTER:
+            return cls_boxes, cls_scores, cls_indices
+        _, top = cls_scores.sort(descending=True)
+        top = top[:_RETINANET_NMS_PREFILTER]
+        return cls_boxes[top], cls_scores[top], cls_indices[top]
+
+    if class_agnostic:
+        idx = torch.arange(boxes.size(0), device=boxes.device)
+        work_boxes, work_scores, work_idx = _prefilter(boxes, scores, idx)
+        if use_gpu_nms:
+            kept = rotated_nms(
+                work_boxes,
+                work_scores,
+                iou_threshold=iou_threshold,
+                max_detections=None,
+            )
+            keep = work_idx[kept]
+        else:
+            kept = nms.oriented_nms(
+                boxes=tensor_to_rboxes(work_boxes),
+                scores=work_scores.cpu().tolist(),
+                iou_threshold=iou_threshold,
+                max_detections=None,
+            )
+            keep = work_idx[kept]
+        if keep.numel() == 0:
+            return empty
+        _, order = scores[keep].sort(descending=True)
+        keep = keep[order]
+        if max_detections_per_image is not None:
+            keep = keep[:max_detections_per_image]
+        return keep
+
+    all_keep = []
+    for label in torch.unique(labels):
+        class_mask = labels == label
+        class_boxes = boxes[class_mask]
+        class_scores = scores[class_mask]
+        class_indices = torch.where(class_mask)[0]
+        if class_boxes.size(0) == 0:
+            continue
+        class_boxes, class_scores, class_indices = _prefilter(
+            class_boxes, class_scores, class_indices
+        )
+        if use_gpu_nms:
+            class_keep = rotated_nms(
+                class_boxes,
+                class_scores,
+                iou_threshold=iou_threshold,
+                max_detections=None,
+            )
+            if len(class_keep) > 0:
+                all_keep.append(class_indices[class_keep])
+        else:
+            class_keep = nms.oriented_nms(
+                boxes=tensor_to_rboxes(class_boxes),
+                scores=class_scores.cpu().tolist(),
+                labels=[int(label.item())] * class_boxes.size(0),
+                iou_threshold=iou_threshold,
+                max_detections=None,
+            )
+            if class_keep:
+                all_keep.append(class_indices[class_keep])
+    if not all_keep:
+        return empty
+    keep = torch.cat(all_keep)
+    _, order = scores[keep].sort(descending=True)
+    keep = keep[order]
+    if max_detections_per_image is not None:
+        keep = keep[:max_detections_per_image]
+    return keep
 
 
 __all__ = ["RotatedRetinaNet", "OrientedRetinaNetHead"]

@@ -82,7 +82,6 @@ After that, copy-pasted commands and unmodified configs that reference `/path/to
 | **Configs** | [`configs/`](configs/) | Experiment JSON (`_base_` inheritance, schema in `configs/config.schema.json`) |
 | **Runs** | `runs/<model_type>/<timestamp>/` | Checkpoints, `config.json` snapshot, `train.log` (created at train time; not shipped in the repo) |
 | **Docs** | [`docs/`](docs/) | MkDocs user guide and API reference |
-| **Export** | [`export/`](export/) | Optional ONNX / TensorFlow export pipeline |
 | **Examples** | [`demo/`](demo/), [`pretrained/`](pretrained/) | Demo images; registered checkpoints (large `.pth` files are usually gitignored) |
 
 **`odet` vs `tools/`:** Installing the package registers the `odet` command. It loads modules under `tools/` (for example `tools.train`, `tools.save_predictions`). Shared inference and collate code lives in [`oriented_det/runtime/`](oriented_det/runtime/). You do not need two workflows — use **`odet`** (or **`make`**, which calls `odet`).
@@ -100,7 +99,6 @@ Full documentation is in the **docs/** folder and can be built and served with M
 
 | Folder | README | Description |
 |--------|--------|-------------|
-| [export/](export/) | [export/README.md](export/README.md) | Phase 1: PyTorch → ONNX → Keras detect bundle; `cd export && make export-tf` |
 | [demo/](demo/) | [demo/README.md](demo/README.md) | Demo images; `odet image-demo` or `make demo` with the latest `runs/` checkpoint |
 | [pretrained/](pretrained/) | [pretrained/README.md](pretrained/README.md) | Registered checkpoints for fine-tunes; large `.pth` files are usually gitignored |
 | [oriented_det/cli/](oriented_det/cli/) | [oriented_det/cli/README.md](oriented_det/cli/README.md) | **`odet`** entry point and subcommand list |
@@ -141,7 +139,7 @@ See **[docs/roadmap.md](docs/roadmap.md)** for the full public plan. Summary:
 
 - **v0.1** (shipped): Geometry, IoU/NMS, DOTA, three ResNet-FPN detectors, config training, Hub pretrained weights
 - **v0.1.1** (shipped): ProbIoU Faster R-CNN 1×/3× on Hub
-- **v0.2** (shipped): Rotated FCOS (anchor-free single-stage); Hub `rotated_fcos_dota_le90_3x` (81.58% eval-val mAP50)
+- **v0.2** (shipped): Rotated FCOS (anchor-free single-stage); Hub `rotated_fcos_dota_le90_3x` (82.32% eval-val mAP50)
 - **v0.3**: HRSC2016 loader + Hub 3× zoo (Oriented R-CNN 90.41%, Faster R-CNN 88.77%, FCOS 88.34% eval-val); FAIR1M remaining
 - **v0.4**: RTMDet-R and native YOLO-OBB (AGPL-free production tier)
 - **v0.5+**: Swin-FPN backbone; optional fused CUDA kernels; hosted docs

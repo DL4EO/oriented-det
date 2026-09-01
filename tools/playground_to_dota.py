@@ -109,6 +109,7 @@ def run(
     val_split_id: int = 0,
     ignore_labels: Optional[List[str]] = None,
     map_labels: Optional[Dict[str, str]] = None,
+    difficult_tags: Optional[List[str]] = None,
     dry_run: bool = False,
 ) -> Dict[str, int]:
     """Export Playground export to DOTA dirs. Returns stats dict (tiles_written, train_count, val_count, objects_total, objects_skipped)."""
@@ -187,6 +188,7 @@ def run(
             root / tile.label_relpath,
             ignore_labels=ignore_set,
             map_labels=map_dict if map_dict else None,
+            difficult_tags=difficult_tags,
         )
 
         if not dry_run:
@@ -244,6 +246,16 @@ def main() -> int:
         dest="map_label_list",
         help="Mapping as src=dst (repeatable). Example: taxi=car",
     )
+    parser.add_argument(
+        "--difficult-tag",
+        action="append",
+        default=[],
+        dest="difficult_tags",
+        help=(
+            "Exact Playground tag that sets difficult=1 and is stripped from class_name "
+            "(repeatable). Example: --difficult-tag 'Partially Hidden'"
+        ),
+    )
     parser.add_argument("--dry-run", action="store_true", help="Do not write files; only report stats.")
     args = parser.parse_args()
 
@@ -269,6 +281,7 @@ def main() -> int:
             val_split_id=args.val_split_id,
             ignore_labels=args.ignore_labels or None,
             map_labels=map_labels if map_labels else None,
+            difficult_tags=args.difficult_tags or None,
             dry_run=args.dry_run,
         )
     except (FileNotFoundError, ValueError) as e:

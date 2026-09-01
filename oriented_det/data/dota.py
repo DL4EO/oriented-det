@@ -54,6 +54,43 @@ class DOTAAnnotation:
     rbox: RBox
 
     @classmethod
+    def from_corners(
+        cls,
+        coords: Sequence[float],
+        class_name: str,
+        difficult: int = 0,
+    ) -> "DOTAAnnotation":
+        """Build an annotation from 8 corner coordinates (x1,y1,...,x4,y4).
+
+        Prefer this over round-tripping structured fields through ``from_line``
+        when ``class_name`` may contain commas (e.g. Airbus Playground CSV).
+        """
+        if len(coords) != 8:
+            raise ValueError(f"Expected 8 coordinates, got {len(coords)}")
+        points = [(float(coords[i]), float(coords[i + 1])) for i in range(0, 8, 2)]
+        polygon = Polygon(points)
+        rbox = transforms.polygon_to_rbox(polygon)
+        return cls(
+            class_name=str(class_name).strip(),
+            difficult=int(difficult),
+            polygon=polygon,
+            rbox=rbox,
+        )
+
+    @staticmethod
+    def _looks_like_official_comma_line(parts: Sequence[str]) -> bool:
+        """True when comma-split fields look like official DOTA (8 numeric coords + category + difficult)."""
+        if len(parts) < 10:
+            return False
+        try:
+            for i in range(8):
+                float(parts[i])
+            int(parts[-1])
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    @classmethod
     def from_line(cls, line: str, *, class_map: Optional[Dict[str, int]] = None) -> "DOTAAnnotation":
         """Parse a single DOTA annotation line.
         
@@ -64,7 +101,12 @@ class DOTAAnnotation:
         We produce this format by default (see format_dota_line, to_line).
         For reading, we also accept space-separated:
           "x1 y1 x2 y2 x3 y3 x4 y4 class_name difficult"
-        (class = parts[8:-1] for multi-word names).
+        (class = parts[8:-1] for multi-word names, including commas in the category).
+
+        The official comma grammar is used only when the line actually looks like
+        8 numeric coord fields separated by commas plus a trailing integer
+        ``difficult``. A space-separated line whose category contains commas
+        (e.g. Airbus synthetic lines) stays on the space path.
         
         Corner Order Convention:
         - The 4 corners are ordered sequentially around the polygon perimeter
@@ -90,34 +132,28 @@ class DOTAAnnotation:
             >>> # Creates a rectangle with corners at (100,200), (300,200), (300,400), (100,400)
         """
         raw = line.strip()
-        if "," in raw:
-            # Official DOTA: x1, y1, x2, y2, x3, y3, x4, y4, category, difficult (10 fields)
-            parts = [p.strip() for p in raw.split(",")]
-            if len(parts) < 10:
-                raise ValueError(f"Invalid DOTA annotation line (comma): {line}")
-            coords = [float(parts[i]) for i in range(8)]
-            class_name = parts[8].strip()
-            difficult = int(parts[9])
+        comma_parts = [p.strip() for p in raw.split(",")] if "," in raw else []
+        if comma_parts and cls._looks_like_official_comma_line(comma_parts):
+            # Official DOTA: x1, y1, ..., x4, y4, category[, ...], difficult
+            coords = [float(comma_parts[i]) for i in range(8)]
+            if len(comma_parts) == 10:
+                class_name = comma_parts[8].strip()
+            else:
+                class_name = ", ".join(comma_parts[8:-1]).strip()
+            difficult = int(comma_parts[-1])
         else:
-            # Space-separated: allows multi-word class (e.g. "General Cargo")
+            # Space-separated: allows multi-word / comma-containing class names
             parts = raw.split()
             if len(parts) < 9:
                 raise ValueError(f"Invalid DOTA annotation line: {line}")
-            coords = [float(parts[i]) for i in range(8)]
+            try:
+                coords = [float(parts[i]) for i in range(8)]
+                difficult = int(parts[-1])
+            except ValueError as exc:
+                raise ValueError(f"Invalid DOTA annotation line: {line}") from exc
             class_name = " ".join(parts[8:-1]) if len(parts) > 9 else parts[8]
-            difficult = int(parts[-1])
-        
-        # Extract 4 corner points: (x1,y1), (x2,y2), (x3,y3), (x4,y4)
-        points = [(coords[i], coords[i + 1]) for i in range(0, 8, 2)]
-        
-        # Convert to Polygon (validates and normalizes orientation)
-        polygon = Polygon(points)
-        
-        # Convert to RBox via QBox (QBox normalizes point order)
-        # QBox ensures counter-clockwise order and starts from top-most point
-        rbox = transforms.polygon_to_rbox(polygon)
-        
-        return cls(class_name=class_name, difficult=difficult, polygon=polygon, rbox=rbox)
+
+        return cls.from_corners(coords, class_name, difficult)
 
     def to_line(self) -> str:
         """Serialize to official DOTA format (comma-separated)."""

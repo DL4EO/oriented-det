@@ -21,10 +21,6 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "playground-csv": ("tools.generate_airbus_playground_csv", "odet-playground-csv"),
     "playground-to-dota": ("tools.playground_to_dota", "odet-playground-to-dota"),
     "hrsc-to-dota": ("tools.hrsc_to_dota", "odet-hrsc-to-dota"),
-    "export-onnx": ("export.scripts.export_onnx", "odet-export-onnx"),
-    "export-tf": ("export.scripts.export_tf", "odet-export-tf"),
-    "export-detect": ("export.scripts.build_faster_rcnn_savedmodel", "odet-export-detect"),
-    "export-preds": ("export.scripts.save_predictions_tf", "odet-export-preds"),
     "labels-to-comma": ("tools.dota_labels_to_comma", "odet-labels-to-comma"),
     "free-gpu": ("tools.free_gpu", "odet-free-gpu"),
     "pretrained": ("tools.pretrained_download", "odet-pretrained"),
@@ -42,10 +38,7 @@ def _print_help() -> None:
     print("  odet train --config configs/oriented_rcnn/dota_le90_1x.json")
     print("  odet train-multi-gpu --config configs/oriented_rcnn/dota_le90_1x.json")
     print("  odet preds --experiment-dir runs/oriented_rcnn/<id>")
-    print("  odet playground-csv --data-root /path/to/export")
-    print("  odet export-tf --config path/to/config.json --checkpoint path/to/model.pth")
-    print("  odet export-tf --mode oriented_rcnn_pre_nms --config ... --checkpoint ...")
-    print("  odet export-tf --mode rotated_fcos_pre_nms --config ... --checkpoint ...")
+    print("  odet playground-csv --data-root /path/to/playground")
 
 
 def _invoke(module_path: str, prog: str, args: List[str]) -> None:
@@ -53,15 +46,7 @@ def _invoke(module_path: str, prog: str, args: List[str]) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
-    try:
-        mod = importlib.import_module(module_path)
-    except ImportError as e:
-        if module_path.startswith("export."):
-            raise SystemExit(
-                f"Failed to import {module_path}: {e}\n"
-                'For TF/ONNX export install extras: pip install "oriented-det[export]"'
-            ) from e
-        raise
+    mod = importlib.import_module(module_path)
     if not hasattr(mod, "main"):
         raise SystemExit(f"{module_path} has no main()")
     sys.argv = [prog] + args

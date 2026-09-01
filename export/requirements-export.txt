@@ -1,9 +1,0 @@
-# Optional dependencies for export/ (install from repo root: pip install -r export/requirements-export.txt)
-# Or: pip install "oriented-det[export]"
-# Versions are conservative pins; relax if you need newer CUDA wheels.
-# onnxruntime-gpu includes CPUExecutionProvider; [cuda,cudnn] pulls NVIDIA CUDA 12 / cuDNN wheels.
-
-onnx>=1.14.0,<2
-onnxruntime-gpu[cuda,cudnn]>=1.16.0
-onnx2tf>=1.22.0
-tensorflow>=2.14.0

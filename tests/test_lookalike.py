@@ -73,13 +73,13 @@ def test_dataset_config_accepts_lookalike_labels(tmp_path: Path):
     assert names == ["ship"]
 
 
-def _ann(class_name: str, cx: float, cy: float, w: float = 8.0, h: float = 8.0) -> DOTAAnnotation:
+def _ann(class_name: str, cx: float, cy: float, w: float = 8.0, h: float = 8.0, difficult: int = 0) -> DOTAAnnotation:
     x1, y1 = cx - w / 2, cy - h / 2
     x2, y2 = cx + w / 2, cy - h / 2
     x3, y3 = cx + w / 2, cy + h / 2
     x4, y4 = cx - w / 2, cy + h / 2
     return DOTAAnnotation.from_line(
-        f"{x1} {y1} {x2} {y2} {x3} {y3} {x4} {y4} {class_name} 0"
+        f"{x1} {y1} {x2} {y2} {x3} {y3} {x4} {y4} {class_name} {int(difficult)}"
     )
 
 
@@ -361,3 +361,130 @@ def test_force_lookalike_helper_protects_positives():
     assert labels[2].item() == 0
     assert forced[1] and forced[2]
     assert not forced[0]
+
+
+def test_collate_routes_difficult_to_rboxes_ignore_not_lookalike(tmp_path: Path):
+    img_path = tmp_path / "tile.png"
+    Image.new("RGB", (64, 64), color=(40, 40, 40)).save(img_path)
+    sample = DOTASample(
+        image_path=img_path,
+        width=64,
+        height=64,
+        annotations=(
+            _ann("car", 16, 16, difficult=0),
+            _ann("car", 48, 48, difficult=1),
+        ),
+    )
+    collate = create_collate_fn(
+        {"car": 1},
+        normalize=False,
+        resize_mode="fixed",
+        resize_to=(64, 64),
+        pad_size_divisor=1,
+        enable_flip_horizontal=False,
+        enable_flip_vertical=False,
+        enable_flip_diagonal=False,
+        enable_random_rotate=False,
+        difficult_strategy="ignore",
+        lookalike_labels=None,
+    )
+    _, targets = collate([sample])
+    tgt = targets[0]
+    assert tgt["labels"].tolist() == [1]
+    assert tgt["rboxes"].shape == (1, 5)
+    assert tgt["rboxes_ignore"].shape == (1, 5)
+    assert tgt["labels_ignore"].tolist() == [1]
+    assert tgt["rboxes_lookalike"].shape == (0, 5)
+
+
+def test_fcos_ignore_points_get_minus_one_not_bg():
+    points = torch.tensor([[50.0, 50.0], [0.0, 0.0], [200.0, 200.0]])
+    gt = torch.zeros((0, 5))
+    gt_labels = torch.tensor([], dtype=torch.int64)
+    ignore = torch.tensor([[50.0, 50.0, 30.0, 30.0, 0.0]])
+    ranges = torch.tensor([[0.0, 1e8]]).expand(3, 2)
+    labels, _, _, pos = assign_fcos_targets_single(
+        points=points,
+        gt_bboxes=gt,
+        gt_labels=gt_labels,
+        regress_ranges=ranges,
+        num_points_per_lvl=[3],
+        strides=[8.0],
+        num_classes=2,
+        center_sampling=False,
+        gt_bboxes_ignore=ignore,
+    )
+    assert labels[0].item() == -1
+    assert labels[1].item() == 2  # background
+    assert not pos[0]
+
+
+def test_fcos_ignore_does_not_override_foreground():
+    points = torch.tensor([[50.0, 50.0]])
+    gt = torch.tensor([[50.0, 50.0, 40.0, 40.0, 0.0]])
+    gt_labels = torch.tensor([1], dtype=torch.int64)  # 1-indexed class
+    ignore = torch.tensor([[50.0, 50.0, 40.0, 40.0, 0.0]])
+    ranges = torch.tensor([[0.0, 1e8]])
+    labels, _, _, pos = assign_fcos_targets_single(
+        points=points,
+        gt_bboxes=gt,
+        gt_labels=gt_labels,
+        regress_ranges=ranges,
+        num_points_per_lvl=[1],
+        strides=[8.0],
+        num_classes=2,
+        center_sampling=False,
+        gt_bboxes_ignore=ignore,
+    )
+    assert labels[0].item() == 0  # FG class 0, not -1
+    assert pos[0]
+
+
+def test_rpn_ignore_marks_non_positive_as_minus_one():
+    anchors = torch.tensor(
+        [
+            [0.0, 0.0, 10.0, 10.0, 0.0],
+            [50.0, 50.0, 20.0, 20.0, 0.0],
+            [200.0, 200.0, 10.0, 10.0, 0.0],
+        ]
+    )
+    gt = torch.tensor([[0.0, 0.0, 10.0, 10.0, 0.0]])
+    ignore = torch.tensor([[50.0, 50.0, 25.0, 25.0, 0.0]])
+    labels, matched = match_oriented_anchors_to_gt(
+        anchors,
+        gt,
+        positive_iou_threshold=0.5,
+        negative_iou_threshold=0.3,
+        gt_boxes_ignore=ignore,
+        ignore_iou_threshold=0.3,
+    )
+    assert labels[0].item() == 1
+    assert labels[1].item() == -1  # ignore overlap → don't-care, not background
+    assert matched[0].item() == 0
+
+
+def test_dataset_config_accepts_difficult_tags(tmp_path: Path):
+    from oriented_det.train.config import TrainingExperimentConfig
+
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "model_type": "rotated_fcos",
+                "dataset": {
+                    "data_root": str(tmp_path),
+                    "format": "airbus_playground",
+                    "annotations_file": "annotations.csv",
+                    "split_file": "split.csv",
+                    "difficult_tags": ["Partially Hidden"],
+                    "difficult_strategy": "ignore",
+                    "map_labels": {"car, van and pickup": "car"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = TrainingExperimentConfig.load(cfg_path)
+    assert cfg.dataset.difficult_tags == ["Partially Hidden"]
+    assert cfg.dataset.difficult_strategy == "ignore"
+    assert cfg.dataset.map_labels["car, van and pickup"] == "car"

@@ -14,9 +14,11 @@ All notable changes to OrientedDet will be documented in this file.
 - Hub slug **`rotated_faster_rcnn_hrsc2016_le90_3x`** (88.77% eval-val mAP50) — Faster R-CNN 3× on HRSC2016 test; report [`docs/eval-reports/rotated_faster_rcnn_hrsc2016_le90_3x/`](eval-reports/rotated_faster_rcnn_hrsc2016_le90_3x/model_analysis.md).
 - Hub slug **`rotated_fcos_hrsc2016_le90_3x`** (88.34% eval-val mAP50) — FCOS 3× decoded rIoU on HRSC2016 test; report [`docs/eval-reports/rotated_fcos_hrsc2016_le90_3x/`](eval-reports/rotated_fcos_hrsc2016_le90_3x/model_analysis.md).
 - **`dataset.drop_easy_empty_tiles`** — with `tile_metrics_csv`, drop train tiles that are vacuous true negatives (`tp=fp=fn=0`) before `max_train_samples` and hard-tile oversampling. Empty tiles with false positives stay and can be oversampled. Keep `filter_empty_gt: false` so those hard empties remain in the loader.
+- **Class-agnostic final NMS** on Rotated FCOS and Rotated RetinaNet via `model.nms_class_agnostic` / `production.nms_class_agnostic` (default `false`, same contract as two-stage). DOTA / HRSC recipes stay class-aware.
 
 ### Fixed
 
+- **`make eval-val` / `odet preds` score floor** — no longer uses `production.score_threshold` or train-val `evaluation.score_threshold` (often 0.3). Resolver is CLI → `evaluation.preds_score_threshold` → **0.05**. Deploy / train val are unchanged.
 - **Diagonal flip angle** — MMRotate `RRandomFlip(direction='diagonal')` mirrors box centers and **keeps θ** (early return). We incorrectly applied `π − θ`, so diagonal samples (and diagonal + random rotate) had boxes at the wrong orientation. Horizontal / vertical flips were already correct.
 - **`keep_ratio` + `pad_size_divisor` 32** no longer crashes on P6: torchvision `max_pool` on an odd feature map (e.g. 576×800 → 9×13) is anisotropic; stride derivation now falls back to configured `[4, 8, 16, 32, 64]` (MMRotate).
 - **`keep_ratio` collate** bottom-right pads a batch to a shared H×W (e.g. 480×800 + 576×800) so `torch.stack` works. Per-image `content_size` is unchanged; `odet preds` stays one image + divisor pad.
@@ -25,9 +27,11 @@ All notable changes to OrientedDet will be documented in this file.
 
 - HRSC2016 **6×** recipes (`oriented_rcnn/hrsc2016_le90_6x.json`, `rotated_fcos/hrsc2016_le90_6x.json`). 3× ±20° is the long schedule; 6× was only +0.2 mAP on Oriented R-CNN and FCOS 6× never beat that 3×.
 - Notebook geometric transform classes (`Rotate`, `HorizontalFlip`, `VerticalFlip`, `DiagonalFlip`, `Compose`, `OrientedTransform`). Image+box augs are only `apply_random_train_flips` / `apply_random_train_rotate` and `apply_flip_to_*` / `apply_rotate_to_*`.
+- **`export/`** (ONNX / TensorFlow tooling), the `odet export-*` subcommands, and the `oriented-det[export]` extra. This repo no longer ships a TF/ONNX export pipeline.
 
 ### Changed
 
+- Hub slug **`rotated_fcos_dota_le90_3x`** refreshed from `runs/rotated_fcos/20260831-052647` (**82.32%** eval-val mAP50, was 81.58%). Weight stem is now `rotated_fcos_r50_fpn_dota_le90_3x-6e383331` (dropped leftover `_riou` in the filename). Report [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md).
 - **NMS split (DOTA + HRSC)** — `model.final_nms_iou_threshold: 0.1` (train val), `production.final_nms_iou_threshold: 0.3` (deploy / `image_demo`), and new **`evaluation.final_nms_iou_threshold: 0.1`** for `odet preds` / `make eval-val` (MMRotate test parity). Resolver: `resolve_preds_final_nms_iou_threshold`.
 - Rotated FCOS DOTA **`dota_le90_3x.json`** is now the decoded rIoU 3× recipe (was `dota_le90_3x_riou.json`). The previous L1 3× is [`dota_le90_3x_l1.json`](../configs/rotated_fcos/dota_le90_3x_l1.json). Hub slug **`rotated_fcos_dota_le90_3x`** (was `rotated_fcos_dota_le90_3x_riou`).
 
@@ -45,7 +49,7 @@ All notable changes to OrientedDet will be documented in this file.
 - Differentiable polygon IoU (`oriented_det.ops.diff_iou_rotated`) for FCOS **`box_reg_loss_type: riou`** (`1 - IoU`). Distinct from sampling `pairwise_rotated_iou`. Recipes [`dota_le90_1x_riou.json`](../configs/rotated_fcos/dota_le90_1x_riou.json) / [`dota_le90_3x.json`](../configs/rotated_fcos/dota_le90_3x.json) (lr 2.5e-3).
 - Hub slug **`rotated_fcos_dota_le90_3x`** (81.58% eval-val mAP50) — Rotated FCOS 3× decoded rIoU; report [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md).
 - Hub slug **`rotated_fcos_dota_le90_3x_kfiou_aux`** (77.18% eval-val mAP50) — Rotated FCOS 3× L1 + KFIoU aux; report [`docs/eval-reports/rotated_fcos_dota_le90_3x_kfiou_aux/`](eval-reports/rotated_fcos_dota_le90_3x_kfiou_aux/model_analysis.md).
-- TF/ONNX export mode **`rotated_fcos_pre_nms`** — Rotated FCOS decode + pad uses the same Keras detect bundle as two-stage models (`odet export-tf --mode rotated_fcos_pre_nms`).
+- TF/ONNX export mode **`rotated_fcos_pre_nms`** — Rotated FCOS decode + pad uses the same Keras detect bundle as two-stage models.
 
 ### Removed
 

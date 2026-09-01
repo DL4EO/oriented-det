@@ -60,12 +60,6 @@ dependencies = [
 viewer = [
     "gradio==6.8.0",
 ]
-export = [
-    "onnx>=1.14.0",
-    "onnxruntime-gpu[cuda,cudnn]>=1.16.0",
-    "onnx2tf>=1.22.0",
-    "tensorflow>=2.14.0",
-]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
@@ -96,10 +90,9 @@ DL4EO = "https://dl4eo.com"
 odet = "oriented_det.cli:main"
 
 [tool.setuptools]
-# Ship oriented_det, tools, and export (Python TF/ONNX export). Makefile/docs under export/
-# are checkout-only; pip users run `odet export-tf` (no Make).
+# Ship oriented_det and tools. Makefile/docs are checkout-only.
 [tool.setuptools.packages.find]
-include = ["oriented_det*", "tools*", "export*"]
+include = ["oriented_det*", "tools*"]
 
 
 [tool.setuptools.package-data]
@@ -107,4 +100,3 @@ include = ["oriented_det*", "tools*", "export*"]
 oriented_det = ["py.typed"]
 "oriented_det.pretrained" = ["manifest.json"]
 "oriented_det.configs" = ["**/*.json"]
-export = ["contract.json"]

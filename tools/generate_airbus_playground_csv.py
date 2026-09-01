@@ -72,6 +72,15 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Label mapping in src=dst form (repeatable). Example: --map-label taxi=car",
     )
+    parser.add_argument(
+        "--difficult-tag",
+        action="append",
+        default=[],
+        help=(
+            "Exact Playground tag that sets difficult=1 and is stripped from class_name "
+            "(repeatable). Example: --difficult-tag 'Partially Hidden'"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -138,6 +147,7 @@ def main() -> None:
         seed=args.seed,
         ignore_labels=args.ignore_label,
         map_labels=map_labels,
+        difficult_tags=args.difficult_tag or None,
         include_stats=True,
     )
     print(f"Wrote annotations CSV: {annotations_path}")

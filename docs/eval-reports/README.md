@@ -22,7 +22,7 @@ Each subdirectory is named after the manifest **slug** and is **tracked in git**
 | `rotated_faster_rcnn_dota_le90_3x_ce` | 75.58% | regenerate (see below) |
 | `rotated_retinanet_dota_le90_3x` | 71.52% | `predictions/20260615_005855/` |
 | `rotated_retinanet_dota_le90_1x` | 64.14% | regenerate (see below) |
-| `rotated_fcos_dota_le90_3x` | 81.58% | `predictions/20260824_212907/` |
+| `rotated_fcos_dota_le90_3x` | 82.32% | `predictions/20260901_053115/` |
 | `rotated_fcos_dota_le90_3x_kfiou_aux` | 77.18% | `predictions/20260820_121343/` |
 | `rotated_fcos_dota_le90_3x_l1` (local L1 baseline; not Hub) | 73.92% | `predictions/20260813_192333/` |
 | `oriented_rcnn_hrsc2016_le90_3x` | 90.41% | `predictions/20260831_011151/` |

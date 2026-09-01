@@ -90,6 +90,7 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     mock_cls.return_value = inst
 
     cfg = _minimal_config("rotated_retinanet")
+    cfg.model.nms_class_agnostic = True
     device = torch.device("cpu")
     with patch.object(train, "RotatedRetinaNet", mock_cls):
         model, _ = train.create_model_from_config(
@@ -124,6 +125,7 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     assert call_kw["score_threshold"] == pytest.approx(0.13)
     assert call_kw["final_nms_iou_threshold"] == pytest.approx(0.31)
     assert call_kw["max_detections_per_image"] == 33
+    assert call_kw["nms_class_agnostic"] is True
     assert call_kw["final_nms_iou_schedule_epochs"] == [1, 2]
     assert call_kw["final_nms_iou_schedule_values"] == [0.6, 0.4, 0.2]
     assert call_kw["roi_box_reg_aux_schedule_epochs"] == [10, 20]
@@ -138,6 +140,7 @@ def test_create_model_fcos_passes_config_fields():
     mock_cls.return_value = inst
 
     cfg = _minimal_config("rotated_fcos")
+    cfg.model.nms_class_agnostic = True
     cfg.loss = LossConfig(loss_type="focal", focal_alpha=0.25, focal_gamma=2.0)
     device = torch.device("cpu")
     with patch.object(train, "RotatedFCOS", mock_cls):
@@ -167,6 +170,7 @@ def test_create_model_fcos_passes_config_fields():
     assert call_kw["score_threshold"] == pytest.approx(0.13)
     assert call_kw["final_nms_iou_threshold"] == pytest.approx(0.31)
     assert call_kw["max_detections_per_image"] == 33
+    assert call_kw["nms_class_agnostic"] is True
     assert call_kw["focal_alpha"] == pytest.approx(0.25)
     assert call_kw["focal_gamma"] == pytest.approx(2.0)
     assert call_kw["regress_ranges"] == [

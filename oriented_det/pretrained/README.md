@@ -39,7 +39,7 @@ odet pretrained list
 ```
 
 Training (`tools/train.py`) and inference call `ensure_checkpoint` when `checkpoint.load_from_checkpoint` points at a registered asset that is missing locally.
-Simple inference (`odet image-demo`, `odet preds`, deploy/export paths through `oriented_det.runtime.checkpoint`) prefers the sidecar JSON only when the provided config is that checkpoint's manifest `source_recipe`. A different user-provided config is kept as-is.
+Simple inference (`odet image-demo`, `odet preds`, deploy paths through `oriented_det.runtime.checkpoint`) prefers the sidecar JSON only when the provided config is that checkpoint's manifest `source_recipe`. A different user-provided config is kept as-is.
 
 ## Publishing weights
 

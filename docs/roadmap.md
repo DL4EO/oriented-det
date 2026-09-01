@@ -10,7 +10,7 @@ High-level plan for Oriented-Det after **v0.2** (geometry, IoU/NMS, DOTA, four R
 |---------|--------|
 | **v0.1** | Shipped — Oriented R-CNN, Rotated Faster R-CNN, Rotated RetinaNet; DOTA; `odet train`; Hub |
 | **v0.1.1** | Shipped — ProbIoU Faster R-CNN 1×/3× on Hub (77.57% / 83.42% eval-val mAP50) |
-| **v0.2** | Shipped — **Rotated FCOS** (anchor-free single-stage); DOTA le90 1×/3×; Hub `rotated_fcos_dota_le90_3x` (81.58% eval-val) |
+| **v0.2** | Shipped — **Rotated FCOS** (anchor-free single-stage); DOTA le90 1×/3×; Hub `rotated_fcos_dota_le90_3x` (82.32% eval-val) |
 | **v0.3** | **HRSC2016** loader + Hub 3× zoo (shipped); **FAIR1M** remaining |
 | **v0.4** | Production speed tier: **RTMDet-R**, then **native YOLO-OBB** |
 | **v0.5–v0.8** | **Swin-FPN** backbone; Oriented R-CNN + Swin-T on Hub; extend to FCOS / speed models |

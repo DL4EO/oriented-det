@@ -134,7 +134,12 @@
         "map_labels": {
           "type": ["object", "null"],
           "additionalProperties": { "type": "string" },
-          "description": "Label remapping dictionary for Airbus Playground, e.g. {\"taxi\":\"car\", \"Confuser\":\"lookalike\"}."
+          "description": "Label remapping dictionary for Airbus Playground, e.g. {\"taxi\":\"car\", \"Confuser\":\"lookalike\", \"car, van and pickup\":\"car\"}. Exact match on the full class_name string after difficult_tags are stripped."
+        },
+        "difficult_tags": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "Exact Playground tags (e.g. \"Partially Hidden\") that set DOTA difficult=1 and are stripped from the semantic class_name at Airbus CSV load/generation. Not ignore_labels (drop) and not lookalike (hard negative). Use with difficult_strategy \"ignore\" for don't-care."
         },
         "difficult_strategy": { "type": "string", "enum": ["drop", "ignore", "keep"], "default": "drop", "description": "How to handle DOTA 'difficult' annotations: drop at read-time, ignore (MMRotate-style don't-care), or keep as normal GT." },
         "filter_empty_gt": { "type": "boolean", "default": false, "description": "Drop samples with no ground truth after difficult_strategy, allowed_classes, and ignore_labels (MMRotate filter_empty_gt parity). Used for DOTA tiles and HRSC2016 images. Default false keeps empty samples." },
@@ -325,7 +330,8 @@
       },
       "additionalProperties": false,
       "properties": {
-        "score_threshold": { "type": "number", "default": 0.5, "description": "Min confidence for detections and TensorBoard viz." },
+        "score_threshold": { "type": "number", "default": 0.5, "description": "Min confidence for train-val mAP and TensorBoard viz (often 0.3 for speed)." },
+        "preds_score_threshold": { "type": ["number", "null"], "default": null, "description": "Global score floor for odet preds / make eval-val only. When null, those tools use 0.05 (published protocol). Ignores production.score_threshold and evaluation.score_threshold. Deploy / image_demo keep production.score_threshold." },
         "per_class_score_threshold": {
           "type": ["object", "null"],
           "additionalProperties": { "type": "number" },
@@ -348,7 +354,7 @@
       },
       "additionalProperties": false,
       "properties": {
-        "score_threshold": { "type": ["number", "null"], "default": null, "description": "When set, overrides evaluation.score_threshold for mAP / val matching and deploy display score (resolve_inference_score_threshold)." },
+        "score_threshold": { "type": ["number", "null"], "default": null, "description": "When set, overrides evaluation.score_threshold for training val/mAP and deploy / image_demo display (resolve_inference_score_threshold). odet preds / make eval-val ignore this and use evaluation.preds_score_threshold or 0.05." },
         "per_class_score_threshold": {
           "type": ["object", "null"],
           "additionalProperties": { "type": "number" },
@@ -358,7 +364,7 @@
         "final_nms_use_cpu": { "type": ["boolean", "null"], "default": null, "description": "When set, patches model.final_nms_use_cpu (exact polygon NMS on CPU)." },
         "inference_pre_nms_score_threshold": { "type": ["number", "null"], "default": null, "description": "Decoder pre-NMS score floor; when set, patches model.inference_pre_nms_score_threshold (or RetinaNet score_threshold)." },
         "max_detections_per_image": { "type": ["integer", "null"], "default": null, "description": "When set, patches model.max_detections_per_image." },
-        "nms_class_agnostic": { "type": ["boolean", "null"], "default": null, "description": "When set, patches model.nms_class_agnostic (two-stage / RetinaNet where supported)." },
+        "nms_class_agnostic": { "type": ["boolean", "null"], "default": null, "description": "When set, patches model.nms_class_agnostic (two-stage, RetinaNet, and FCOS)." },
         "roi_inference_top_class_only": { "type": ["boolean", "null"], "default": null, "description": "Two-stage only: when set, patches model.roi_inference_top_class_only." },
         "rpn_pre_nms_top_n": { "type": ["integer", "null"], "default": null, "description": "When set, patches model.rpn_pre_nms_top_n (two-stage)." },
         "rpn_post_nms_top_n": { "type": ["integer", "null"], "default": null, "description": "When set, patches model.rpn_post_nms_top_n (two-stage)." },

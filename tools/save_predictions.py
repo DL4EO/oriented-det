@@ -56,6 +56,7 @@ from oriented_det.train.config import (
     get_preprocessing_params,
     apply_inference_config_to_model,
     effective_eval_metric_thresholds,
+    resolve_preds_score_threshold,
     resolve_preds_final_nms_iou_threshold,
     resolve_inference_sliding_window_overlap_pixels,
 )
@@ -74,8 +75,8 @@ from oriented_det.runtime.checkpoint import (
 )
 from oriented_det.data.dota_classes import DOTA_V1_CLASSES
 from oriented_det.data.dota import dota_label_path_for_image
+from oriented_det.data.build import collect_split_images
 from oriented_det.ops.iou import rbox_iou
-from export.val_dataset import collect_split_images
 
 # ImageNet normalization constants (fallback only; prefer config.preprocessing to match training)
 IMAGENET_MEAN = [0.485, 0.456, 0.406]  # RGB
@@ -1486,17 +1487,13 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
             f"Using CLI max_detections_per_image={int(max_detections_per_image)} "
             "(overrides config model.max_detections_per_image)"
         )
-    cfg_thr_sc, cfg_thr_pc, cfg_thr_iou = effective_eval_metric_thresholds(config)
+    _, cfg_thr_pc, cfg_thr_iou = effective_eval_metric_thresholds(config)
 
     per_cls_thr: Optional[Dict[str, float]] = per_class_score_threshold
-    if score_threshold is not None:
-        print(f"Using score_threshold={score_threshold} from CLI (for mAP and diagnostics; overrides config)")
-    else:
-        score_threshold = cfg_thr_sc
-        print(
-            "Using score_threshold from config (production.score_threshold overrides "
-            f"evaluation.score_threshold when set): {score_threshold}"
-        )
+    score_threshold, score_src = resolve_preds_score_threshold(
+        config, cli_score_threshold=score_threshold
+    )
+    print(f"Using score_threshold={score_threshold} from {score_src}")
     if ignore_config_per_class_score_threshold:
         if per_cls_thr is not None:
             print("Ignoring config per-class score thresholds; explicit per-class thresholds were also suppressed")
@@ -2134,8 +2131,10 @@ def main():
     parser.add_argument('--vis-score-threshold', type=float, default=0.5,
                        help='Score threshold for visualization (default: 0.5).')
     parser.add_argument('--score-threshold', type=float, default=None,
-                       help='Score threshold for diagnostics and mAP (overrides evaluation.score_threshold '
-                            'in config when set; default: use evaluation.score_threshold or 0.5)')
+                       help='Score floor for odet preds / eval-val mAP and diagnostics. '
+                            'Default: evaluation.preds_score_threshold when set, else 0.05. '
+                            'Ignores production.score_threshold and evaluation.score_threshold '
+                            '(those stay for deploy and train val).')
     parser.add_argument('--no-per-class-score-thresholds', action='store_true',
                        help='Ignore evaluation.per_class_score_threshold from config and use the global score threshold only.')
     parser.add_argument(
@@ -2269,7 +2268,9 @@ def main():
 
         score_thr = args.score_threshold
         if score_thr is None:
-            if cfg_thr_sc is not None:
+            if config is not None:
+                score_thr, _ = resolve_preds_score_threshold(config)
+            elif cfg_thr_sc is not None:
                 score_thr = cfg_thr_sc
             else:
                 score_thr = float(meta.get('score_threshold', 0.5))

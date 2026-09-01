@@ -13,7 +13,7 @@ x1, y1, x2, y2, x3, y3, x4, y4, category, difficult
 ```
 
 - **Writing**: `format_dota_line()`, `DOTAAnnotation.to_line()`, `tools/tile_dota.py`, and `tools/playground_to_dota.py` all output this format.
-- **Reading**: `DOTAAnnotation.from_line()` accepts **both** comma-separated (official) and space-separated (legacy). The dataset loader uses this too.
+- **Reading**: `DOTAAnnotation.from_line()` accepts **both** comma-separated (official) and space-separated (legacy). The official comma grammar is used only when the line looks like 8 numeric coords + category + difficult; a space-separated line whose category contains commas (e.g. Airbus) stays on the space path. Prefer `DOTAAnnotation.from_corners()` when building from structured fields.
 
 
 ### Loading DOTA Dataset
@@ -264,14 +264,47 @@ CSV + split-file datasets (`dataset.format: airbus_playground` in [Configuration
 - `annotations_file` — object CSV from Playground export
 - `split_file` — fold or train/val column (`val_split_id` for integer folds)
 - `train_includes_val` — when `true`, train on all folds; `val_split_id` fold is still used for validation/monitoring only (DOTA `train_tiles_dirs` trainval parity)
-- `ignore_labels`, `map_labels` — filter and rename classes
+- `ignore_labels`, `map_labels` — filter and rename classes (`map_labels` is **exact match** on the full concatenated `class_name` string)
+- `difficult_tags` — exact Playground tags (e.g. `["Partially Hidden"]`) that set DOTA `difficult=1` and are stripped from the semantic class name at **load** and **CSV generation** time
+- `difficult_strategy` — same as DOTA (`drop` / `ignore` / `keep`). For Partially Hidden don't-care, use `"ignore"`
 - **Lookalike confusers** (hard negatives, not a semantic class) — see [Lookalike confusers](#lookalike-confusers) below
 
-Keep dataset JSON in your own config tree and inherit `@odet:configs/_base_/...` fragments. Prep tools: `odet playground-csv`, `odet playground-to-dota` (see [tools/README.md](https://github.com/DL4EO/oriented-det/blob/main/tools/README.md)).
+Playground JSON stores multiple tags per object as `", ".join(sorted(tags))`. Class names may therefore contain commas (e.g. `car, van and pickup`). The Airbus loader builds annotations from structured CSV fields (`dota_coords` + `class_name` + `difficult`) and does **not** drop boxes when the category contains a comma.
+
+**Label routing (do not confuse):**
+
+| Mechanism | Effect |
+|-----------|--------|
+| `ignore_labels` | Drop the box at read-time |
+| `difficult=1` + `difficult_strategy: "ignore"` | Don't-care: stays in the sample, routed to `rboxes_ignore`; no FG/BG/TP/FN/FP |
+| `lookalike` / `lookalike_labels` | Hard negative: overlapping non-positives forced to **background** |
+
+Example vehicles config fragment:
+
+```json
+"dataset": {
+  "format": "airbus_playground",
+  "difficult_strategy": "ignore",
+  "difficult_tags": ["Partially Hidden"],
+  "ignore_labels": [],
+  "map_labels": {
+    "truck and bus": "truck",
+    "car, van and pickup": "car"
+  }
+}
+```
+
+`Partially Hidden, car` → semantic `car`, `difficult=1` (not a lookalike, not dropped). Compounds that remain after stripping must be mapped (or they become extra classes); with `allowed_classes` set, an unmapped leftover **raises** instead of silently dropping.
+
+`filter_empty_gt` keeps tiles that still have don't-care or lookalike boxes (same as lookalike-only tiles). With `difficult_strategy: "drop"`, Partially Hidden boxes are removed and a don't-care-only tile becomes empty and is dropped.
+
+Keep dataset JSON in your own config tree and inherit `@odet:configs/_base_/...` fragments. Prep tools: `odet playground-csv`, `odet playground-to-dota` (see [tools/README.md](https://github.com/DL4EO/oriented-det/blob/main/tools/README.md)). Pass `--difficult-tag 'Partially Hidden'` when regenerating CSVs so the CSV `difficult` column matches the loader.
 
 ## Lookalike confusers
 
 `lookalike` is a **reserved class name**. It never enters `class_map` / `num_classes`. Boxes mapped onto it are trained as hard negatives: overlapping non-positive RPN/ROI/RetinaNet/FCOS samples are forced to **background** (not ignore), and two-stage heads preferentially sample those negatives.
+
+This is **not** the same as DOTA difficult / `difficult_tags` (e.g. Partially Hidden): lookalike = hard negative (BG); difficult ignore = don't-care (neither FG nor BG).
 
 Recipe (Airbus Playground CSV or any loader that applies `map_labels`):
 
@@ -289,6 +322,7 @@ Notes:
 - Optional `dataset.lookalike_labels` adds extra aliases treated the same way; `"lookalike"` is always included. Example without renaming: `"lookalike_labels": ["Confuser"]`.
 - Lookalike wins over `ignore_labels` and is kept even when not in `allowed_classes`. Lookalike-only tiles are **not** dropped by `filter_empty_gt`.
 - At eval, lookalikes are not positives; a real-class detection on that region counts as an FP (desired). Do not put them on `rboxes_ignore` at eval.
+- Do **not** put Partially Hidden on `ignore_labels` or map it to `lookalike`; use `difficult_tags` + `difficult_strategy: "ignore"`.
 
 ## HRSC2016
 

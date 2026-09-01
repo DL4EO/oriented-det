@@ -1,19 +1,19 @@
 # Model Analysis Report
 
-- Generated at: `2026-08-24T22:48:49.420880`
+- Generated at: `2026-09-01T06:50:26.240598`
 
 ## Model metadata
-- Experiment dir: `runs/rotated_fcos/20260822-153943`
-- Checkpoint: `runs/rotated_fcos/20260822-153943/checkpoints/best_mAP_0.88.pth`
-- Checkpoint modified: `2026-08-23T18:01:23.063689`
-- Config: `runs/rotated_fcos/20260822-153943/config.json`
+- Experiment dir: `runs/rotated_fcos/20260831-052647`
+- Checkpoint: `runs/rotated_fcos/20260831-052647/checkpoints/best_mAP_0.82.pth`
+- Checkpoint modified: `2026-09-01T04:11:52.270189`
+- Config: `runs/rotated_fcos/20260831-052647/config.json`
 
 ## Source data
 - Data root: `/path/to/data/DOTA-v1.0-tiled`
 - Data split: `val`
 - Total images: `7669`
 - Total ground truth objects: `57768`
-- Total predictions: `96432`
+- Total predictions: `98253`
 
 ## Evaluation setup
 - mAP / PR matching IoU (rotated boxes, VOC-style; **not** NMS IoU): `0.50`
@@ -22,78 +22,78 @@
 
 ## Key outcomes
 - Best threshold (F1): `0.2500`
-- Precision at best threshold: `0.8021`
-- Recall at best threshold: `0.8924`
-- F1 at best threshold: `0.8449`
-- F2 at best threshold: `0.8728`
-- mAP50: `0.8158` (81.58%)
+- Precision at best threshold: `0.8034`
+- Recall at best threshold: `0.8998`
+- F1 at best threshold: `0.8489`
+- F2 at best threshold: `0.8787`
+- mAP50: `0.8232` (82.32%)
 
 ## GT alignment (mean best IoU vs raw detections)
 
-- Global mean best IoU (any class): `0.7836`
-- Global mean best IoU (same class): `0.7817` (median `0.8159`)
+- Global mean best IoU (any class): `0.7921`
+- Global mean best IoU (same class): `0.7901` (median `0.8215`)
 
 Per-class breakdown (each GT: max rotated IoU vs detections on the same image):
 
 | Class | gts | mean_any | mean_same | med_same |
 | --- | ---: | ---: | ---: | ---: |
-| `baseball-diamond` | 364 | 0.7764 | 0.7764 | 0.7702 |
-| `basketball-court` | 278 | 0.8810 | 0.8806 | 0.8963 |
-| `bridge` | 666 | 0.7118 | 0.7118 | 0.7556 |
-| `ground-track-field` | 216 | 0.7418 | 0.7033 | 0.8234 |
-| `harbor` | 4298 | 0.7466 | 0.7455 | 0.7822 |
-| `helicopter` | 157 | 0.7536 | 0.7399 | 0.7889 |
-| `large-vehicle` | 9398 | 0.8076 | 0.8023 | 0.8269 |
-| `plane` | 4731 | 0.8354 | 0.8354 | 0.8713 |
-| `roundabout` | 256 | 0.8379 | 0.8379 | 0.8695 |
-| `ship` | 18534 | 0.7934 | 0.7928 | 0.8174 |
-| `small-vehicle` | 11357 | 0.7482 | 0.7453 | 0.7802 |
-| `soccer-ball-field` | 260 | 0.8431 | 0.8377 | 0.8889 |
-| `storage-tank` | 5031 | 0.7421 | 0.7421 | 0.8216 |
-| `swimming-pool` | 693 | 0.6888 | 0.6888 | 0.7221 |
-| `tennis-court` | 1529 | 0.9076 | 0.9075 | 0.9229 |
-| **global** | 57768 | 0.7836 | 0.7817 | 0.8159 |
+| `baseball-diamond` | 364 | 0.8142 | 0.8142 | 0.8336 |
+| `basketball-court` | 278 | 0.8994 | 0.8994 | 0.9103 |
+| `bridge` | 666 | 0.7268 | 0.7267 | 0.7697 |
+| `ground-track-field` | 216 | 0.7453 | 0.6901 | 0.8348 |
+| `harbor` | 4298 | 0.7604 | 0.7589 | 0.7977 |
+| `helicopter` | 157 | 0.8041 | 0.7955 | 0.8310 |
+| `large-vehicle` | 9398 | 0.8183 | 0.8129 | 0.8367 |
+| `plane` | 4731 | 0.8393 | 0.8393 | 0.8783 |
+| `roundabout` | 256 | 0.8290 | 0.8290 | 0.8702 |
+| `ship` | 18534 | 0.8029 | 0.8024 | 0.8202 |
+| `small-vehicle` | 11357 | 0.7553 | 0.7525 | 0.7839 |
+| `soccer-ball-field` | 260 | 0.8532 | 0.8445 | 0.8967 |
+| `storage-tank` | 5031 | 0.7420 | 0.7417 | 0.8197 |
+| `swimming-pool` | 693 | 0.7006 | 0.7006 | 0.7308 |
+| `tennis-court` | 1529 | 0.9161 | 0.9161 | 0.9290 |
+| **global** | 57768 | 0.7921 | 0.7901 | 0.8215 |
 
 ## Per-class metrics (mAP50)
 
 | Class | gts | dets | recall | AP |
 | --- | ---: | ---: | ---: | ---: |
-| `baseball-diamond` | 364 | 907 | 0.978 | 0.7826 |
-| `basketball-court` | 278 | 432 | 1.000 | 0.9611 |
-| `bridge` | 666 | 2194 | 0.895 | 0.6845 |
-| `ground-track-field` | 216 | 441 | 0.843 | 0.6193 |
-| `harbor` | 4298 | 6842 | 0.941 | 0.8452 |
-| `helicopter` | 157 | 363 | 0.917 | 0.8830 |
-| `large-vehicle` | 9398 | 15234 | 0.974 | 0.8728 |
-| `plane` | 4731 | 5608 | 0.964 | 0.8899 |
-| `roundabout` | 256 | 585 | 0.961 | 0.8265 |
-| `ship` | 18534 | 32217 | 0.974 | 0.7057 |
-| `small-vehicle` | 11357 | 20018 | 0.947 | 0.8574 |
-| `soccer-ball-field` | 260 | 541 | 0.962 | 0.8853 |
-| `storage-tank` | 5031 | 7716 | 0.885 | 0.7792 |
-| `swimming-pool` | 693 | 1482 | 0.913 | 0.7843 |
-| `tennis-court` | 1529 | 1851 | 0.991 | 0.8597 |
-| **mAP** | | | | 0.8158 |
+| `baseball-diamond` | 364 | 1057 | 0.975 | 0.7607 |
+| `basketball-court` | 278 | 457 | 1.000 | 0.9779 |
+| `bridge` | 666 | 2381 | 0.899 | 0.7133 |
+| `ground-track-field` | 216 | 446 | 0.806 | 0.6311 |
+| `harbor` | 4298 | 7205 | 0.941 | 0.8443 |
+| `helicopter` | 157 | 313 | 0.968 | 0.9060 |
+| `large-vehicle` | 9398 | 15210 | 0.979 | 0.8868 |
+| `plane` | 4731 | 5608 | 0.962 | 0.8921 |
+| `roundabout` | 256 | 605 | 0.957 | 0.8248 |
+| `ship` | 18534 | 32588 | 0.985 | 0.7342 |
+| `small-vehicle` | 11357 | 20515 | 0.953 | 0.8581 |
+| `soccer-ball-field` | 260 | 687 | 0.965 | 0.8925 |
+| `storage-tank` | 5031 | 7766 | 0.882 | 0.7789 |
+| `swimming-pool` | 693 | 1540 | 0.915 | 0.7794 |
+| `tennis-court` | 1529 | 1875 | 0.995 | 0.8685 |
+| **mAP** | | | | 0.8232 |
 
 ## Per-class best thresholds (max F1 over the same sweep)
 
 | Class | Threshold | Precision | Recall | F1 | TP | FP | FN |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `baseball-diamond` | 0.4500 | 0.7550 | 0.9313 | 0.8339 | 339 | 110 | 25 |
-| `basketball-court` | 0.3500 | 0.8846 | 0.9928 | 0.9356 | 276 | 36 | 2 |
-| `bridge` | 0.3000 | 0.7481 | 0.7492 | 0.7487 | 499 | 168 | 167 |
-| `ground-track-field` | 0.1500 | 0.6468 | 0.6528 | 0.6498 | 141 | 77 | 75 |
-| `harbor` | 0.2500 | 0.8425 | 0.8876 | 0.8645 | 3815 | 713 | 483 |
-| `helicopter` | 0.3000 | 0.9424 | 0.8344 | 0.8851 | 131 | 8 | 26 |
-| `large-vehicle` | 0.2500 | 0.8852 | 0.9289 | 0.9065 | 8730 | 1132 | 668 |
-| `plane` | 0.3000 | 0.9421 | 0.9387 | 0.9404 | 4441 | 273 | 290 |
-| `roundabout` | 0.3500 | 0.7770 | 0.8984 | 0.8333 | 230 | 66 | 26 |
-| `ship` | 0.2500 | 0.6903 | 0.9388 | 0.7956 | 17400 | 7806 | 1134 |
-| `small-vehicle` | 0.2000 | 0.8292 | 0.8709 | 0.8496 | 9891 | 2037 | 1466 |
-| `soccer-ball-field` | 0.3500 | 0.9144 | 0.9038 | 0.9091 | 235 | 22 | 25 |
-| `storage-tank` | 0.1500 | 0.8439 | 0.8346 | 0.8392 | 4199 | 777 | 832 |
-| `swimming-pool` | 0.2500 | 0.7120 | 0.8240 | 0.7639 | 571 | 231 | 122 |
-| `tennis-court` | 0.3000 | 0.9337 | 0.9863 | 0.9593 | 1508 | 107 | 21 |
+| `baseball-diamond` | 0.4500 | 0.7297 | 0.9121 | 0.8107 | 332 | 123 | 32 |
+| `basketball-court` | 0.3500 | 0.9026 | 1.0000 | 0.9488 | 278 | 30 | 0 |
+| `bridge` | 0.3000 | 0.7204 | 0.7778 | 0.7480 | 518 | 201 | 148 |
+| `ground-track-field` | 0.2000 | 0.7120 | 0.6296 | 0.6683 | 136 | 55 | 80 |
+| `harbor` | 0.2500 | 0.8417 | 0.9016 | 0.8706 | 3875 | 729 | 423 |
+| `helicopter` | 0.3000 | 0.9792 | 0.8981 | 0.9369 | 141 | 3 | 16 |
+| `large-vehicle` | 0.2500 | 0.9021 | 0.9337 | 0.9176 | 8775 | 952 | 623 |
+| `plane` | 0.2500 | 0.9338 | 0.9419 | 0.9378 | 4456 | 316 | 275 |
+| `roundabout` | 0.3500 | 0.7649 | 0.9023 | 0.8280 | 231 | 71 | 25 |
+| `ship` | 0.3000 | 0.7071 | 0.9299 | 0.8033 | 17235 | 7139 | 1299 |
+| `small-vehicle` | 0.2000 | 0.8302 | 0.8757 | 0.8523 | 9945 | 2034 | 1412 |
+| `soccer-ball-field` | 0.3500 | 0.9255 | 0.9077 | 0.9165 | 236 | 19 | 24 |
+| `storage-tank` | 0.2000 | 0.8815 | 0.8002 | 0.8389 | 4026 | 541 | 1005 |
+| `swimming-pool` | 0.3000 | 0.7709 | 0.7576 | 0.7642 | 525 | 156 | 168 |
+| `tennis-court` | 0.3000 | 0.9300 | 0.9817 | 0.9551 | 1501 | 113 | 28 |
 
 ## Confusion matrix
 
@@ -103,22 +103,22 @@ Rows are ground-truth classes; columns are predicted classes. The `False Positiv
 
 | Actual \ Predicted | baseball-diamond | basketball-court | bridge | ground-track-field | harbor | helicopter | large-vehicle | plane | roundabout | ship | small-vehicle | soccer-ball-field | storage-tank | swimming-pool | tennis-court | Missed |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `baseball-diamond` | 355 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 9 |
+| `baseball-diamond` | 353 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 11 |
 | `basketball-court` | 0 | 278 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `bridge` | 0 | 0 | 530 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 136 |
-| `ground-track-field` | 0 | 0 | 0 | 124 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 0 | 0 | 90 |
-| `harbor` | 0 | 0 | 0 | 0 | 3815 | 0 | 0 | 0 | 0 | 4 | 0 | 0 | 0 | 0 | 0 | 479 |
-| `helicopter` | 0 | 0 | 0 | 0 | 0 | 137 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 19 |
-| `large-vehicle` | 0 | 0 | 0 | 0 | 0 | 0 | 8727 | 0 | 0 | 0 | 58 | 0 | 0 | 0 | 0 | 613 |
-| `plane` | 0 | 0 | 0 | 0 | 0 | 2 | 0 | 4468 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 261 |
-| `roundabout` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 236 | 0 | 0 | 0 | 0 | 0 | 0 | 20 |
-| `ship` | 0 | 0 | 0 | 0 | 2 | 0 | 1 | 0 | 0 | 17400 | 0 | 0 | 0 | 2 | 0 | 1129 |
-| `small-vehicle` | 0 | 0 | 0 | 0 | 0 | 0 | 43 | 0 | 0 | 0 | 9357 | 0 | 0 | 0 | 0 | 1957 |
-| `soccer-ball-field` | 0 | 0 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 245 | 0 | 0 | 0 | 13 |
-| `storage-tank` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3795 | 0 | 0 | 1236 |
-| `swimming-pool` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 571 | 0 | 122 |
-| `tennis-court` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1509 | 20 |
-| `False Positive` | 200 | 48 | 220 | 46 | 711 | 15 | 1091 | 307 | 99 | 7802 | 1330 | 40 | 350 | 229 | 118 | 0 |
+| `bridge` | 0 | 0 | 555 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 111 |
+| `ground-track-field` | 0 | 0 | 0 | 126 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 7 | 0 | 0 | 0 | 83 |
+| `harbor` | 0 | 0 | 0 | 0 | 3874 | 0 | 0 | 0 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 422 |
+| `helicopter` | 0 | 0 | 0 | 0 | 0 | 143 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 13 |
+| `large-vehicle` | 0 | 0 | 0 | 0 | 0 | 0 | 8773 | 0 | 0 | 0 | 60 | 0 | 0 | 0 | 0 | 565 |
+| `plane` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4456 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 275 |
+| `roundabout` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 235 | 0 | 0 | 0 | 0 | 0 | 0 | 21 |
+| `ship` | 0 | 0 | 0 | 0 | 2 | 0 | 1 | 0 | 0 | 17683 | 0 | 0 | 0 | 2 | 0 | 846 |
+| `small-vehicle` | 0 | 0 | 0 | 0 | 0 | 0 | 50 | 0 | 0 | 1 | 9356 | 0 | 0 | 0 | 0 | 1950 |
+| `soccer-ball-field` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 241 | 0 | 0 | 0 | 19 |
+| `storage-tank` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3832 | 0 | 0 | 1199 |
+| `swimming-pool` | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 548 | 0 | 145 |
+| `tennis-court` | 0 | 2 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 1509 | 17 |
+| `False Positive` | 203 | 43 | 287 | 51 | 727 | 10 | 903 | 315 | 95 | 7869 | 1353 | 38 | 377 | 211 | 125 | 0 |
 
 ## Artifacts
 - Predictions JSON: `predictions.json`

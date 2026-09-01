@@ -99,11 +99,15 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 | `same_folder` | `false` | If true, images and `.txt` labels live directly under tile dirs |
 | `overlap` | `16` | Tile overlap (px, even); `0` = none. Deploy margin defaults to `overlap/2` when `production.ignore_margin_pixels` is null |
 | `difficult_strategy` | `drop` | `drop` \| `ignore` \| `keep` for DOTA difficult flag |
-| `filter_empty_gt` | `false` | Drop samples with no GT after difficult/class filters (DOTA tiles and HRSC2016 images; MMRotate parity) |
+| `difficult_tags` | null | Airbus: exact tags (e.g. `["Partially Hidden"]`) → `difficult=1` and strip from class name at load/generation |
+| `filter_empty_gt` | `false` | Drop samples with no GT after difficult/class filters (DOTA tiles and HRSC2016 images; MMRotate parity). Don't-care-only / lookalike-only tiles are kept when those boxes remain |
 | `max_train_samples` / `max_val_samples` | null | Cap dataset size; use `max_samples_shuffle_seed` for spread sampling |
 | `tile_metrics_csv` | null | From `save_predictions --save-tile-metrics-csv`; enables hard-tile oversampling |
 | `hard_tile_metric_column` / `hard_tile_threshold` / `hard_tile_oversample_factor` | `f1` / `0.8` / `2.0` | Tiles with metric strictly below the threshold are oversampled |
 | `drop_easy_empty_tiles` | `false` | Requires `tile_metrics_csv`. Drops train tiles with `tp=fp=fn=0` (no GT, no preds) before `max_train_samples` and oversampling. Empty tiles with FPs stay and can be oversampled. Keep `filter_empty_gt: false` so those hard empties remain in the loader |
+| `annotations_file` / `split_file` | null | Required for `format: airbus_playground` |
+| `val_split_id` / `train_includes_val` | `0` / `false` | Airbus fold CSVs |
+| `ignore_labels` / `map_labels` / `lookalike_labels` | null | Drop / rename / hard-negative aliases (see [Data Loading](data.md)) |
 
 ### `model` (by detector)
 
@@ -117,9 +121,9 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 | RPN IoU thresholds | Midpoint-offset RPN defaults | Standard oriented RPN | See `rpn_positive_iou_threshold`, `rpn_negative_iou_threshold`, … |
 | `roi_focal_*`, `roi_norm_factor`, `roi_edge_swap` | ROI head | ROI head | Reused for **RetinaNet focal cls** (`loss.loss_type: focal` wires these in `train.py`) |
 
-**RetinaNet note:** There is no RPN or ROI module. `tools/train.py` maps `model.rpn_*` to oriented-anchor matching and `model.roi_*` / `loss.focal_*` to the classification head. See [configs/rotated_retinanet/README.md](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_retinanet/README.md).
+**RetinaNet note:** There is no RPN or ROI module. `tools/train.py` maps `model.rpn_*` to oriented-anchor matching and `model.roi_*` / `loss.focal_*` to the classification head. Final NMS is class-aware by default; set `model.nms_class_agnostic: true` (and `production.nms_class_agnostic` if deploy should match) to suppress overlapping lookalike classes (car/truck). See [configs/rotated_retinanet/README.md](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_retinanet/README.md).
 
-**FCOS note:** Anchor-free; ignore `anchor_*` / RPN / ROI keys. Box regression is `model.box_reg_loss_type` (`l1`, `kfiou`, `riou`) plus optional `aux_loss_type` / `aux_loss_weight`. Head knobs are `fcos_*`. See [configs/rotated_fcos/README.md](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_fcos/README.md).
+**FCOS note:** Anchor-free; ignore `anchor_*` / RPN / ROI keys. Box regression is `model.box_reg_loss_type` (`l1`, `kfiou`, `riou`) plus optional `aux_loss_type` / `aux_loss_weight`. Head knobs are `fcos_*`. Final NMS is class-aware by default; set `model.nms_class_agnostic: true` (and `production.nms_class_agnostic` if deploy should match) to suppress overlapping lookalike classes (car/truck). See [configs/rotated_fcos/README.md](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_fcos/README.md).
 
 `roi_box_reg_angle_weight` scales the angle (5th encoded dim) SmoothL1 term in ROI box regression (two-stage models only). Optional `roi_box_reg_angle_schedule_epochs` / `roi_box_reg_angle_schedule_values` piecewise-schedule that weight by 0-based epoch (`values` length = `len(epochs) + 1`; when either field is null, `roi_box_reg_angle_weight` stays constant). The engine calls `set_roi_box_reg_angle_weight_for_epoch(epoch)` each epoch.
 
@@ -146,9 +150,9 @@ For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set
 
 | Context | Score threshold | IoU for mAP | Final detection NMS |
 |---------|-----------------|-------------|---------------------|
-| Training loop | `evaluation.*` (score may use `production.score_threshold` via merge) | `evaluation.iou_threshold` | **`model.final_nms_iou_threshold`** (recipes: **0.1**) — `production` is **not** applied in `train.py` |
-| `odet preds` / `make eval-val` | `production.score_threshold` overrides `evaluation` when set; per-class maps merge | Always `evaluation.iou_threshold` | **`evaluation.final_nms_iou_threshold`** when set (recipes: **0.1**), else production/model |
-| Deploy / `image_demo` | Same score merge | n/a | **`production.final_nms_iou_threshold`** (recipes: **0.3**) via `apply_inference_config_to_model` |
+| Training loop | `evaluation.score_threshold` (often **0.3**); `production.score_threshold` overrides when set | `evaluation.iou_threshold` | **`model.final_nms_iou_threshold`** (recipes: **0.1**) — `production` is **not** applied in `train.py` |
+| `odet preds` / `make eval-val` | **`evaluation.preds_score_threshold`** when set, else **0.05** (ignores production/train floors); per-class maps still merge | Always `evaluation.iou_threshold` | **`evaluation.final_nms_iou_threshold`** when set (recipes: **0.1**), else production/model |
+| Deploy / `image_demo` | `production.score_threshold` else `evaluation.score_threshold` | n/a | **`production.final_nms_iou_threshold`** (recipes: **0.3**) via `apply_inference_config_to_model` |
 
 `production.overlap_pixels` (default 200 when null) and `ignore_margin_pixels` (default `dataset.overlap / 2`) control native sliding-window inference for `fixed`/`crop` in `oriented_det.runtime.inference` (`odet preds`, `save_predictions`, deploy). `resize_mode: pad` / `keep_ratio` do not native-tile; they use the training whole-image scale path (`keep_ratio` then `pad_size_divisor`).
 

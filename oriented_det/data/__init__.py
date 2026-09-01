@@ -16,6 +16,7 @@ from .dota import (
 )
 from .airbus_playground import (
     AirbusPlaygroundCSVDataset,
+    apply_airbus_difficult_tags,
     detect_airbus_split_csv_format,
     format_airbus_empty_gt_filter_log,
     generate_airbus_playground_csvs,
@@ -29,6 +30,7 @@ from .hrsc2016 import (
 from .build import (
     SUPPORTED_DATASET_FORMATS,
     build_split_dataset,
+    collect_split_images,
     dataset_format_name,
     split_class_names,
 )
@@ -85,6 +87,7 @@ __all__ = [
     "format_hrsc_empty_gt_filter_log",
     "SUPPORTED_DATASET_FORMATS",
     "build_split_dataset",
+    "collect_split_images",
     "dataset_format_name",
     "split_class_names",
     "LOOKALIKE_CLASS_NAME",
@@ -92,6 +95,7 @@ __all__ = [
     "is_lookalike_class_name",
     "resolve_lookalike_label_set",
     "AirbusPlaygroundCSVDataset",
+    "apply_airbus_difficult_tags",
     "detect_airbus_split_csv_format",
     "format_airbus_empty_gt_filter_log",
     "generate_airbus_playground_csvs",

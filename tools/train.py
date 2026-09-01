@@ -857,6 +857,7 @@ def create_model_from_config(
             roi_box_reg_aux_schedule_epochs=config.model.roi_box_reg_aux_schedule_epochs,
             roi_box_reg_aux_schedule_values=config.model.roi_box_reg_aux_schedule_values,
             final_nms_use_cpu=getattr(config.model, "final_nms_use_cpu", False),
+            nms_class_agnostic=getattr(config.model, "nms_class_agnostic", False),
         )
     elif model_type == "rotated_fcos":
         rr = getattr(config.model, "fcos_regress_ranges", None)
@@ -894,6 +895,7 @@ def create_model_from_config(
             final_nms_iou_schedule_epochs=config.model.final_nms_iou_schedule_epochs,
             final_nms_iou_schedule_values=config.model.final_nms_iou_schedule_values,
             final_nms_use_cpu=getattr(config.model, "final_nms_use_cpu", False),
+            nms_class_agnostic=getattr(config.model, "nms_class_agnostic", False),
         )
     else:
         raise ValueError(

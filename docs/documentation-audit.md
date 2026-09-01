@@ -22,7 +22,7 @@ Tracking alignment of human docs with `oriented_det/`, `tools/`, and `configs/`.
 | `tools/README.md` | **done** | Tiled preds/metrics/viewer only |
 | `pretrained/README.md` | **done** | Hub + make preds/metrics |
 | `oriented_det/**/README.md` | **done** | External project root wording |
-| `export/**`, `deploy/**` | **done** | In-repo example paths |
+| `deploy/**` | **done** | In-repo example paths |
 | `tests/README.md` | **done** | Full module list + CI note |
 | `.github/workflows/test.yml` | **done** | CPU pytest on push/PR |
 | Install / dev workflow | **done** (2026-06-02) | **uv** only in human docs; `make install` / `docs-deps` use `uv pip`; PyPI consumers may still use `pip install oriented-det` |
@@ -46,8 +46,8 @@ Full report: [`code-analysis-report.md`](code-analysis-report.md).
 | `docs/user-guide/configuration.md` | **done** (2026-06-15) | RetinaNet `rpn_*`/`roi_*` reuse documented (F6) |
 | `pretrained/README.md`, config Hub tables | **done** (2026-06-15) | `eval_map50` vs training final mAP clarified (F1) |
 | Config schema ↔ `config.py` | **verified** | All sections field-aligned (F8) |
-| `export/PARITY.md` ↔ contract/tests | **verified** | (F9) |
 | Run `rotated_retinanet/20260612-121232` | **verified** | Matches `dota_le90_3x` recipe; final mAP 75.94% (F10) |
+| `export/` | **removed** | ONNX/TF pipeline, `odet export-*`, and `[export]` extra are no longer in this repo |
 
 **Automated validation (2026-06-15):** `make docs` pass (4 link warnings before fixes); 47 targeted pytest pass; 383 full pytest pass with editable install; Hub manifest 4/4 runs present.
 

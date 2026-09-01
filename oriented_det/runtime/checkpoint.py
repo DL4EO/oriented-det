@@ -374,6 +374,7 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             roi_box_reg_aux_schedule_epochs=getattr(m, "roi_box_reg_aux_schedule_epochs", None) if m else None,
             roi_box_reg_aux_schedule_values=getattr(m, "roi_box_reg_aux_schedule_values", None) if m else None,
             final_nms_use_cpu=getattr(m, "final_nms_use_cpu", False) if m else False,
+            nms_class_agnostic=getattr(m, "nms_class_agnostic", False) if m else False,
         )
     elif 'fcos' in model_type_lower:
         m = config.model
@@ -412,6 +413,7 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             final_nms_iou_schedule_epochs=m.final_nms_iou_schedule_epochs if m else None,
             final_nms_iou_schedule_values=m.final_nms_iou_schedule_values if m else None,
             final_nms_use_cpu=getattr(m, "final_nms_use_cpu", False) if m else False,
+            nms_class_agnostic=getattr(m, "nms_class_agnostic", False) if m else False,
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}")

@@ -213,6 +213,10 @@ class DatasetConfig:
     # is always included even when this list is null/empty.
     lookalike_labels: Optional[List[str]] = None
     map_labels: Optional[Dict[str, str]] = None
+    # Exact Playground tags (e.g. "Partially Hidden") that set DOTA difficult=1 and are
+    # stripped from the semantic class_name at Airbus CSV load / generation time.
+    # Not the same as ignore_labels (drop) or lookalike (hard negative).
+    difficult_tags: Optional[List[str]] = None
     # How to handle DOTA "difficult" annotations (last field in label lines):
     # - "drop": remove difficult objects at read-time (fast; they never reach training/eval targets)
     # - "ignore": keep difficult objects but route them into ignore targets (MMRotate/MMDet-style)
@@ -501,6 +505,10 @@ class EvaluationConfig:
     # Optional class_name -> min score; classes not listed use score_threshold
     per_class_score_threshold: Optional[Dict[str, float]] = None
     iou_threshold: float = 0.5  # IoU threshold for mAP calculation
+    # Global score floor for ``odet preds`` / ``make eval-val`` only (published protocol 0.05).
+    # When null, those tools use 0.05. Training val uses ``score_threshold`` (often 0.3).
+    # Deploy / image_demo use ``production.score_threshold`` (may be 0.3).
+    preds_score_threshold: Optional[float] = None
     # Final detection NMS IoU for ``odet preds`` / ``make eval-val`` only (MMRotate test parity).
     # When set, overrides ``production.final_nms_iou_threshold`` for that path. Deploy / image_demo
     # still use ``production.*`` via ``apply_inference_config_to_model``. Training val uses ``model.*``.
@@ -572,6 +580,35 @@ def resolve_inference_score_threshold(config: "TrainingExperimentConfig") -> flo
         if v is not None:
             return float(v)
     return float(getattr(config.evaluation, "score_threshold", 0.5))
+
+
+def resolve_preds_score_threshold(
+    config: "TrainingExperimentConfig",
+    *,
+    cli_score_threshold: Optional[float] = None,
+) -> Tuple[float, str]:
+    """Global score floor for ``odet preds`` / ``make eval-val``.
+
+    Priority:
+    1. CLI ``--score-threshold``
+    2. ``evaluation.preds_score_threshold`` when set
+    3. ``0.05`` (published eval-val protocol)
+
+    Ignores ``production.score_threshold`` and ``evaluation.score_threshold`` so
+    deploy display (often 0.3) and fast train-val (often 0.3) cannot raise the
+    published mAP floor. Deploy / ``image_demo`` keep
+    :func:`resolve_inference_score_threshold`. Training val keeps
+    :func:`effective_eval_metric_thresholds`.
+    """
+    if cli_score_threshold is not None:
+        return float(cli_score_threshold), "CLI --score-threshold"
+    ev = getattr(config, "evaluation", None)
+    if ev is not None and getattr(ev, "preds_score_threshold", None) is not None:
+        return (
+            float(ev.preds_score_threshold),
+            "evaluation.preds_score_threshold (eval-val / odet preds)",
+        )
+    return 0.05, "default 0.05 (eval-val / odet preds)"
 
 
 def resolve_preds_final_nms_iou_threshold(
@@ -1025,6 +1062,8 @@ class TrainingExperimentConfig:
                     print("  Train Includes Val: true (all folds in train; val fold for monitoring only)")
                 print(f"  Ignore Labels: {self.dataset.ignore_labels}")
                 print(f"  Map Labels: {self.dataset.map_labels}")
+                if getattr(self.dataset, "difficult_tags", None):
+                    print(f"  Difficult Tags: {self.dataset.difficult_tags}")
             elif self.dataset.format == "hrsc2016":
                 print(f"  Train Split (ImageSets): {self.dataset.train_split or 'trainval'}")
                 print(f"  Val Split (ImageSets): {self.dataset.val_split or 'test'}")
@@ -1087,7 +1126,11 @@ class TrainingExperimentConfig:
         print()
         
         print("Evaluation:")
-        print(f"  Score Threshold: {self.evaluation.score_threshold}")
+        print(f"  Score Threshold (train val): {self.evaluation.score_threshold}")
+        print(
+            f"  preds_score_threshold (odet preds / eval-val): "
+            f"{self.evaluation.preds_score_threshold!r}"
+        )
         if self.evaluation.per_class_score_threshold:
             print(f"  Per-class score thresholds: {self.evaluation.per_class_score_threshold}")
         print(f"  Extended GT metrics: {self.evaluation.extended_gt_metrics}")
@@ -1109,7 +1152,9 @@ class TrainingExperimentConfig:
         ow_px = resolve_inference_sliding_window_overlap_pixels(self)
         _eff_sc, _eff_pc, _eff_iou = effective_eval_metric_thresholds(self)
         _preds_nms, _preds_nms_src = resolve_preds_final_nms_iou_threshold(self)
-        print(f"  score_threshold: {inf.score_threshold!r} → effective {_eff_sc}")
+        _preds_sc, _preds_sc_src = resolve_preds_score_threshold(self)
+        print(f"  score_threshold: {inf.score_threshold!r} → train/deploy {_eff_sc}")
+        print(f"  odet preds / eval-val score → {_preds_sc} via {_preds_sc_src}")
         print(f"  per_class_score_threshold: {inf.per_class_score_threshold!r} → effective {_eff_pc!r}")
         print(f"  (mAP IoU from evaluation.iou_threshold: {self.evaluation.iou_threshold} → effective {_eff_iou})")
         print(

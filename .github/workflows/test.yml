@@ -23,4 +23,4 @@ jobs:
       - name: Check vendored configs match configs/
         run: make check-configs
       - name: Run tests
-        run: python -m pytest tests/ export/tests/ -q --tb=short
+        run: python -m pytest tests/ -q --tb=short

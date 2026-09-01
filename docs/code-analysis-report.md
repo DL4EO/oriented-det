@@ -1,7 +1,7 @@
 # Code and documentation analysis report
 
 **Date:** 2026-06-15  
-**Scope:** Full repo — MkDocs user guide, folder READMEs, config recipes, core library, CLI/tools, export parity, and training run `runs/rotated_retinanet/20260612-121232`.
+**Scope:** Full repo — MkDocs user guide, folder READMEs, config recipes, core library, CLI/tools, and training run `runs/rotated_retinanet/20260612-121232`.
 
 ---
 
@@ -31,7 +31,6 @@
 | [`oriented_det/train/README.md`](../oriented_det/train/README.md) | `engine.py`, `config.py` | OK | |
 | [`oriented_det/cli/README.md`](../oriented_det/cli/README.md) | CLI dispatch table | OK | Fuller command list than getting-started tools page |
 | [`tools/README.md`](../tools/README.md) | All `tools/*.py` | OK | Analysis artifacts documented in detail |
-| [`export/PARITY.md`](../export/PARITY.md) | [`export/wrappers.py`](../export/wrappers.py), [`export/contract.json`](../export/contract.json) | OK | Modes match contract; tests in `export/tests/` |
 | [`oriented_det/pretrained/manifest.json`](../oriented_det/pretrained/manifest.json) | `runs/`, Hub assets | Partial | `eval_map50` ≠ training final mAP (see §5) |
 | 31 folder READMEs | Local packages | OK | Per prior audit |
 
@@ -60,7 +59,7 @@
 
 **Registered in `oriented_det/cli/__init__.py`:**
 
-`train`, `train-multi-gpu`, `preds`, `metrics`, `lr-finder`, `stats`, `tile-dota`, `image-demo`, `viewer`, `playground-csv`, `playground-to-dota`, `export-onnx`, `labels-to-comma`, `free-gpu`, `pretrained`, plus `export-tf` (Makefile wrapper).
+`train`, `train-multi-gpu`, `preds`, `metrics`, `lr-finder`, `stats`, `tile-dota`, `image-demo`, `viewer`, `playground-csv`, `playground-to-dota`, `labels-to-comma`, `free-gpu`, `pretrained`.
 
 | Command | `cli/README.md` | `getting-started/tools.md` | `tools/README.md` |
 |---------|-----------------|---------------------------|-------------------|
@@ -70,7 +69,6 @@
 | image-demo, viewer | Yes | Partial | Yes |
 | tile-dota, stats, lr-finder | Yes | No | Yes |
 | playground-* | Yes | No | Yes |
-| export-onnx, export-tf | Yes | No | Via export README |
 | pretrained | No | No | Yes |
 | labels-to-comma, free-gpu | No | No | Yes |
 
@@ -119,10 +117,6 @@ Verified behaviors vs 3× run:
 
 - [`tools/README.md`](../tools/README.md) documents `analysis_iou*.json`, `model_analysis_*.md`, per-class AP tables, confusion matrix
 - [`docs/examples/inference.md`](examples/inference.md) only says "optional analysis plots" — artifact filenames and `--per-class-threshold-analysis` not mentioned
-
-### 4.5 Export parity
-
-**Coverage:** Documented | [`export/PARITY.md`](../export/PARITY.md) aligns with [`export/contract.json`](../export/contract.json) modes (`backbone`, `retinanet_heads`, `faster_rcnn_pre_nms`). Regression: `export/tests/test_export_wrappers.py`, `test_faster_rcnn_export_parity.py`.
 
 ---
 
@@ -184,7 +178,7 @@ Manifest `eval_map50` reflects **published preds/metrics evaluation**, not `comp
 
 | ID | Severity | Finding | Location |
 |----|----------|---------|----------|
-| F3 | Partial | `docs/getting-started/tools.md` omits half of `odet` commands (`train-multi-gpu`, `tile-dota`, `stats`, `lr-finder`, `export-*`, `pretrained`, etc.) | `docs/getting-started/tools.md` |
+| F3 | Partial | `docs/getting-started/tools.md` omits half of `odet` commands (`train-multi-gpu`, `tile-dota`, `stats`, `lr-finder`, `pretrained`, etc.) | `docs/getting-started/tools.md` |
 | F4 | Partial | Inference example does not name analysis artifacts (`analysis_iou0.50.json`, `model_analysis_*.md`) or key flags | `docs/examples/inference.md` vs `tools/README.md` |
 | F5 | Stale | MkDocs build warns on relative out-of-tree links | `docs/user-guide/data.md`, `docs/user-guide/models.md` |
 | F6 | Partial | RetinaNet config key reuse (`rpn_*` / `roi_*` for anchors/focal) absent from user guide | `docs/user-guide/configuration.md` |
@@ -195,7 +189,6 @@ Manifest `eval_map50` reflects **published preds/metrics evaluation**, not `comp
 |----|----------|---------|----------|
 | F7 | Redundant | CLI command list duplicated inconsistently across `cli/README`, `tools/README`, `getting-started/tools` | Multiple |
 | F8 | OK | Config schema ↔ Python dataclasses fully aligned | `config.py`, `config.schema.json` |
-| F9 | OK | Export PARITY ↔ contract ↔ tests consistent | `export/` |
 | F10 | OK | 3× RetinaNet run matches recipe and config README expectations | Run `20260612-121232` |
 
 ---

@@ -93,6 +93,24 @@ def test_ap_calculator_difficult_flags():
     assert metrics.recall == 0.0
 
 
+def test_ap_calculator_missing_difficult_is_not_fn():
+    """Missing a difficult GT must not count as FN (num_gts excludes difficult)."""
+    easy = RBox(100, 100, 50, 30, 0)
+    hard = RBox(200, 200, 50, 30, 0)
+    detections = [
+        Detection(rbox=easy, score=0.9, class_id=0, class_name="plane"),
+    ]
+    ground_truths = [
+        GroundTruth(rbox=easy, class_id=0, class_name="plane", difficult=0),
+        GroundTruth(rbox=hard, class_id=0, class_name="plane", difficult=1),
+    ]
+    calculator = APCalculator(iou_threshold=0.5)
+    ap, metrics = calculator.compute_ap(detections, ground_truths, class_name="plane")
+    assert metrics.num_gts == 1
+    assert metrics.recall == 1.0
+    assert ap > 0.9
+
+
 def test_ap_calculator_no_detections():
     """Test AP calculation with no detections."""
     rbox = RBox(100, 100, 50, 30, 0)

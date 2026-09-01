@@ -326,3 +326,193 @@ def test_loader_applies_ignore_and_map_labels(tmp_path: Path):
     classes = set(train_ds.get_class_names()) | set(val_ds.get_class_names())
     assert "Confuser" not in classes
     assert "car" in classes
+
+
+def _write_minimal_airbus_csv(
+    root: Path,
+    *,
+    class_name: str,
+    difficult: str = "0",
+    tile_relpath: str = "ds/samples/z/img/tile-a.jpg",
+    coords: str = "10.000 10.000 20.000 10.000 20.000 18.000 10.000 18.000",
+) -> None:
+    """Write annotations.csv + split.csv + a tiny image without shapely."""
+    img_path = root / tile_relpath
+    img_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (64, 64), color=(90, 90, 90)).save(img_path)
+    with (root / "annotations.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "tile_relpath",
+                "dataset_id",
+                "zone_id",
+                "image_id",
+                "tile_id",
+                "dota_coords",
+                "class_name",
+                "difficult",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "tile_relpath": tile_relpath,
+                "dataset_id": "ds",
+                "zone_id": "z",
+                "image_id": "img",
+                "tile_id": "tile-a",
+                "dota_coords": coords,
+                "class_name": class_name,
+                "difficult": difficult,
+            }
+        )
+    with (root / "split.csv").open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["tile_relpath", "dataset_id", "zone_id", "image_id", "tile_id", "split"],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "tile_relpath": tile_relpath,
+                "dataset_id": "ds",
+                "zone_id": "z",
+                "image_id": "img",
+                "tile_id": "tile-a",
+                "split": "1",
+            }
+        )
+
+
+def test_apply_airbus_difficult_tags_strips_partially_hidden():
+    from oriented_det.data.airbus_playground import apply_airbus_difficult_tags
+
+    name, difficult = apply_airbus_difficult_tags(
+        "Partially Hidden, car",
+        difficult_tags=["Partially Hidden"],
+    )
+    assert name == "car"
+    assert difficult == 1
+
+    name2, d2 = apply_airbus_difficult_tags(
+        "Partially Hidden, car, van and pickup",
+        difficult_tags=["Partially Hidden"],
+    )
+    assert name2 == "car, van and pickup"
+    assert d2 == 1
+
+    with pytest.raises(ValueError, match="only difficult_tags"):
+        apply_airbus_difficult_tags("Partially Hidden", difficult_tags=["Partially Hidden"])
+
+
+def test_loader_keeps_comma_class_name(tmp_path: Path):
+    _write_minimal_airbus_csv(tmp_path, class_name="car, van and pickup")
+    ds = AirbusPlaygroundCSVDataset(
+        data_root=tmp_path,
+        split="train",
+        annotations_file="annotations.csv",
+        split_file="split.csv",
+        difficult_strategy="keep",
+    )
+    anns = ds[0].annotations
+    assert len(anns) == 1
+    assert anns[0].class_name == "car, van and pickup"
+    assert "car, van and pickup" in ds.get_class_names()
+
+
+def test_loader_maps_comma_class_and_partially_hidden(tmp_path: Path):
+    _write_minimal_airbus_csv(tmp_path, class_name="Partially Hidden, car, van and pickup")
+    ds = AirbusPlaygroundCSVDataset(
+        data_root=tmp_path,
+        split="train",
+        annotations_file="annotations.csv",
+        split_file="split.csv",
+        difficult_strategy="ignore",
+        difficult_tags=["Partially Hidden"],
+        map_labels={"car, van and pickup": "car"},
+    )
+    anns = ds[0].annotations
+    assert len(anns) == 1
+    assert anns[0].class_name == "car"
+    assert anns[0].difficult == 1
+    assert ds.get_class_names() == ["car"]
+    assert "Partially Hidden, car, van and pickup" not in ds.get_class_names()
+
+
+def test_loader_raises_on_bad_coords(tmp_path: Path):
+    _write_minimal_airbus_csv(
+        tmp_path,
+        class_name="car",
+        coords="1 2 3",
+    )
+    with pytest.raises(ValueError, match="Failed to parse annotation"):
+        AirbusPlaygroundCSVDataset(
+            data_root=tmp_path,
+            split="train",
+            annotations_file="annotations.csv",
+            split_file="split.csv",
+        )
+
+
+def test_loader_raises_on_unknown_allowed_class(tmp_path: Path):
+    _write_minimal_airbus_csv(tmp_path, class_name="car, van and pickup")
+    with pytest.raises(ValueError, match="map_labels"):
+        AirbusPlaygroundCSVDataset(
+            data_root=tmp_path,
+            split="train",
+            annotations_file="annotations.csv",
+            split_file="split.csv",
+            allowed_classes=["car", "truck"],
+        )
+
+
+def test_filter_empty_gt_keeps_dont_care_only_tile(tmp_path: Path):
+    _write_minimal_airbus_csv(tmp_path, class_name="Partially Hidden, car", difficult="0")
+    ds = AirbusPlaygroundCSVDataset(
+        data_root=tmp_path,
+        split="train",
+        annotations_file="annotations.csv",
+        split_file="split.csv",
+        difficult_strategy="ignore",
+        difficult_tags=["Partially Hidden"],
+        filter_empty_gt=True,
+    )
+    assert len(ds) == 1
+    assert ds[0].annotations[0].difficult == 1
+
+
+def test_generate_csv_writes_difficult_for_partially_hidden(tmp_path: Path):
+    pytest.importorskip("shapely")
+    dataset_id = "dataset-PH"
+    zone_id = "zone-1"
+    image_id = "image-1"
+    tile_id = "tile-1"
+    _write_tile(tmp_path / dataset_id / "samples" / zone_id / image_id / f"{tile_id}.jpg")
+    label_path = tmp_path / dataset_id / "labels" / zone_id / f"{tile_id}.json"
+    label_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[10, 10], [20, 10], [20, 18], [10, 18], [10, 10]]],
+                },
+                "properties": {"tags": ["Partially Hidden", "car"]},
+            }
+        ],
+    }
+    label_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    ann_path, _ = generate_airbus_playground_csvs(
+        tmp_path,
+        difficult_tags=["Partially Hidden"],
+        include_stats=False,
+    )
+    with ann_path.open("r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["class_name"] == "car"
+    assert rows[0]["difficult"] == "1"
