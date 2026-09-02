@@ -1,0 +1,276 @@
+{
+  "device": "mps",
+  "torch": "2.13.0",
+  "score_threshold": 0.3,
+  "nms_threshold": 0.1,
+  "models": {
+    "oriented_rcnn": {
+      "slug": "oriented_rcnn_dota_le90_3x",
+      "model_type": "oriented_rcnn",
+      "params": 41311978,
+      "load_s": 1.21,
+      "ckpt": "/Users/jeffaudi/Projects/oriented-det/pretrained/oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.pth"
+    },
+    "rotated_fcos": {
+      "slug": "rotated_fcos_dota_le90_3x",
+      "model_type": "rotated_fcos",
+      "params": 36223451,
+      "load_s": 0.72,
+      "ckpt": "/Users/jeffaudi/Projects/oriented-det/pretrained/rotated_fcos_r50_fpn_dota_le90_3x-6e383331.pth"
+    }
+  },
+  "images": {
+    "demo.jpg": {
+      "size": [
+        1024,
+        1024
+      ],
+      "models": {
+        "oriented_rcnn": {
+          "n_windows": 1,
+          "n_dets": 102,
+          "class_counts": {
+            "large-vehicle": 96,
+            "small-vehicle": 6
+          },
+          "times_s": [
+            0.475,
+            0.491,
+            0.494,
+            0.475,
+            0.481
+          ],
+          "mean_s": 0.483,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/demo_oriented_rcnn.png"
+        },
+        "rotated_fcos": {
+          "n_windows": 1,
+          "n_dets": 100,
+          "class_counts": {
+            "large-vehicle": 95,
+            "small-vehicle": 5
+          },
+          "times_s": [
+            0.424,
+            0.426,
+            0.413,
+            0.422,
+            0.409
+          ],
+          "mean_s": 0.419,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/demo_rotated_fcos.png"
+        }
+      }
+    },
+    "large.jpg": {
+      "size": [
+        1299,
+        1904
+      ],
+      "models": {
+        "oriented_rcnn": {
+          "n_windows": 6,
+          "n_dets": 318,
+          "class_counts": {
+            "ship": 281,
+            "small-vehicle": 28,
+            "harbor": 9
+          },
+          "times_s": [
+            3.257,
+            2.842,
+            2.854
+          ],
+          "mean_s": 2.984,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/large_oriented_rcnn.png"
+        },
+        "rotated_fcos": {
+          "n_windows": 6,
+          "n_dets": 314,
+          "class_counts": {
+            "ship": 282,
+            "small-vehicle": 22,
+            "harbor": 10
+          },
+          "times_s": [
+            1.72,
+            1.728,
+            1.741
+          ],
+          "mean_s": 1.729,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/large_rotated_fcos.png"
+        }
+      }
+    },
+    "P0079_0_0.jpg": {
+      "size": [
+        1024,
+        1024
+      ],
+      "models": {
+        "oriented_rcnn": {
+          "n_windows": 1,
+          "n_dets": 5,
+          "class_counts": {
+            "small-vehicle": 3,
+            "roundabout": 1,
+            "swimming-pool": 1
+          },
+          "times_s": [
+            0.35,
+            0.336,
+            0.361,
+            0.357,
+            0.349
+          ],
+          "mean_s": 0.351,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/P0079_0_0_oriented_rcnn.png"
+        },
+        "rotated_fcos": {
+          "n_windows": 1,
+          "n_dets": 4,
+          "class_counts": {
+            "small-vehicle": 2,
+            "roundabout": 1,
+            "swimming-pool": 1
+          },
+          "times_s": [
+            0.173,
+            0.169,
+            0.172,
+            0.169,
+            0.17
+          ],
+          "mean_s": 0.17,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/P0079_0_0_rotated_fcos.png"
+        }
+      }
+    },
+    "P0123_0_0.jpg": {
+      "size": [
+        1024,
+        1024
+      ],
+      "models": {
+        "oriented_rcnn": {
+          "n_windows": 1,
+          "n_dets": 30,
+          "class_counts": {
+            "small-vehicle": 19,
+            "tennis-court": 11
+          },
+          "times_s": [
+            0.388,
+            0.411,
+            0.413,
+            0.411,
+            0.395
+          ],
+          "mean_s": 0.404,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/P0123_0_0_oriented_rcnn.png"
+        },
+        "rotated_fcos": {
+          "n_windows": 1,
+          "n_dets": 18,
+          "class_counts": {
+            "tennis-court": 11,
+            "small-vehicle": 7
+          },
+          "times_s": [
+            0.227,
+            0.245,
+            0.228,
+            0.23,
+            0.228
+          ],
+          "mean_s": 0.232,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/P0123_0_0_rotated_fcos.png"
+        }
+      }
+    },
+    "P0170_0_57.jpg": {
+      "size": [
+        1024,
+        1024
+      ],
+      "models": {
+        "oriented_rcnn": {
+          "n_windows": 1,
+          "n_dets": 39,
+          "class_counts": {
+            "small-vehicle": 27,
+            "plane": 9,
+            "large-vehicle": 3
+          },
+          "times_s": [
+            0.43,
+            0.436,
+            0.428,
+            0.427,
+            0.434
+          ],
+          "mean_s": 0.431,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/P0170_0_57_oriented_rcnn.png"
+        },
+        "rotated_fcos": {
+          "n_windows": 1,
+          "n_dets": 37,
+          "class_counts": {
+            "small-vehicle": 26,
+            "plane": 9,
+            "large-vehicle": 2
+          },
+          "times_s": [
+            0.219,
+            0.22,
+            0.218,
+            0.218,
+            0.22
+          ],
+          "mean_s": 0.219,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/P0170_0_57_rotated_fcos.png"
+        }
+      }
+    },
+    "P2337_0_0.jpg": {
+      "size": [
+        1024,
+        1024
+      ],
+      "models": {
+        "oriented_rcnn": {
+          "n_windows": 1,
+          "n_dets": 10,
+          "class_counts": {
+            "storage-tank": 10
+          },
+          "times_s": [
+            0.329,
+            0.332,
+            0.328,
+            0.317,
+            0.342
+          ],
+          "mean_s": 0.329,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/P2337_0_0_oriented_rcnn.png"
+        },
+        "rotated_fcos": {
+          "n_windows": 1,
+          "n_dets": 9,
+          "class_counts": {
+            "storage-tank": 9
+          },
+          "times_s": [
+            0.175,
+            0.175,
+            0.176,
+            0.203,
+            0.171
+          ],
+          "mean_s": 0.18,
+          "vis": "/Users/jeffaudi/Projects/oriented-det/demo/out/macos_fcos_vs_orcnn/P2337_0_0_rotated_fcos.png"
+        }
+      }
+    }
+  }
+}
