@@ -41,6 +41,7 @@ from .utils import (
     setup_anchors,
     derive_fpn_strides_from_grid,
     warn_if_fpn_strides_mismatch,
+    SigmoidFocalClassWeightsMixin,
 )
 
 
@@ -110,17 +111,43 @@ class OrientedRetinaNetHead(nn.Module):
 
 
 
+def _foreground_sigmoid_focal_weights(
+    class_weights: Optional[torch.Tensor],
+    num_classes: int,
+) -> Optional[torch.Tensor]:
+    """Return ``[C]`` column weights, dropping background if a ``[C+1]`` tensor is passed."""
+    if class_weights is None:
+        return None
+    if class_weights.ndim != 1:
+        raise ValueError(
+            f"class_weights must be 1-D, got shape {tuple(class_weights.shape)}"
+        )
+    if class_weights.shape[0] == num_classes + 1:
+        return class_weights[1:]
+    if class_weights.shape[0] != num_classes:
+        raise ValueError(
+            f"class_weights must have shape [{num_classes}] or [{num_classes + 1}], "
+            f"got {tuple(class_weights.shape)}"
+        )
+    return class_weights
+
+
 def sigmoid_focal_loss_sum(
     logits: torch.Tensor,
     targets_onehot: torch.Tensor,
     alpha: float = 0.25,
     gamma: float = 2.0,
+    class_weights: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Sigmoid focal loss (RetinaNet / MMRotate ``FocalLoss(use_sigmoid=True)``), sum reduction.
     
     Each class is an independent binary classifier; ``alpha`` weights the positive
     (target=1) entries and ``1 - alpha`` the negative entries. The caller is expected
     to normalize the returned sum by the number of positive anchors (MMDet avg_factor).
+
+    Optional ``class_weights`` scale each class column (positives and negatives of
+    that class). A ``[C+1]`` ROI-head tensor is accepted; index 0 (background) is
+    ignored. ``None`` is bit-identical to the unweighted loss.
     
     Args:
         logits: [N, num_classes] raw classification logits.
@@ -128,6 +155,7 @@ def sigmoid_focal_loss_sum(
             positive anchors, all zeros for background anchors).
         alpha: Balance weight for positive entries (default 0.25).
         gamma: Focusing parameter (default 2.0).
+        class_weights: Optional ``[C]`` or ``[C+1]`` per-class scales.
     
     Returns:
         Scalar tensor: sum of focal loss over all entries.
@@ -137,6 +165,9 @@ def sigmoid_focal_loss_sum(
     pt = p * targets_onehot + (1 - p) * (1 - targets_onehot)
     alpha_t = alpha * targets_onehot + (1 - alpha) * (1 - targets_onehot)
     loss = alpha_t * (1 - pt).pow(gamma) * ce
+    weights = _foreground_sigmoid_focal_weights(class_weights, logits.shape[-1])
+    if weights is not None:
+        loss = loss * weights.to(device=loss.device, dtype=loss.dtype)
     return loss.sum()
 
 
@@ -268,6 +299,7 @@ def compute_oriented_retinanet_loss(
     box_reg_loss_type: str = "smooth_l1",
     main_loss_type: str = "smooth_l1",
     reg_sample_size_per_image: Optional[int] = None,
+    class_weights: Optional[torch.Tensor] = None,
 ) -> Dict[str, torch.Tensor]:
     """Compute Rotated RetinaNet losses for oriented object detection.
     
@@ -507,6 +539,7 @@ def compute_oriented_retinanet_loss(
                         cls_targets,
                         alpha=focal_alpha,
                         gamma=focal_gamma,
+                        class_weights=class_weights,
                     )
                 )
             num_pos_total += int((labels == 1).sum())
@@ -656,7 +689,7 @@ def compute_oriented_retinanet_loss(
     }
 
 
-class RotatedRetinaNet(nn.Module):
+class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
     """Complete Rotated RetinaNet model for true oriented object detection.
     
     This model implements a full single-stage oriented detector that:
@@ -745,12 +778,14 @@ class RotatedRetinaNet(nn.Module):
         box_reg_loss_type: str = "smooth_l1",
         box_reg_main_loss_type: str = "smooth_l1",
         reg_sample_size_per_image: Optional[int] = None,
+        roi_class_weights: Optional[Union[Dict[str, float], torch.Tensor]] = None,
     ) -> None:
         from .backbones.utils import require_torch
         require_torch()
         super().__init__()
         
         self.num_classes = num_classes
+        self._init_sigmoid_focal_class_weights(roi_class_weights)
         
         # Bbox coder options (MMRotate: norm_factor=None, edge_swap=True for Rotated RetinaNet)
         self.norm_factor = norm_factor
@@ -951,6 +986,7 @@ class RotatedRetinaNet(nn.Module):
                 box_reg_loss_type=self.box_reg_loss_type,
                 main_loss_type=self.box_reg_main_loss_type,
                 reg_sample_size_per_image=self.reg_sample_size_per_image,
+                class_weights=self.roi_class_weights_tensor,
             )
             
             return losses

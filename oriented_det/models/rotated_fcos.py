@@ -36,6 +36,7 @@ from .utils import (
     derive_fpn_strides_from_grid,
     warn_if_fpn_strides_mismatch,
     tensor_to_rboxes,
+    SigmoidFocalClassWeightsMixin,
 )
 
 INF = 1e8
@@ -480,6 +481,7 @@ def compute_rotated_fcos_loss(
     aux_angle_weight: float = 1.0,
     aux_angle_lambda: float = 1.0,
     gt_boxes_lookalike: Optional[List[torch.Tensor]] = None,
+    class_weights: Optional[torch.Tensor] = None,
 ) -> Dict[str, torch.Tensor]:
     """Focal cls + box regression (L1 / KFIoU / decoded rIoU) + optional decoded aux + centerness BCE."""
     device = cls_scores[0].device
@@ -591,7 +593,11 @@ def compute_rotated_fcos_loss(
         if fg.any():
             cls_targets[fg, cls_lab[fg].long()] = 1.0
         loss_cls = sigmoid_focal_loss_sum(
-            cls_logits, cls_targets, alpha=focal_alpha, gamma=focal_gamma
+            cls_logits,
+            cls_targets,
+            alpha=focal_alpha,
+            gamma=focal_gamma,
+            class_weights=class_weights,
         ) / num_pos_t
     else:
         loss_cls = flatten_cls.sum() * 0.0
@@ -658,7 +664,7 @@ def compute_rotated_fcos_loss(
     return out
 
 
-class RotatedFCOS(nn.Module):
+class RotatedFCOS(SigmoidFocalClassWeightsMixin, nn.Module):
     """Full Rotated FCOS detector (ResNet-FPN P3–P7)."""
 
     def __init__(
@@ -695,6 +701,7 @@ class RotatedFCOS(nn.Module):
         nms_class_agnostic: bool = False,
         final_nms_iou_schedule_epochs: Optional[List[int]] = None,
         final_nms_iou_schedule_values: Optional[List[float]] = None,
+        roi_class_weights: Optional[Union[Dict[str, float], torch.Tensor]] = None,
         **kwargs: Any,
     ):
         if nn is None:
@@ -713,6 +720,7 @@ class RotatedFCOS(nn.Module):
                 "use L1 primary + decoded aux, or a different aux type."
             )
         self.num_classes = int(num_classes)
+        self._init_sigmoid_focal_class_weights(roi_class_weights)
         self.fpn_extra_level = bool(fpn_extra_level)
         self.returned_layers = returned_layers or [2, 3, 4]
         self.fpn_strides = list(fpn_strides or [8, 16, 32, 64, 128])
@@ -839,6 +847,7 @@ class RotatedFCOS(nn.Module):
                 aux_loss_weight=self.aux_loss_weight,
                 aux_angle_weight=self.aux_angle_weight,
                 aux_angle_lambda=self.aux_angle_lambda,
+                class_weights=self.roi_class_weights_tensor,
             )
 
         return self._inference(

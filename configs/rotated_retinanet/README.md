@@ -10,8 +10,10 @@ See the [main README](../../README.md) for installation and [configs/README.md](
 
 | File | Purpose |
 |------|---------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** (12 epochs, lr 0.0025, batch 2, train+val tiles, H+V+diagonal flips). Rotated IoU anchor matching; mAP every **4** epochs. Hub: `rotated_retinanet_dota_le90_1x`. |
-| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** (36 epochs, milestones [24, 33]); inherits 1×. `compute_map_final: true`, exact CPU IoU for final mAP. Hub: `rotated_retinanet_dota_le90_3x`. |
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** (12 epochs, lr 0.0025, batch 2, train+val tiles, H+V+diagonal flips). Rotated IoU anchor matching; mAP every **4** epochs. |
+| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** (36 epochs, milestones [24, 33]); inherits 1×. `compute_map_final: true`, exact CPU IoU for final mAP. Deploy `production.score_threshold` **0.45** (eval-val F1 0.50 − 0.05). Hub: `rotated_retinanet_dota_le90_3x`. |
+
+Recipes keep `loss.loss_type: focal` (unweighted). Set `focal_weighted` to apply `loss.class_weight_*` to sigmoid-focal class columns; `background_weight` is ignored.
 
 Hub **`eval_map50`** in the manifest is from **`odet preds`** on val tiles (see [pretrained/README.md](../../pretrained/README.md)), not the training **final mAP** printed at the end of `train.log`.
 
@@ -33,7 +35,7 @@ We ran a **1× ProbIoU primary** ablation (decoded ProbIoU + encoded L1 aux **0.
 python tools/train.py --config configs/rotated_retinanet/dota_le90_3x.json
 ```
 
-Uses `evaluation.score_threshold: 0.3` and `model.max_detections_per_image: 300` during training validation (faster mAP). Deploy defaults stay in `production.*` (0.05 score, 2000 dets). Final mAP uses exact CPU IoU on the best checkpoint.
+Uses `evaluation.score_threshold: 0.3` and `model.max_detections_per_image: 300` during training validation (faster mAP). Deploy `production.score_threshold` is **0.45** (eval-val F1 0.50 − 0.05); `max_detections_per_image` stays **2000**. Final mAP uses exact CPU IoU on the best checkpoint.
 
 **TensorBoard:** The focal classification loss is logged as `train/loss_classifier` (same tag as Rotated Faster R-CNN), alongside `train/loss_box_reg`.
 
@@ -209,7 +211,7 @@ DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 
 
 | Backbone | mAP (eval-val) | Angle | lr schd | Aug | BS | Config | Final config | Final log | Download |
 | :----------------------: | :---: | :---: | :-----: | :-: | :--: | :----: | :----------: | :-------: | :----: |
-| ResNet50 (1024,1024,200) | 64.14 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log) | `hf://rotated_retinanet_dota_le90_1x` |
+| ResNet50 (1024,1024,200) | 64.14 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log) | — |
 | ResNet50 (1024,1024,200) | 71.52 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log`](../../pretrained/rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log) | `hf://rotated_retinanet_dota_le90_3x` |
 
 Eval reports: [`docs/eval-reports/rotated_retinanet_dota_le90_1x/`](../../docs/eval-reports/rotated_retinanet_dota_le90_1x/model_analysis.md), [`docs/eval-reports/rotated_retinanet_dota_le90_3x/`](../../docs/eval-reports/rotated_retinanet_dota_le90_3x/model_analysis.md).

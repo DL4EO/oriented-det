@@ -207,7 +207,7 @@ def download_asset(
     """Download a manifest asset from Hugging Face Hub.
 
     Args:
-        asset_name: Manifest slug (e.g. ``rotated_retinanet_dota_le90_1x``) or ``.pth`` filename.
+        asset_name: Manifest slug (e.g. ``rotated_retinanet_dota_le90_3x``) or ``.pth`` filename.
         dest: Optional explicit destination file. Defaults to ``<pretrained_dir>/<filename>``.
 
     Returns:

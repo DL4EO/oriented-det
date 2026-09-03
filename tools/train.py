@@ -68,12 +68,13 @@ except Exception:  # pragma: no cover
     SummaryWriter = None  # type: ignore
 from datetime import datetime
 from collections import Counter
-from typing import Optional, Dict, Any, List, Union, Set, Tuple
+from typing import Optional, Dict, Any, List, Union, Set, Tuple, Sequence
 import math
 import numpy as np
 import sys
 import traceback
 import argparse
+import warnings
 
 from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet, RotatedFCOS
 from oriented_det.data import (
@@ -207,6 +208,115 @@ def _drop_easy_empty_tiles(dataset: Dataset, csv_path: Path) -> Tuple[Dataset, i
             f"(all were tp=fp=fn=0 in {csv_path})"
         )
     return Subset(dataset, keep), n_dropped
+
+
+def _resolve_class_tile_oversample_classes(
+    requested: Optional[Sequence[str]],
+    known_class_names: Optional[Sequence[str]] = None,
+    lookalike_labels: Optional[Sequence[str]] = None,
+) -> Tuple[List[str], List[str]]:
+    """Keep requested class names that are valid semantic targets.
+
+    Matching is case-sensitive exact ``class_name``. Reserved lookalike routing
+    labels (and configured aliases) are never kept. When ``known_class_names``
+    is provided, names absent from that list are ignored. Unknown / lookalike
+    names are returned in the second list and warned once.
+    """
+    from oriented_det.data.lookalike import resolve_lookalike_label_set
+
+    look_set = resolve_lookalike_label_set(lookalike_labels)
+    known = set(known_class_names) if known_class_names is not None else None
+    kept: List[str] = []
+    ignored: List[str] = []
+    seen: Set[str] = set()
+    if not requested:
+        return kept, ignored
+    for raw in requested:
+        name = str(raw)
+        if name in seen:
+            continue
+        seen.add(name)
+        if not name or name in look_set or (known is not None and name not in known):
+            if name:
+                ignored.append(name)
+            continue
+        kept.append(name)
+    if ignored:
+        warnings.warn(
+            "dataset.class_tile_oversample_classes ignored unknown or lookalike "
+            f"name(s): {ignored}. Matching is case-sensitive exact class_name.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return kept, ignored
+
+
+def _count_class_tile_gt_matches(
+    annotations,
+    target_classes: Set[str],
+    lookalike_labels: Optional[Sequence[str]] = None,
+) -> int:
+    """Count GT boxes whose class_name is in ``target_classes`` (not lookalike)."""
+    from oriented_det.data.lookalike import resolve_lookalike_label_set
+
+    look_set = resolve_lookalike_label_set(lookalike_labels)
+    n = 0
+    for ann in annotations or ():
+        name = getattr(ann, "class_name", None)
+        if name is None or name in look_set:
+            continue
+        if name in target_classes:
+            n += 1
+    return n
+
+
+def _class_tile_match_indices(
+    dataset: Dataset,
+    target_classes: Sequence[str],
+    min_count: int = 1,
+    lookalike_labels: Optional[Sequence[str]] = None,
+) -> List[int]:
+    """Train indices whose remaining GT contains enough target-class boxes."""
+    targets = set(target_classes)
+    if not targets:
+        return []
+    matches: List[int] = []
+    for i in range(len(dataset)):
+        annotations = getattr(dataset[i], "annotations", ())
+        n = _count_class_tile_gt_matches(annotations, targets, lookalike_labels)
+        if n >= int(min_count):
+            matches.append(i)
+    return matches
+
+
+def _compose_tile_oversample_weights(
+    n: int,
+    hard_indices: Optional[Sequence[int]] = None,
+    hard_factor: float = 1.0,
+    class_indices: Optional[Sequence[int]] = None,
+    class_factor: float = 1.0,
+) -> List[float]:
+    """Per-index weights: start at 1.0, apply hard-tile, then multiply class-tile."""
+    weights = [1.0] * int(n)
+    if hard_indices:
+        hf = float(hard_factor)
+        for i in hard_indices:
+            weights[int(i)] = hf
+    if class_indices:
+        cf = float(class_factor)
+        for i in class_indices:
+            weights[int(i)] *= cf
+    return weights
+
+
+def _expand_indices_by_weights(weights: Sequence[float]) -> List[int]:
+    """Repeat indices so DistributedSampler sees round(weight) draws (DDP)."""
+    order = list(range(len(weights)))
+    for i, w in enumerate(weights):
+        extra = max(0, int(round(float(w))) - 1)
+        for _ in range(extra):
+            order.append(i)
+    return order
 
 
 class _HardTileExpandedDataset(Dataset):
@@ -390,6 +500,99 @@ def _round_ratio(value: float) -> float:
     return round(value, 3)
 
 
+# Finest-stride occupancy: encoded L1 is weak when boxes span few FPN cells.
+_WIZARD_TINY_CELLS = 2.0
+_WIZARD_SMALL_CELLS = 4.0
+_WIZARD_TINY_SHARE = 0.05
+
+
+def _fpn_level_name(stride: int) -> str:
+    """Map a power-of-two FPN stride to P2/P3/... (stride 4 → P2, 8 → P3)."""
+    s = int(stride)
+    if s >= 2 and (s & (s - 1)) == 0:
+        return f"P{int(math.log2(s))}"
+    return "finest"
+
+
+def _wizard_small_vs_finest_stride(min_stride: int, widths: np.ndarray) -> Tuple[float, float, float, bool]:
+    """Return p10/p50 cell counts, share of <2-cell boxes, and whether GT is small vs finest stride."""
+    stride = float(min_stride)
+    w10 = float(np.percentile(widths, 10))
+    w50 = float(np.percentile(widths, 50))
+    cells_p10 = w10 / stride
+    cells_p50 = w50 / stride
+    tiny_share = float((widths < (_WIZARD_TINY_CELLS * stride)).mean())
+    small = cells_p10 < _WIZARD_SMALL_CELLS or tiny_share >= _WIZARD_TINY_SHARE
+    return cells_p10, cells_p50, tiny_share, small
+
+
+def _wizard_fcos_fpn_recommendation(min_stride: int, widths: np.ndarray) -> Tuple[str, bool]:
+    """Geometry-only FPN size advice (pooled over all objects; no class names)."""
+    finest = _fpn_level_name(min_stride)
+    w10 = float(np.percentile(widths, 10))
+    w50 = float(np.percentile(widths, 50))
+    cells_p10, cells_p50, tiny_share, small = _wizard_small_vs_finest_stride(min_stride, widths)
+    line = (
+        f"- fpn_strides: finest={min_stride}px; GT width p10/p50={w10:.1f}/{w50:.1f}px "
+        f"(~{cells_p10:.1f}/{cells_p50:.1f} cells on {finest}). "
+    )
+    if small:
+        if tiny_share >= _WIZARD_TINY_SHARE:
+            size_note = f"{tiny_share:.0%} of boxes occupy <{int(_WIZARD_TINY_CELLS)} cells"
+        else:
+            size_note = f"p10 occupies ~{cells_p10:.1f} cells"
+        line += (
+            f"{size_note}; encoded L1 is weak on small boxes; keep {finest} and "
+            "prefer decoded `kfiou` for overlap."
+        )
+    else:
+        line += f"{finest} stride looks adequate for this GT size distribution."
+    return line, small
+
+
+def _wizard_fcos_box_reg_lines(
+    box_loss: str,
+    aux_type: Optional[str],
+    aux_w: float,
+    *,
+    small_vs_stride: bool,
+    aux_angle_weight: float,
+    aux_angle_lambda: float,
+) -> List[str]:
+    """FCOS box-reg advice from size vs stride and current loss knobs (no class names)."""
+    lines: List[str] = []
+    if box_loss in ("l1", "smooth_l1"):
+        if small_vs_stride and aux_w <= 0.0:
+            lines.append(
+                f"- box_reg_loss_type: {box_loss} (encoded L1). Small boxes vs finest FPN "
+                "stride are hard for encoded L1; try L1 primary + decoded `kfiou` aux "
+                "(aux_loss_type=kfiou, aux_loss_weight≈0.1)."
+            )
+        else:
+            lines.append(f"- box_reg_loss_type: {box_loss} (encoded L1).")
+    elif box_loss == "kfiou":
+        lines.append(
+            "- box_reg_loss_type: kfiou (decoded KFIoU primary). "
+            "L1 primary + decoded aux is usually more stable."
+        )
+    elif box_loss == "riou":
+        lines.append(
+            "- box_reg_loss_type: riou (decoded differentiable polygon IoU, 1-IoU). "
+            "Typical lr is 2.5e-3. Not sampling pairwise_rotated_iou."
+        )
+    else:
+        lines.append(f"- box_reg_loss_type: {box_loss}")
+    if aux_w > 0.0:
+        lines.append(
+            f"- aux_loss_type: {aux_type} weight={aux_w:g} (centerness-weighted decoded "
+            f"+ gated angle weight={aux_angle_weight:g} λ={aux_angle_lambda:g}). "
+            "Keep L1 primary and lr 2.5e-4."
+        )
+    else:
+        lines.append("- aux_loss_weight: 0 (decoded aux off).")
+    return lines
+
+
 def gather_wizard_stats(dataset) -> Dict[str, Any]:
     """Collect geometry and density statistics from training samples."""
     per_image_objects: List[int] = []
@@ -431,7 +634,10 @@ def print_wizard_recommendations(
     *,
     world_size: int,
 ) -> None:
-    """Print data-driven config recommendations from training distribution."""
+    """Print data-driven config recommendations from training distribution.
+
+    Geometry stats and FPN/box-reg nudges are pooled over all objects (class-agnostic).
+    """
     if stats["num_images"] == 0:
         print("\n[Wizard] Skipped: no training images found.")
         return
@@ -498,16 +704,10 @@ def print_wizard_recommendations(
     if is_fcos:
         strides = [int(s) for s in getattr(config.model, "fpn_strides", [8, 16, 32, 64, 128])]
         min_stride = min(strides) if strides else 8
+        small_vs_stride = False
         if widths.size > 0:
-            w10 = float(np.percentile(widths, 10))
-            w50 = float(np.percentile(widths, 50))
-            cells_p10 = w10 / float(min_stride)
-            print(
-                f"- fpn_strides: finest={min_stride}px; GT width p10/p50={w10:.1f}/{w50:.1f}px "
-                f"(~{cells_p10:.1f}/{w50 / float(min_stride):.1f} cells on P3). "
-                "Small vehicles near 1–2 cells are hard for encoded L1; keep P3 and "
-                "prefer decoded `kfiou` for overlap."
-            )
+            fpn_line, small_vs_stride = _wizard_fcos_fpn_recommendation(min_stride, widths)
+            print(fpn_line)
         radius = float(getattr(config.model, "fcos_center_sample_radius", 1.5))
         if radius < 1.5:
             print(
@@ -519,32 +719,17 @@ def print_wizard_recommendations(
         box_loss = str(getattr(config.model, "box_reg_loss_type", "l1")).lower()
         aux_type = getattr(config.model, "aux_loss_type", None)
         aux_w = float(getattr(config.model, "aux_loss_weight", 0.0) or 0.0)
-        if box_loss in ("l1", "smooth_l1"):
-            print(
-                f"- box_reg_loss_type: {box_loss} (L1 baseline). Dense small classes "
-                "(ship/small-vehicle/storage-tank) often lag; try L1 + decoded aux "
-                "(configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json)."
-            )
-        elif box_loss == "kfiou":
-            print("- box_reg_loss_type: kfiou (decoded KFIoU primary). Prefer L1 + aux recipes.")
-        elif box_loss == "riou":
-            print(
-                "- box_reg_loss_type: riou (decoded differentiable polygon IoU, 1-IoU). "
-                "Recipe configs/rotated_fcos/dota_le90_1x.json uses lr 2.5e-3. "
-                "Not sampling pairwise_rotated_iou."
-            )
-        else:
-            print(f"- box_reg_loss_type: {box_loss}")
-        if aux_w > 0.0:
-            ang_w = float(getattr(config.model, "aux_angle_weight", 1.0) or 0.0)
-            ang_lam = float(getattr(config.model, "aux_angle_lambda", 1.0) or 1.0)
-            print(
-                f"- aux_loss_type: {aux_type} weight={aux_w:g} (centerness-weighted decoded "
-                f"+ gated angle weight={ang_w:g} λ={ang_lam:g}). "
-                "Keep L1 primary and lr 2.5e-4."
-            )
-        else:
-            print("- aux_loss_weight: 0 (decoded aux off).")
+        ang_w = float(getattr(config.model, "aux_angle_weight", 1.0) or 0.0)
+        ang_lam = float(getattr(config.model, "aux_angle_lambda", 1.0) or 1.0)
+        for line in _wizard_fcos_box_reg_lines(
+            box_loss,
+            aux_type,
+            aux_w,
+            small_vs_stride=small_vs_stride,
+            aux_angle_weight=ang_w,
+            aux_angle_lambda=ang_lam,
+        ):
+            print(line)
         print(
             "- anchors / target_stds: skipped (anchor-free DistanceAnglePointCoder; "
             "not DeltaXYWHA)."
@@ -858,6 +1043,7 @@ def create_model_from_config(
             roi_box_reg_aux_schedule_values=config.model.roi_box_reg_aux_schedule_values,
             final_nms_use_cpu=getattr(config.model, "final_nms_use_cpu", False),
             nms_class_agnostic=getattr(config.model, "nms_class_agnostic", False),
+            roi_class_weights=roi_class_weights,
         )
     elif model_type == "rotated_fcos":
         rr = getattr(config.model, "fcos_regress_ranges", None)
@@ -896,6 +1082,7 @@ def create_model_from_config(
             final_nms_iou_schedule_values=config.model.final_nms_iou_schedule_values,
             final_nms_use_cpu=getattr(config.model, "final_nms_use_cpu", False),
             nms_class_agnostic=getattr(config.model, "nms_class_agnostic", False),
+            roi_class_weights=roi_class_weights,
         )
     else:
         raise ValueError(
@@ -1349,43 +1536,79 @@ def main():
         print(f"Class mapping: {class_map}\n")
     
     weighted_train_sampler: Optional[WeightedRandomSampler] = None
+    hard_indices: List[int] = []
+    hard_factor = float(getattr(config.dataset, "hard_tile_oversample_factor", 2.0))
+    metric_col = getattr(config.dataset, "hard_tile_metric_column", "f1")
+    h_thr = float(getattr(config.dataset, "hard_tile_threshold", 0.8))
     if csv_path is not None:
         if not csv_path.is_file():
             raise FileNotFoundError(f"dataset.tile_metrics_csv not found: {csv_path}")
-        metric_col = getattr(config.dataset, "hard_tile_metric_column", "f1")
-        h_thr = float(getattr(config.dataset, "hard_tile_threshold", 0.8))
-        factor = float(getattr(config.dataset, "hard_tile_oversample_factor", 2.0))
         stem_metrics = _load_tile_metrics_by_stem(csv_path, metric_col)
         vacuous_stems = _stems_vacuous_true_negatives_from_tile_csv(csv_path)
-        hard_indices: List[int] = []
         for i in range(len(train_dataset)):
             stem = _dataset_index_to_image_stem(train_dataset, i)
             m = stem_metrics.get(stem)
             if m is not None and m < h_thr and stem not in vacuous_stems:
                 hard_indices.append(i)
-        extra = max(0, int(round(factor)) - 1)
-        if is_distributed:
-            order = list(range(len(train_dataset)))
-            for hi in hard_indices:
-                for _ in range(extra):
-                    order.append(hi)
-            train_dataset = _HardTileExpandedDataset(train_dataset, order)
-            if rank == 0:
-                print(
-                    f"Hard-tile oversampling (DDP): {csv_path.name}, {len(hard_indices)} tiles with "
-                    f"{metric_col} < {h_thr}; ~{factor}x via {extra} extra index(es) per hard tile"
-                )
-        else:
-            w = torch.ones(len(train_dataset), dtype=torch.double)
-            for hi in hard_indices:
-                w[hi] = factor
-            weighted_train_sampler = WeightedRandomSampler(
-                w, num_samples=len(train_dataset), replacement=True
+
+    class_indices: List[int] = []
+    class_factor = float(getattr(config.dataset, "class_tile_oversample_factor", 1.0))
+    class_min_count = int(getattr(config.dataset, "class_tile_oversample_min_count", 1))
+    raw_class_tile_classes = getattr(config.dataset, "class_tile_oversample_classes", None)
+    resolved_class_tile_classes: List[str] = []
+    if raw_class_tile_classes:
+        lookalike_extra = getattr(config.dataset, "lookalike_labels", None)
+        resolved_class_tile_classes, ignored_class_tile = _resolve_class_tile_oversample_classes(
+            raw_class_tile_classes,
+            known_class_names=class_names,
+            lookalike_labels=lookalike_extra,
+        )
+        if rank == 0 and ignored_class_tile:
+            print(
+                "Class-tile oversampling: ignored unknown or lookalike name(s) "
+                f"{ignored_class_tile}"
+            )
+        if resolved_class_tile_classes and class_factor != 1.0:
+            class_indices = _class_tile_match_indices(
+                train_dataset,
+                resolved_class_tile_classes,
+                min_count=class_min_count,
+                lookalike_labels=lookalike_extra,
             )
             if rank == 0:
                 print(
+                    f"Class-tile oversampling: {len(class_indices)} train tiles matched "
+                    f"{resolved_class_tile_classes} (min_count={class_min_count}); "
+                    f"factor={class_factor}"
+                )
+
+    apply_tile_weights = csv_path is not None or bool(class_indices)
+    if apply_tile_weights:
+        weights = _compose_tile_oversample_weights(
+            len(train_dataset),
+            hard_indices=hard_indices if csv_path is not None else None,
+            hard_factor=hard_factor,
+            class_indices=class_indices,
+            class_factor=class_factor,
+        )
+        if is_distributed:
+            order = _expand_indices_by_weights(weights)
+            train_dataset = _HardTileExpandedDataset(train_dataset, order)
+            if rank == 0 and csv_path is not None:
+                extra = max(0, int(round(hard_factor)) - 1)
+                print(
+                    f"Hard-tile oversampling (DDP): {csv_path.name}, {len(hard_indices)} tiles with "
+                    f"{metric_col} < {h_thr}; ~{hard_factor}x via {extra} extra index(es) per hard tile"
+                )
+        else:
+            w = torch.tensor(weights, dtype=torch.double)
+            weighted_train_sampler = WeightedRandomSampler(
+                w, num_samples=len(train_dataset), replacement=True
+            )
+            if rank == 0 and csv_path is not None:
+                print(
                     f"Hard-tile oversampling: {csv_path.name}, {len(hard_indices)} tiles with "
-                    f"{metric_col} < {h_thr}; WeightedRandomSampler weight={factor} for those indices"
+                    f"{metric_col} < {h_thr}; WeightedRandomSampler weight={hard_factor} for those indices"
                 )
     
     # Analyze class distribution
@@ -1750,7 +1973,7 @@ def main():
         elif rank == 0:
             print(f"\nNote: class_weight_schedule_type set but end_epoch <= start_epoch; schedule disabled.")
     
-    # Configure class weights on the model (only for models that support it, e.g. OrientedRCNN, RotatedFasterRCNN; RetinaNet uses focal loss and does not)
+    # Configure class weights (ROI heads, and FCOS/RetinaNet sigmoid focal when loss_type is focal_weighted).
     if roi_class_weights is not None and isinstance(roi_class_weights, dict) and hasattr(model, "set_class_weights"):
         model.set_class_weights(config.class_map, device=device)
         if rank == 0:

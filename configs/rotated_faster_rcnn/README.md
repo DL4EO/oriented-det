@@ -172,10 +172,10 @@ Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **b
 
 | File | Purpose |
 |------|---------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** — 12 epochs, lr 0.005, MultiStep @ 8/11, ProbIoU main + Smooth L1 aux 0.1 (`roi_box_reg_aux_*`), angle weight 1.0. Hub: `rotated_faster_rcnn_dota_le90_1x`. |
-| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Hub: `rotated_faster_rcnn_dota_le90_3x`. |
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** — 12 epochs, lr 0.005, MultiStep @ 8/11, ProbIoU main + Smooth L1 aux 0.1 (`roi_box_reg_aux_*`), angle weight 1.0. |
+| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Deploy `production.score_threshold` **0.6** (eval-val F1 0.65 − 0.05). Hub: `rotated_faster_rcnn_dota_le90_3x`. |
 | [`hrsc2016_le90_1x.json`](./hrsc2016_le90_1x.json) | **1× HRSC2016** — native XML, single-class ship, `keep_ratio` + pad-32, H+V+diagonal flips (rotate **off**), same ProbIoU main + Smooth L1 aux as DOTA; model/eval-val NMS **0.1**, production NMS **0.3**, `max_detections_per_image` **2000**. |
-| [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | **3× HRSC2016** — inherits 1×; 36 epochs, milestones [24, 33], `lr_scheduler_gamma` 0.1, random rotate p=0.5 **±20°**. Hub: `rotated_faster_rcnn_hrsc2016_le90_3x`. |
+| [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | **3× HRSC2016** — inherits 1×; 36 epochs, milestones [24, 33], `lr_scheduler_gamma` 0.1, random rotate p=0.5 **±20°**. Deploy `production.score_threshold` **0.85** (eval-val F1 0.90 − 0.05). Hub: `rotated_faster_rcnn_hrsc2016_le90_3x`. |
 
 ### First run (1× baseline)
 
@@ -213,9 +213,9 @@ DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 
 
 | Backbone | mAP (eval-val) | Angle | lr schd | Aug | BS | Config | Final config | Final log | Download |
 | :----------------------: | :---: | :---: | :-----: | :-: | :--: | :----: | :----------: | :-------: | :----: |
-| ResNet50 (1024,1024,200) | 77.57 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log) | `hf://rotated_faster_rcnn_dota_le90_1x` |
-| ResNet50 (1024,1024,200) | 83.42 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.log) | `hf://rotated_faster_rcnn_dota_le90_3x` |
-| ResNet50 (1024,1024,200) | 75.58 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log) | `hf://rotated_faster_rcnn_dota_le90_3x_ce` |
+| ResNet50 (1024,1024,200) | 77.57 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log) | — |
+| ResNet50 (1024,1024,200) | 83.46 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log) | `hf://rotated_faster_rcnn_dota_le90_3x` |
+| ResNet50 (1024,1024,200) | 75.58 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log) | — (CE baseline) |
 
 Eval reports: [`docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/model_analysis.md), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/model_analysis.md), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x_ce/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x_ce/model_analysis.md).
 

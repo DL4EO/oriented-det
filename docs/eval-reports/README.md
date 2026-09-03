@@ -1,6 +1,6 @@
 # Published eval-val reports
 
-Frozen **`make eval-val`** metrics for each Hub pretrained slug. DOTA le90: full val split (7,669 tiles, `filter_empty_gt=false`). HRSC2016: ImageSets test (453 images, whole-image `keep_ratio`). Score ≥ 0.05, final NMS IoU **0.1** via `evaluation.final_nms_iou_threshold` (MMRotate test parity; deploy recipes ship production NMS **0.3**), mAP matching IoU 0.50.
+Frozen **`make eval-val`** metrics for published Hub slugs (and a few historical local baselines). DOTA le90: full val split (7,669 tiles, `filter_empty_gt=false`). HRSC2016: ImageSets test (453 images, whole-image `keep_ratio`). Score ≥ 0.05, final NMS IoU **0.1** via `evaluation.final_nms_iou_threshold` (MMRotate test parity; deploy recipes ship production NMS **0.3**), mAP matching IoU 0.50.
 
 Each subdirectory is named after the manifest **slug** and is **tracked in git** (reports and analysis only — no `predictions.json`; see below).
 
@@ -16,18 +16,14 @@ Each subdirectory is named after the manifest **slug** and is **tracked in git**
 | Hub slug | eval-val mAP50 | Local `predictions.json` (viewer) |
 |----------|----------------|-----------------------------------|
 | `oriented_rcnn_dota_le90_3x` | 79.40% | `predictions/20260627_082942/` |
-| `oriented_rcnn_dota_le90_1x` | 74.79% | `predictions/20260618_140030/` |
-| `rotated_faster_rcnn_dota_le90_1x` | 77.57% | `predictions/20260710_044125/` |
-| `rotated_faster_rcnn_dota_le90_3x` | 83.42% | `predictions/20260705_055252/` |
-| `rotated_faster_rcnn_dota_le90_3x_ce` | 75.58% | regenerate (see below) |
+| `rotated_faster_rcnn_dota_le90_3x` | 83.46% | `predictions/20260903_004825/` |
 | `rotated_retinanet_dota_le90_3x` | 71.52% | `predictions/20260615_005855/` |
-| `rotated_retinanet_dota_le90_1x` | 64.14% | regenerate (see below) |
 | `rotated_fcos_dota_le90_3x` | 82.32% | `predictions/20260901_053115/` |
-| `rotated_fcos_dota_le90_3x_kfiou_aux` | 77.18% | `predictions/20260820_121343/` |
-| `rotated_fcos_dota_le90_3x_l1` (local L1 baseline; not Hub) | 73.92% | `predictions/20260813_192333/` |
 | `oriented_rcnn_hrsc2016_le90_3x` | 90.41% | `predictions/20260831_011151/` |
 | `rotated_faster_rcnn_hrsc2016_le90_3x` | 88.77% | `predictions/20260831_050947/` |
 | `rotated_fcos_hrsc2016_le90_3x` | 88.34% | `predictions/20260831_033939/` |
+
+Historical reports (not on Hub): [`oriented_rcnn_dota_le90_1x`](oriented_rcnn_dota_le90_1x/model_analysis.md) 74.79%, [`rotated_faster_rcnn_dota_le90_1x`](rotated_faster_rcnn_dota_le90_1x/model_analysis.md) 77.57%, [`rotated_faster_rcnn_dota_le90_3x_ce`](rotated_faster_rcnn_dota_le90_3x_ce/model_analysis.md) 75.58%, [`rotated_retinanet_dota_le90_1x`](rotated_retinanet_dota_le90_1x/model_analysis.md) 64.14%, [`rotated_fcos_dota_le90_3x_kfiou_aux`](rotated_fcos_dota_le90_3x_kfiou_aux/model_analysis.md) 77.18%, [`rotated_fcos_dota_le90_3x_l1`](rotated_fcos_dota_le90_3x_l1/model_analysis.md) 73.92% (local L1 baseline).
 
 **Viewer** (needs `predictions.json` in the directory you pass):
 

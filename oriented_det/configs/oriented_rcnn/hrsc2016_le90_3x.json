@@ -12,5 +12,8 @@
     "enable_random_rotate": true,
     "random_rotate_prob": 0.5,
     "random_rotate_angle_range": 20
+  },
+  "production": {
+    "score_threshold": 0.85
   }
 }

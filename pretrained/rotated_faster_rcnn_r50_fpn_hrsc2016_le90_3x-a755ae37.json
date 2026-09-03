@@ -219,7 +219,7 @@
     "use_exact_rotated_iou_for_final_map": null
   },
   "production": {
-    "score_threshold": 0.05,
+    "score_threshold": 0.85,
     "per_class_score_threshold": null,
     "final_nms_iou_threshold": 0.1,
     "final_nms_use_cpu": true,

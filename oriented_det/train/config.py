@@ -239,6 +239,13 @@ class DatasetConfig:
     hard_tile_metric_column: str = "f1"
     hard_tile_threshold: float = 0.8
     hard_tile_oversample_factor: float = 2.0
+    # Optional train-tile oversampling by GT class presence (no metrics CSV).
+    # null / [] disables. Matching is case-sensitive exact class_name after the
+    # loader's ignore / difficult / lookalike filtering. Lookalike routing labels
+    # are never a match. Unknown names are warned once and ignored.
+    class_tile_oversample_classes: Optional[List[str]] = None
+    class_tile_oversample_factor: float = 1.0
+    class_tile_oversample_min_count: int = 1
     # When tile_metrics_csv is set: drop vacuous true-negative tiles (tp=fp=fn=0) from train
     # before max_train_samples / hard-tile oversampling. Empty tiles with FPs stay and can
     # be oversampled. Requires filter_empty_gt=false in the loader to keep those hard empties.
@@ -768,13 +775,16 @@ class CheckpointConfig:
 
 @dataclass
 class LossConfig:
-    """Experiment-level ROI loss selection and optional class weighting.
+    """Experiment-level classification loss selection and optional class weighting.
 
     loss_type chooses the recipe applied by tools/train.py:
-    - cross_entropy: plain ROI CE (MMRotate-style)
-    - class_weighted: ROI CE with dataset-derived class weights
-    - focal: unweighted focal ROI loss
-    - focal_weighted: focal ROI loss with dataset-derived class weights
+    - cross_entropy: plain ROI CE (MMRotate-style; two-stage only)
+    - class_weighted: ROI CE with dataset-derived class weights (two-stage only)
+    - focal: unweighted focal (ROI softmax focal, or FCOS/RetinaNet sigmoid focal)
+    - focal_weighted: same focal as ``focal``, plus dataset-derived class weights
+      (ROI heads, and per-class column scales on FCOS/RetinaNet sigmoid focal).
+      ``background_weight`` applies to two-stage ROI only (no background class
+      in one-stage one-hot focal).
     - none: legacy fallback to model.roi_loss_type
     """
     loss_type: str = "class_weighted"
@@ -1087,6 +1097,18 @@ class TrainingExperimentConfig:
             print(f"  difficult_strategy: {getattr(self.dataset, 'difficult_strategy', 'drop')}")
             print(f"  filter_empty_gt: {getattr(self.dataset, 'filter_empty_gt', False)}")
             print(f"  drop_easy_empty_tiles: {getattr(self.dataset, 'drop_easy_empty_tiles', False)}")
+            print(
+                f"  class_tile_oversample_classes: "
+                f"{getattr(self.dataset, 'class_tile_oversample_classes', None)}"
+            )
+            print(
+                f"  class_tile_oversample_factor: "
+                f"{getattr(self.dataset, 'class_tile_oversample_factor', 1.0)}"
+            )
+            print(
+                f"  class_tile_oversample_min_count: "
+                f"{getattr(self.dataset, 'class_tile_oversample_min_count', 1)}"
+            )
             print(f"  Tile overlap (px): {getattr(self.dataset, 'overlap', 16)}")
             print()
         

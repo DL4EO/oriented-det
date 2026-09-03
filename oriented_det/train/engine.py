@@ -2202,10 +2202,6 @@ def train(
     if rank is None or rank == 0:
         print(f"Training started at: {train_started_at_iso}")
 
-    # After partial freeze (freeze_backbone_epochs / freeze_rpn_epochs), all parameters train; rebuild DDP
-    # with find_unused_parameters=False to avoid extra autograd traversals and PyTorch warnings.
-    ddp_rebuilt_after_partial_freeze = False
-    
     for epoch in range(start_epoch, start_epoch + num_epochs):
         epoch_t0 = time.perf_counter()
         val_metrics: Dict[str, Any] = {}
@@ -2247,28 +2243,11 @@ def train(
                     if parts:
                         print(f"  {' | '.join(parts)} — loop epoch {epoch}")
 
-        _freeze_span = max(_fb, _fr)
-        if (
-            not ddp_rebuilt_after_partial_freeze
-            and _freeze_span > 0
-            and epoch >= _freeze_span
-            and dist is not None
-            and dist.is_initialized()
-            and isinstance(model, nn.parallel.DistributedDataParallel)
-        ):
-            inner = model.module
-            model = nn.parallel.DistributedDataParallel(
-                inner,
-                device_ids=None,
-                output_device=None,
-                find_unused_parameters=False,
-                broadcast_buffers=False,
-            )
-            ddp_rebuilt_after_partial_freeze = True
-            if rank is None or rank == 0:
-                print(
-                    "  DDP: rebuilt with find_unused_parameters=False (partial freeze ended; faster reductions)."
-                )
+        # Keep the initial DDP wrap from tools/train.py (find_unused_parameters=True when
+        # freeze_backbone_epochs or freeze_rpn_epochs > 0). Rebuilding with False after
+        # unfreeze deadlocks NCCL when a batch skips a head (empty / lookalike-only).
+        # Leftover hangs die when TORCH_DIST_TIMEOUT_SECONDS elapses (default 24h;
+        # odet-planes sets 30 min).
 
         # Update NMS IoU threshold from schedule (e.g. Rotated RetinaNet: lower = more suppression)
         if hasattr(train_model, "set_final_nms_iou_for_epoch"):

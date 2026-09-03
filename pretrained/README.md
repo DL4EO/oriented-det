@@ -6,8 +6,8 @@ Large checkpoint files live here (typically **gitignored**). Registered assets a
 
 | Piece | Role | Example |
 |-------|------|---------|
-| **Manifest slug** | Stable id for `hf://` and `odet pretrained download` | `oriented_rcnn_dota_le90_1x` |
-| **`.pth` filename** | Content-addressed blob on disk / Hub | `oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.pth` |
+| **Manifest slug** | Stable id for `hf://` and `odet pretrained download` | `oriented_rcnn_dota_le90_3x` |
+| **`.pth` filename** | Content-addressed blob on disk / Hub | `oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.pth` |
 | **mAP** | Metadata only (eval-val protocol via `odet preds`; see below) | See tables below |
 
 **Do not compare manifest `eval_map50` to training `compute_map_final` mAP.** They use different pipelines:
@@ -18,7 +18,7 @@ Large checkpoint files live here (typically **gitignored**). Registered assets a
 | **Periodic mAP during training** | `evaluation.compute_map_every_n_epochs` on non-empty val tiles; often GPU-sampled IoU (`use_exact_rotated_iou: false`) | Monitor convergence |
 | **Final mAP after training** | `evaluation.compute_map_final` on best checkpoint; often exact CPU polygon IoU (`use_exact_rotated_iou_for_final_map: true`) | Training log headline number |
 
-Example (Oriented R-CNN 1×): Hub `eval_map50` is **74.79%** from `odet preds` on val tiles using the published `oriented_rcnn_dota_le90_1x` checkpoint.
+Example (Oriented R-CNN 3×): Hub `eval_map50` is **79.40%** from `odet preds` on val tiles using the published `oriented_rcnn_dota_le90_3x` checkpoint.
 
 Publish or refresh a checkpoint:
 
@@ -46,11 +46,11 @@ Overrides: `HF_REPO_ID=`, `HF_REVISION=`, `HF_COMMIT_MESSAGE=`, `PRETRAINED_DIR=
 
 ```bash
 odet pretrained list
-odet pretrained download oriented_rcnn_dota_le90_1x
+odet pretrained download oriented_rcnn_dota_le90_3x
 ```
 
 ```json
-"load_from_checkpoint": "hf://oriented_rcnn_dota_le90_1x"
+"load_from_checkpoint": "hf://oriented_rcnn_dota_le90_3x"
 ```
 
 Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/pretrained/README.md).
@@ -61,26 +61,24 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 
 **mAP** below is **`make eval-val`** mAP50 (all 7,669 val tiles, `filter_empty_gt=false`, rotated IoU ≥ 0.50). Training-time periodic mAP uses non-empty tiles only and may be higher.
 
+**Deploy `production.score_threshold`** on these four DOTA 3× slugs is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.7**, Faster R-CNN **0.6**, RetinaNet **0.45**, FCOS **0.2**). `make eval-val` still uses score ≥ **0.05**.
+
 ### Oriented R-CNN R50-FPN
 
 | Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
 |------|--------|----------------|--------|--------------|-----------|
-| `oriented_rcnn_dota_le90_1x` | 1× (12 ep) | 74.79% | [`dota_le90_1x.json`](../configs/oriented_rcnn/dota_le90_1x.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json`](./oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log`](./oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log) |
 | `oriented_rcnn_dota_le90_3x` | 3× (36 ep) | 79.40% | [`dota_le90_3x.json`](../configs/oriented_rcnn/dota_le90_3x.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json`](./oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log`](./oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log) |
 
 ### Rotated Faster R-CNN R50-FPN
 
 | Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
 |------|--------|----------------|--------|--------------|-----------|
-| `rotated_faster_rcnn_dota_le90_1x` | 1× ProbIoU main | 77.57% | [`dota_le90_1x.json`](../configs/rotated_faster_rcnn/dota_le90_1x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log) |
-| `rotated_faster_rcnn_dota_le90_3x` | 3× ProbIoU main | 83.42% | [`dota_le90_3x.json`](../configs/rotated_faster_rcnn/dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-bfbd261d.log) |
-| `rotated_faster_rcnn_dota_le90_3x_ce` | 3× CE baseline | 75.58% | [`dota_le90_3x.json`](../configs/rotated_faster_rcnn/dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log) |
+| `rotated_faster_rcnn_dota_le90_3x` | 3× ProbIoU main | 83.46% | [`dota_le90_3x.json`](../configs/rotated_faster_rcnn/dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log) |
 
 ### Rotated RetinaNet R50-FPN
 
 | Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
 |------|--------|----------------|--------|--------------|-----------|
-| `rotated_retinanet_dota_le90_1x` | 1× (12 ep) | 64.14% | [`dota_le90_1x.json`](../configs/rotated_retinanet/dota_le90_1x.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json`](./rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.json) | [`rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log`](./rotated_retinanet_r50_fpn_dota_le90_1x-bb9a0bd2.log) |
 | `rotated_retinanet_dota_le90_3x` | 3× (36 ep) | 71.52% | [`dota_le90_3x.json`](../configs/rotated_retinanet/dota_le90_3x.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json`](./rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.json) | [`rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log`](./rotated_retinanet_r50_fpn_dota_le90_3x-8decc6f1.log) |
 
 ### Rotated FCOS R50-FPN
@@ -88,13 +86,14 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 | Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
 |------|--------|----------------|--------|--------------|-----------|
 | `rotated_fcos_dota_le90_3x` | 3× decoded rIoU primary | 82.32% | [`dota_le90_3x.json`](../configs/rotated_fcos/dota_le90_3x.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log) |
-| `rotated_fcos_dota_le90_3x_kfiou_aux` | 3× L1 + KFIoU aux 0.1 | 77.18% | [`dota_le90_1x_l1_kfiou_aux.json`](../configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json) (1× lineage; 3× recipe retired) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.json) | [`rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log`](./rotated_fcos_r50_fpn_dota_le90_3x_kfiou_aux-83c78863.log) |
 
 ## HRSC2016 le90 zoo
 
 **Training split: ImageSets trainval.** **Eval split: ImageSets test** (453 images; 15 empty). Whole-image `keep_ratio` + pad-32 (no native sliding windows).
 
 **mAP** below is **`make eval-val`** mAP50 (rotated IoU ≥ 0.50, `evaluation.final_nms_iou_threshold` **0.1**; deploy production NMS **0.3**).
+
+**Deploy `production.score_threshold`** on these three HRSC 3× slugs is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). `make eval-val` still uses score ≥ **0.05**.
 
 ### Oriented R-CNN R50-FPN
 

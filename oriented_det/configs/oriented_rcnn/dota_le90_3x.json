@@ -7,5 +7,8 @@
     "learning_rate": 0.005,
     "lr_scheduler_milestones": [24, 33],
     "lr_scheduler_gamma": 0.1
+  },
+  "production": {
+    "score_threshold": 0.7
   }
 }

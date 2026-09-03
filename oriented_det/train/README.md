@@ -21,9 +21,13 @@ Anchor-based detectors (`RotatedFasterRCNN`, `OrientedRCNN`, `RotatedRetinaNet`)
 
 `RotatedFCOS` is anchor-free (`model_type: rotated_fcos`) and does not use RPN anchors.
 
+## Class-weighted sigmoid focal (`loss.focal_weighted`)
+
+`loss.class_weight_*` is shared. `focal` is unweighted. `focal_weighted` applies the same dataset-derived weights to two-stage ROI focal and to FCOS/RetinaNet sigmoid-focal class columns (positives and negatives). `background_weight` is ROI-only. Optional `class_weight_schedule_type: linear_ramp` uses the existing epoch hook (`set_class_weights_tensor`); one-stage models drop the background slot.
+
 ## FCOS box regression (`model.box_reg_loss_type`, `model.aux_loss_type`)
 
-- **`box_reg_loss_type`**: `l1` (default), `kfiou`, or `riou` (decoded differentiable polygon IoU). DOTA Hub FCOS is 3× rIoU ([`dota_le90_3x.json`](../../configs/rotated_fcos/dota_le90_3x.json), lr **2.5e-3**); L1 + KFIoU aux remains published as `rotated_fcos_dota_le90_3x_kfiou_aux`.
+- **`box_reg_loss_type`**: `l1` (default), `kfiou`, or `riou` (decoded differentiable polygon IoU). DOTA Hub FCOS is 3× rIoU ([`dota_le90_3x.json`](../../configs/rotated_fcos/dota_le90_3x.json), lr **2.5e-3**).
 - **`aux_loss_type`** / **`aux_loss_weight`**: decoded `kfiou` or `probiou` on positives (centerness-weighted). Weight **0** disables. Typical **0.1**. Aux `riou` is rejected. Logged as `loss_box_reg_aux`. Aux is Gaussian overlap plus an aspect-gated heading term (`ω sin²(2Δθ)`); **`aux_angle_weight`** (default **1.0**, **0** disables the heading term) and **`aux_angle_lambda`** (default **1.0**) control it.
 
 Recipes: [`configs/rotated_fcos/dota_le90_1x.json`](../../configs/rotated_fcos/dota_le90_1x.json), [`dota_le90_3x.json`](../../configs/rotated_fcos/dota_le90_3x.json), [`dota_le90_1x_l1_kfiou_aux.json`](../../configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json).
@@ -152,13 +156,13 @@ Epochs 0–23 → **0.1**, 24–27 → **0.05**, 28+ → **0.0** (display epochs
 
 Two independent thresholds (0-based loop epoch, same as checkpoint `epoch`): `freeze_backbone_epochs` freezes `backbone.*`; `freeze_rpn_epochs` freezes `rpn_head.*` on two-stage models. The ROI head always trains. Helpers: `set_backbone_requires_grad`, `set_rpn_requires_grad`, `model_has_rpn_head` in `oriented_det/train/utils.py`. With `use_lr_param_groups: true` and either threshold \(>0\), `tools/train.py` builds optimizer param groups with `include_frozen_parameters=True` so frozen weights stay in the optimizer until unfrozen.
 
-**DDP:** Multi-GPU training wraps the model with `find_unused_parameters=True` whenever either freeze threshold is \(>0\) (frozen parameters skip the loss graph; `False` would break the reducer). At the first loop epoch where `epoch >= max(freeze_backbone_epochs, freeze_rpn_epochs)`, the engine **re-wraps** the same inner module with `find_unused_parameters=False` so later epochs avoid the extra autograd traversal and PyTorch warnings.
+**DDP:** Multi-GPU training wraps the model with `find_unused_parameters=True` whenever either freeze threshold is \(>0\) (frozen parameters skip the loss graph; `False` would break the reducer). That wrap is kept for the rest of training: rebuilding with `find_unused_parameters=False` after unfreeze deadlocks the NCCL reducer when a batch skips a head (empty / lookalike-only). Leftover hangs die when `TORCH_DIST_TIMEOUT_SECONDS` elapses (default 24h; `make train-multi-gpu` and odet-planes set 30 min).
 
 ## Capping train/val size
 
 `max_train_samples` / `max_val_samples` default to the **first N** samples in dataset order (often many tiles from the same source image). Set **`dataset.max_samples_shuffle_seed`** to an integer (e.g. `42`) to instead take **N indices from a deterministic shuffle** of the full split (same cap, spread across the listing; train and val each use the same seed with independent permutations).
 
-When **`dataset.tile_metrics_csv`** is set, **`dataset.drop_easy_empty_tiles: true`** removes vacuous train tiles (`tp=fp=fn=0`) **before** this cap, so `max_train_samples` counts remaining tiles (including empty tiles with false positives). Hard-tile oversampling runs after the cap.
+When **`dataset.tile_metrics_csv`** is set, **`dataset.drop_easy_empty_tiles: true`** removes vacuous train tiles (`tp=fp=fn=0`) **before** this cap, so `max_train_samples` counts remaining tiles (including empty tiles with false positives). Hard-tile oversampling and optional class-tile oversampling (`dataset.class_tile_oversample_classes`) run after the cap and share one sampler (weights multiply when both are on).
 
 ## Checkpoint and Resume Behavior
 

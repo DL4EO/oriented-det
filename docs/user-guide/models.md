@@ -17,7 +17,7 @@ All detectors:
 - Preserve angle information through training and inference
 - Use oriented IoU for matching and oriented NMS for post-processing
 
-Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_3x` (79.40% eval-val mAP50), `rotated_faster_rcnn_dota_le90_3x` (83.42%), `rotated_fcos_dota_le90_3x` (82.32%), `oriented_rcnn_dota_le90_1x`, `rotated_faster_rcnn_dota_le90_1x` (77.57%), `rotated_retinanet_dota_le90_1x`, and `rotated_retinanet_dota_le90_3x`. HRSC2016: `oriented_rcnn_hrsc2016_le90_3x` (90.41%), `rotated_faster_rcnn_hrsc2016_le90_3x` (88.77%), `rotated_fcos_hrsc2016_le90_3x` (88.34%). See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
+Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_3x` (79.40% eval-val mAP50), `rotated_faster_rcnn_dota_le90_3x` (83.46%), `rotated_fcos_dota_le90_3x` (82.32%), and `rotated_retinanet_dota_le90_3x` (71.52%). HRSC2016: `oriented_rcnn_hrsc2016_le90_3x` (90.41%), `rotated_faster_rcnn_hrsc2016_le90_3x` (88.77%), `rotated_fcos_hrsc2016_le90_3x` (88.34%). See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
 
 ## Training vs inference paths (two-stage models)
 
@@ -301,6 +301,8 @@ model = OrientedRCNN(
 class_map = {"plane": 1, "ship": 2, "small-vehicle": 3, ...}
 model.set_class_weights(class_map)
 ```
+
+`RotatedFCOS` and `RotatedRetinaNet` accept the same `roi_class_weights` dict (or the `[C+1]` schedule tensor). `set_class_weights(class_map)` maps names onto one-hot columns `0..C-1`; missing names stay `1.0`. `background_weight` is ignored (no background class). Config: `loss.loss_type: focal_weighted` plus `loss.class_weight_*`. Recipe default `focal` stays unweighted.
 
 **Best practices:**
 - Start with default cross-entropy loss and standard training

@@ -733,6 +733,83 @@ class ClassWeightsMixin:
         return self.roi_class_weights_tensor
 
 
+class SigmoidFocalClassWeightsMixin:
+    """Class weights for one-stage sigmoid focal loss (FCOS / RetinaNet).
+
+    The stored tensor is ``[num_classes]``, aligned with one-hot columns / FCOS
+    labels ``0 .. C-1``. There is no background class; ``background`` keys in a
+    weights dict are ignored. ``set_class_weights_tensor`` also accepts the
+    ``[C+1]`` ROI schedule tensor and drops index 0 so the existing epoch ramp
+    works unchanged.
+    """
+
+    def _init_sigmoid_focal_class_weights(
+        self,
+        class_weights: Optional[Union[Dict[str, float], "torch.Tensor"]] = None,
+    ) -> None:
+        self._roi_class_weights = class_weights
+        self.roi_class_weights_tensor: Optional["torch.Tensor"] = None
+        if class_weights is not None and torch is not None and isinstance(class_weights, torch.Tensor):
+            self.set_class_weights_tensor(class_weights)
+
+    def set_class_weights(
+        self,
+        class_map: Dict[str, int],
+        device: Optional["torch.device"] = None,
+    ) -> None:
+        """Map a name→weight dict onto FCOS/RetinaNet columns ``0 .. C-1``."""
+        if torch is None:
+            raise RuntimeError("PyTorch is required.")
+        if self._roi_class_weights is None:
+            return
+        if not isinstance(self._roi_class_weights, dict):
+            return
+        if device is None:
+            if hasattr(self, "parameters"):
+                params = list(self.parameters())
+                device = params[0].device if params else torch.device("cpu")
+            else:
+                device = torch.device("cpu")
+        num_classes = int(self.num_classes)
+        weights = torch.ones(num_classes, dtype=torch.float32, device=device)
+        for class_name, class_id in class_map.items():
+            if class_name in ("background", "__background__"):
+                continue
+            cid = int(class_id)
+            if cid < 1 or cid > num_classes:
+                continue
+            if class_name in self._roi_class_weights:
+                weights[cid - 1] = float(self._roi_class_weights[class_name])
+        self.roi_class_weights_tensor = weights
+
+    def set_class_weights_tensor(self, weights: "torch.Tensor") -> None:
+        """Set per-class focal weights.
+
+        Accepts ``[num_classes]`` (one-hot columns) or ``[num_classes + 1]``
+        (ROI schedule tensor; background at index 0 is dropped).
+        """
+        if torch is None:
+            raise RuntimeError("PyTorch is required.")
+        if not isinstance(weights, torch.Tensor):
+            raise TypeError("weights must be a torch.Tensor")
+        num_classes = int(self.num_classes)
+        if weights.ndim != 1:
+            raise ValueError(f"weights must be 1-D, got shape {tuple(weights.shape)}")
+        if weights.shape[0] == num_classes + 1:
+            weights = weights[1:]
+        elif weights.shape[0] != num_classes:
+            raise ValueError(
+                f"weights must have shape [{num_classes}] or [{num_classes + 1}], "
+                f"got {tuple(weights.shape)}"
+            )
+        self.roi_class_weights_tensor = weights
+
+    @property
+    def roi_class_weights(self) -> Optional["torch.Tensor"]:
+        """Per-class focal weights ``[num_classes]``, or None if unweighted."""
+        return self.roi_class_weights_tensor
+
+
 class GroupedCeMixin:
     """Optional coarse-to-fine ROI classification curriculum (grouped cross-entropy)."""
 
@@ -811,5 +888,6 @@ __all__ = [
     "extract_backbone_features",
     "setup_anchors",
     "ClassWeightsMixin",
+    "SigmoidFocalClassWeightsMixin",
     "GroupedCeMixin",
 ]

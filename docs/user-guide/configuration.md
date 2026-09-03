@@ -104,10 +104,21 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 | `max_train_samples` / `max_val_samples` | null | Cap dataset size; use `max_samples_shuffle_seed` for spread sampling |
 | `tile_metrics_csv` | null | From `save_predictions --save-tile-metrics-csv`; enables hard-tile oversampling |
 | `hard_tile_metric_column` / `hard_tile_threshold` / `hard_tile_oversample_factor` | `f1` / `0.8` / `2.0` | Tiles with metric strictly below the threshold are oversampled |
+| `class_tile_oversample_classes` | null | Train-tile oversampling by GT class presence (no CSV). Tiles with at least `class_tile_oversample_min_count` remaining GT boxes whose `class_name` is in this list are upweighted. `null` or `[]` disables. Case-sensitive exact match (same as `class_map` / `map_labels`). Lookalike routing labels are never a match. Unknown names are warned once and ignored |
+| `class_tile_oversample_factor` | `1.0` | Weight multiplier for class-matched train tiles (`1.0` = no extra weight). When hard-tile CSV is also set: `final_weight = hard_weight * class_weight` |
+| `class_tile_oversample_min_count` | `1` | Minimum target-class GT boxes (after loader ignore/difficult/lookalike filtering) for a tile to match |
 | `drop_easy_empty_tiles` | `false` | Requires `tile_metrics_csv`. Drops train tiles with `tp=fp=fn=0` (no GT, no preds) before `max_train_samples` and oversampling. Empty tiles with FPs stay and can be oversampled. Keep `filter_empty_gt: false` so those hard empties remain in the loader |
 | `annotations_file` / `split_file` | null | Required for `format: airbus_playground` |
 | `val_split_id` / `train_includes_val` | `0` / `false` | Airbus fold CSVs |
 | `ignore_labels` / `map_labels` / `lookalike_labels` | null | Drop / rename / hard-negative aliases (see [Data Loading](data.md)) |
+
+Class-tile oversampling is off unless `class_tile_oversample_classes` is a non-empty list and `class_tile_oversample_factor` is not `1.0`. It shares the hard-tile sampler (no second sampler):
+
+```json
+"class_tile_oversample_classes": ["class-a", "class-b"],
+"class_tile_oversample_factor": 3.0,
+"class_tile_oversample_min_count": 1
+```
 
 ### `model` (by detector)
 
@@ -137,14 +148,17 @@ For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set
 - **`freeze_backbone_epochs` / `freeze_rpn_epochs`**: Freeze modules for early epochs (ROI still trains).
 - **`early_stop_*`**: Optional stop when metric plateaus.
 
-### `loss` (two-stage ROI)
+### `loss`
 
 | `loss_type` | Behavior |
 |-------------|----------|
-| `cross_entropy` | Plain ROI CE |
-| `class_weighted` | CE + dataset-derived weights (default) |
-| `focal` / `focal_weighted` | Focal ROI; weighted variant uses class weights |
+| `cross_entropy` | Plain ROI CE (two-stage) |
+| `class_weighted` | CE + dataset-derived weights (two-stage; default) |
+| `focal` | Unweighted focal (ROI, or FCOS/RetinaNet sigmoid focal) |
+| `focal_weighted` | Same focal plus dataset-derived class weights. Two-stage ROI heads use the full `[C+1]` tensor; FCOS/RetinaNet scale each sigmoid-focal class column (positives and negatives). `background_weight` is ignored on one-stage one-hot focal (no background class). |
 | `none` | Legacy: falls back to `model.roi_loss_type` |
+
+`class_weight_method`, `class_weight_beta`, `class_weight_overrides`, and optional `class_weight_schedule_type` (`linear_ramp`) are shared. Recipes keep their default `loss_type` (FCOS/RetinaNet stay `focal` unless you set `focal_weighted`).
 
 ### `evaluation` vs `production`
 
@@ -153,6 +167,8 @@ For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set
 | Training loop | `evaluation.score_threshold` (often **0.3**); `production.score_threshold` overrides when set | `evaluation.iou_threshold` | **`model.final_nms_iou_threshold`** (recipes: **0.1**) — `production` is **not** applied in `train.py` |
 | `odet preds` / `make eval-val` | **`evaluation.preds_score_threshold`** when set, else **0.05** (ignores production/train floors); per-class maps still merge | Always `evaluation.iou_threshold` | **`evaluation.final_nms_iou_threshold`** when set (recipes: **0.1**), else production/model |
 | Deploy / `image_demo` | `production.score_threshold` else `evaluation.score_threshold` | n/a | **`production.final_nms_iou_threshold`** (recipes: **0.3**) via `apply_inference_config_to_model` |
+
+DOTA 3× Hub recipes set `production.score_threshold` to the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.7**, Faster R-CNN **0.6**, RetinaNet **0.45**, FCOS **0.2**). HRSC 3× Hub recipes use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**).
 
 `production.overlap_pixels` (default 200 when null) and `ignore_margin_pixels` (default `dataset.overlap / 2`) control native sliding-window inference for `fixed`/`crop` in `oriented_det.runtime.inference` (`odet preds`, `save_predictions`, deploy). `resize_mode: pad` / `keep_ratio` do not native-tile; they use the training whole-image scale path (`keep_ratio` then `pad_size_divisor`).
 

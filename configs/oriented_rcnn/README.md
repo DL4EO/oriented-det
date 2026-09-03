@@ -123,9 +123,9 @@ Our implementation is compatible with MMRotate's Oriented R-CNN implementation:
 | File | Purpose |
 |------|---------|
 | [`dota_le90_1x.json`](./dota_le90_1x.json) | **Full DOTA 1× recipe** — Smooth L1 main + ProbIoU aux (`roi_box_reg_aux_weight` 0.1) |
-| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33] |
+| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Deploy `production.score_threshold` **0.7** (eval-val F1 0.75 − 0.05). Hub: `oriented_rcnn_dota_le90_3x`. |
 | [`hrsc2016_le90_1x.json`](./hrsc2016_le90_1x.json) | **1× HRSC2016** — native XML loader, single-class ship, `keep_ratio` + pad-32, H+V+diagonal flips (random rotate **off**), Smooth L1 + ProbIoU aux (`roi_box_reg_aux_weight` 0.1); model/eval-val NMS **0.1**, production NMS **0.3**, `max_detections_per_image` **2000** |
-| [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | **3× HRSC2016** — inherits 1×; 36 epochs, milestones [24, 33], `lr_scheduler_gamma` 0.1, random rotate p=0.5 **±20°**. Hub: `oriented_rcnn_hrsc2016_le90_3x`. |
+| [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | **3× HRSC2016** — inherits 1×; 36 epochs, milestones [24, 33], `lr_scheduler_gamma` 0.1, random rotate p=0.5 **±20°**. Deploy `production.score_threshold` **0.85** (eval-val F1 0.90 − 0.05). Hub: `oriented_rcnn_hrsc2016_le90_3x`. |
 
 ### Loss Functions
 
@@ -184,7 +184,7 @@ Oriented R-CNN is slower per step than Rotated Faster R-CNN (~2–3×) because *
 |------|--------------------------------|-------------|----------|
 | Final NMS IoU | `nms.iou_thr=0.1` | `evaluation.final_nms_iou_threshold: 0.1` (eval-val); `production` ships **0.3** | no |
 | Max dets / image | `max_per_img=2000` | `production.max_detections_per_image: 2000` | no |
-| Score floor | `score_thr=0.05` | `production.score_threshold: 0.05` | no |
+| Score floor | `score_thr=0.05` | 1× keeps `0.05`; 3× Hub `production.score_threshold: 0.85` (eval-val F1 0.90 − 0.05) | no |
 | RPN pre/post NMS | 2000 / NMS 0.8 | 2000 / 0.8 | no |
 | Image pipeline | `RResize(800,800)` keep-ratio + `Pad(divisor=32)` | `keep_ratio` + `pad_size_divisor` 32 | yes (canvas) |
 | ROI box loss | Smooth L1 | Smooth L1 main + ProbIoU aux 0.1 | yes |
@@ -219,7 +219,7 @@ The method achieves state-of-the-art accuracy while maintaining competitive effi
 
 ### OrientedDet
 
-`dota_le90_1x.json` trained on DOTA train+val tiles and evaluated on the full val tile split (`filter_empty_gt=false`) reaches **74.79% mAP50**. Hub slug: `oriented_rcnn_dota_le90_1x`; eval report: [`docs/eval-reports/oriented_rcnn_dota_le90_1x/model_analysis.md`](../../docs/eval-reports/oriented_rcnn_dota_le90_1x/model_analysis.md).
+`dota_le90_1x.json` trained on DOTA train+val tiles and evaluated on the full val tile split (`filter_empty_gt=false`) reaches **74.79% mAP50**. Eval report: [`docs/eval-reports/oriented_rcnn_dota_le90_1x/model_analysis.md`](../../docs/eval-reports/oriented_rcnn_dota_le90_1x/model_analysis.md) (historical; not on Hub).
 
 `dota_le90_3x.json` (36 epochs, LR milestones at 24 and 33) reaches **79.40% mAP50** on the same eval-val protocol. Hub slug: `oriented_rcnn_dota_le90_3x`; eval report: [`docs/eval-reports/oriented_rcnn_dota_le90_3x/model_analysis.md`](../../docs/eval-reports/oriented_rcnn_dota_le90_3x/model_analysis.md).
 
@@ -227,7 +227,7 @@ The method achieves state-of-the-art accuracy while maintaining competitive effi
 
 | Config | Final config | Final log | Schedule | Training run | Checkpoint | eval-val mAP50 | Hub slug |
 |--------|--------------|-----------|----------|--------------|------------|----------------|----------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log) | 1× (12 ep) | `runs/oriented_rcnn/20260616-030231` | `best_mAP_0.78.pth` | 74.79% | `oriented_rcnn_dota_le90_1x` |
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_1x-5b128e72.log) | 1× (12 ep) | `runs/oriented_rcnn/20260616-030231` | `best_mAP_0.78.pth` | 74.79% | — |
 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log`](../../pretrained/oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log) | 3× (36 ep) | `runs/oriented_rcnn/20260621-092802` | `best_mAP_0.82.pth` | 79.40% | `oriented_rcnn_dota_le90_3x` |
 | [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | [`oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.json`](../../pretrained/oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.json) | [`oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.log`](../../pretrained/oriented_rcnn_r50_fpn_hrsc2016_le90_3x-dd8a195b.log) | 3× (36 ep) | `runs/oriented_rcnn/20260830-163857` | `best_mAP_0.90.pth` | 90.41% | `oriented_rcnn_hrsc2016_le90_3x` |
 

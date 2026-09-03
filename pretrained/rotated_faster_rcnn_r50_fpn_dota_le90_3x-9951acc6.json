@@ -1,21 +1,21 @@
 {
-  "model_type": "rotated_fcos",
-  "experiment_timestamp": "20260818-100049",
-  "source_recipe": "configs/rotated_fcos/dota_le90_3x_kfiou_aux.json",
+  "model_type": "rotated_faster_rcnn",
+  "experiment_timestamp": "20260901-095802",
+  "source_recipe": "configs/rotated_faster_rcnn/dota_le90_3x.json",
   "source_code_root": "/home/jeffaudi/oriented-det",
-  "git_commit": "1eac3189a343ef5d38421a09d29f734e6bec09c5",
-  "git_describe": "v0.1.1-3-g1eac318-dirty",
-  "git_dirty": true,
+  "git_commit": "0c1f51a3d1659606d4820b928382bda2862548a7",
+  "git_describe": "v0.2.0-2-g0c1f51a",
+  "git_dirty": false,
   "git_branch": "main",
-  "git_commit_date": "2026-08-10T07:40:38+00:00",
+  "git_commit_date": "2026-09-01T09:41:03+00:00",
   "package_version": "0.1.0",
   "enable_albumentation": false,
   "enable_profiling": false,
   "dataset": {
     "data_root": "/path/to/data/DOTA-v1.0-tiled",
     "format": "dota",
-    "train_tiles_dir": null,
-    "val_tiles_dir": null,
+    "train_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/train",
+    "val_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/val",
     "train_tiles_dirs": [
       "/path/to/data/DOTA-v1.0-tiled/train",
       "/path/to/data/DOTA-v1.0-tiled/val"
@@ -34,17 +34,22 @@
       "airport",
       "helipad"
     ],
+    "lookalike_labels": null,
     "map_labels": null,
+    "difficult_tags": null,
     "difficult_strategy": "keep",
     "filter_empty_gt": true,
     "max_train_samples": null,
     "max_val_samples": null,
     "max_samples_shuffle_seed": null,
     "allowed_classes": null,
+    "train_split": null,
+    "val_split": null,
     "tile_metrics_csv": null,
     "hard_tile_metric_column": "f1",
     "hard_tile_threshold": 0.8,
-    "hard_tile_oversample_factor": 2.0
+    "hard_tile_oversample_factor": 2.0,
+    "drop_easy_empty_tiles": false
   },
   "augmentation": {
     "brightness_limit": 0.2,
@@ -77,22 +82,21 @@
     "trainable_layers": 5,
     "frozen_stages": 1,
     "fpn_returned_layers": [
+      1,
       2,
       3,
       4
     ],
     "fpn_strides": [
+      4,
       8,
       16,
       32,
-      64,
-      128
+      64
     ],
-    "fpn_extra_level": true,
+    "fpn_extra_level": false,
     "anchor_scales": [
-      8,
-      16,
-      32
+      8
     ],
     "anchor_ratios": [
       0.5,
@@ -102,11 +106,11 @@
     "anchor_octave_base_scale": null,
     "anchor_scales_per_octave": null,
     "target_means": [
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0
+      0,
+      0,
+      0,
+      0,
+      0
     ],
     "target_stds": [
       0.1,
@@ -115,26 +119,30 @@
       0.2,
       0.1
     ],
-    "roi_loss_type": "focal",
-    "roi_focal_alpha": 0.25,
-    "roi_focal_gamma": 2.0,
-    "roi_norm_factor": 2.0,
+    "roi_loss_type": "cross_entropy",
+    "roi_focal_alpha": 1,
+    "roi_focal_gamma": 2,
+    "roi_norm_factor": 2,
     "roi_edge_swap": true,
-    "roi_proj_xy": false,
+    "roi_proj_xy": true,
     "roi_box_reg_angle_weight": 1.0,
     "roi_box_reg_angle_schedule_epochs": null,
     "roi_box_reg_angle_schedule_values": null,
+    "roi_box_reg_aux_weight": 0.1,
+    "roi_box_reg_aux_schedule_epochs": null,
+    "roi_box_reg_aux_schedule_values": null,
     "roi_batch_size_per_image": 512,
     "roi_positive_iou_threshold": 0.5,
     "roi_negative_iou_threshold": 0.5,
     "roi_match_low_quality": false,
     "roi_min_pos_iou": 0.5,
+    "roi_box_reg_aux_loss_type": "smooth_l1",
     "roi_box_reg_kfiou_fun": null,
-    "roi_box_reg_probiou_mode": null,
-    "roi_box_reg_main_loss_type": "smooth_l1",
-    "roi_box_reg_norm": "sampled_all",
+    "roi_box_reg_probiou_mode": "l1",
+    "roi_box_reg_main_loss_type": "probiou",
+    "roi_box_reg_norm": "positives_only",
     "retinanet_stacked_convs": 4,
-    "box_reg_loss_type": "l1",
+    "box_reg_loss_type": "smooth_l1",
     "box_reg_weight": 1.0,
     "fcos_stacked_convs": 4,
     "fcos_center_sampling": true,
@@ -145,13 +153,13 @@
     "fcos_regress_ranges": null,
     "fcos_angle_weight": 1.0,
     "fcos_nms_pre": 2000,
-    "aux_loss_type": "kfiou",
-    "aux_loss_weight": 0.1,
+    "aux_loss_type": null,
+    "aux_loss_weight": 0.0,
     "aux_angle_weight": 1.0,
     "aux_angle_lambda": 1.0,
-    "rpn_min_size": 0.0,
+    "rpn_min_size": 0,
     "rpn_pre_nms_top_n": 2000,
-    "rpn_post_nms_top_n": 1000,
+    "rpn_post_nms_top_n": 2000,
     "rpn_nms_threshold": 0.7,
     "rpn_batch_size_per_image": 256,
     "rpn_positive_iou_threshold": 0.7,
@@ -163,16 +171,12 @@
     "add_gt_as_proposals": true,
     "final_nms_iou_threshold": 0.1,
     "nms_class_agnostic": false,
-    "final_nms_use_cpu": false,
+    "final_nms_use_cpu": true,
     "final_nms_iou_schedule_epochs": null,
     "final_nms_iou_schedule_values": null,
     "max_detections_per_image": 2000,
     "inference_pre_nms_score_threshold": 0.05,
-    "roi_inference_top_class_only": false,
-    "roi_box_reg_aux_schedule_epochs": null,
-    "roi_box_reg_aux_schedule_values": null,
-    "roi_box_reg_aux_weight": 0.0,
-    "roi_box_reg_aux_loss_type": "riou"
+    "roi_inference_top_class_only": true
   },
   "training": {
     "lr_scheduler_type": null,
@@ -192,7 +196,7 @@
     "lr_scheduler_cosine_epochs": null,
     "lr_scheduler_cosine_tail_epochs": 0,
     "lr_scheduler_cosine_tail_lr": null,
-    "lr_warmup_steps": 2000,
+    "lr_warmup_steps": 500,
     "lr_scaling_with_accumulation": "linear",
     "lr_scale_with_world_size": false,
     "use_lr_param_groups": false,
@@ -202,7 +206,7 @@
     "lr_mult_other": 1.0,
     "lr_mult_head": null,
     "num_epochs": 36,
-    "learning_rate": 0.00025,
+    "learning_rate": 0.005,
     "momentum": 0.9,
     "weight_decay": 0.0001,
     "use_amp": false,
@@ -217,26 +221,28 @@
     "early_stop_higher_is_better": null
   },
   "evaluation": {
-    "score_threshold": 0.3,
-    "per_class_score_threshold": null,
-    "iou_threshold": 0.5,
-    "compute_map_final": true,
-    "compute_map_every_n_epochs": 4,
-    "extended_gt_metrics": true,
-    "use_exact_rotated_iou": false,
-    "use_exact_rotated_iou_for_final_map": true
-  },
-  "production": {
     "score_threshold": 0.05,
     "per_class_score_threshold": null,
+    "iou_threshold": 0.5,
+    "preds_score_threshold": null,
     "final_nms_iou_threshold": 0.1,
+    "compute_map_final": false,
+    "compute_map_every_n_epochs": 4,
+    "extended_gt_metrics": true,
+    "use_exact_rotated_iou": true,
+    "use_exact_rotated_iou_for_final_map": null
+  },
+  "production": {
+    "score_threshold": 0.6,
+    "per_class_score_threshold": null,
+    "final_nms_iou_threshold": 0.3,
     "final_nms_use_cpu": true,
     "inference_pre_nms_score_threshold": 0.05,
-    "max_detections_per_image": 3000,
+    "max_detections_per_image": 2000,
     "nms_class_agnostic": null,
-    "roi_inference_top_class_only": null,
-    "rpn_pre_nms_top_n": null,
-    "rpn_post_nms_top_n": null,
+    "roi_inference_top_class_only": true,
+    "rpn_pre_nms_top_n": 6000,
+    "rpn_post_nms_top_n": 6000,
     "rpn_nms_threshold": null,
     "overlap_pixels": 200,
     "ignore_margin_pixels": 0,
@@ -257,7 +263,7 @@
     "higher_is_better": true
   },
   "loss": {
-    "loss_type": "focal",
+    "loss_type": "cross_entropy",
     "class_weight_method": "sqrt",
     "class_weight_beta": 0.9999,
     "class_weight_schedule_type": null,
@@ -265,7 +271,7 @@
     "class_weight_schedule_end_epoch": 0,
     "class_weight_schedule_power": 1.0,
     "background_weight": null,
-    "focal_alpha": 0.25,
+    "focal_alpha": 1.0,
     "focal_gamma": 2.0,
     "class_weight_overrides": null,
     "label_smoothing": 0.0,
@@ -277,7 +283,7 @@
     "roi_grouped_ce_schedule_power": 1.0
   },
   "tensorboard": {
-    "log_debug_anchors_proposals": false,
+    "log_debug_anchors_proposals": true,
     "vis_score_threshold": 0.5
   },
   "preprocessing": {
@@ -287,19 +293,22 @@
       1024
     ],
     "normalize_mean": [
-      0.485,
-      0.456,
-      0.406
+      0.307941,
+      0.311986,
+      0.297761
     ],
     "normalize_std": [
-      0.229,
-      0.22399999999999998,
-      0.225
+      0.192315,
+      0.187769,
+      0.181551
     ],
     "pad_size_divisor": 32,
     "enable_flip_horizontal": true,
     "enable_flip_vertical": true,
-    "enable_flip_diagonal": true
+    "enable_flip_diagonal": true,
+    "enable_random_rotate": false,
+    "random_rotate_prob": 0.5,
+    "random_rotate_angle_range": 180.0
   },
   "class_map": {
     "baseball-diamond": 1,

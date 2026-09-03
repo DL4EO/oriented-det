@@ -7,13 +7,13 @@
   },
   "evaluation": {
     "score_threshold": 0.3,
-    "compute_map_final": true,
+    "compute_map_final": false,
     "compute_map_every_n_epochs": 4,
     "use_exact_rotated_iou": false,
     "use_exact_rotated_iou_for_final_map": true
   },
   "production": {
-    "score_threshold": null
+    "score_threshold": 0.2
   },
   "checkpoint": {
     "load_from_checkpoint": null,

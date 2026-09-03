@@ -24,7 +24,9 @@ ORIENTED_DET_WINDOW_BATCH_SIZE ?= 64
 
 # Prefer pip-installed cuDNN over system /usr/local/cuda (avoids libcudnn_cnn_train.so.8 / GET engine errors)
 CUDNN_LIB := $(shell python -c "import os, site; p=[x for x in site.getsitepackages() if 'site-packages' in x][0]; print(os.path.join(p,'nvidia/cudnn/lib'))" 2>/dev/null)
-TRAIN_ENV = LD_LIBRARY_PATH="$(CUDNN_LIB):$$LD_LIBRARY_PATH"
+# 30 min NCCL/Gloo timeout so a DDP reducer hang dies instead of spinning for 24h
+TRAIN_ENV := TORCH_DIST_TIMEOUT_SECONDS=1800 \
+        LD_LIBRARY_PATH="$(CUDNN_LIB):$$LD_LIBRARY_PATH"
 
 # VIEWER_PRED_DIR: predictions dir for make viewer (default: latest under predictions/)
 VIEWER_PRED_DIR ?=

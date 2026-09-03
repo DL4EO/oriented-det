@@ -84,7 +84,7 @@ add in-repo CUDA kernels behind the same abstraction after the first release.
 `RotatedRetinaNet` follows MMRotate's `FocalLoss(use_sigmoid=True)` exactly:
 
 - The head outputs **`num_anchors * num_classes`** classification channels (K independent binary classifiers per anchor, **no background channel**). Bias init is `-log((1-π)/π)` with π=0.01 so every class starts at sigmoid ≈ 0.01.
-- Training uses **sigmoid focal loss** (`sigmoid_focal_loss_sum`): one-hot binary targets per anchor, `alpha` (default 0.25) weighting positive entries and `1-alpha` weighting negatives, summed over all anchors/levels and normalized by the **total number of positive anchors** in the batch (MMDet `avg_factor`).
+- Training uses **sigmoid focal loss** (`sigmoid_focal_loss_sum`): one-hot binary targets per anchor, `alpha` (default 0.25) weighting positive entries and `1-alpha` weighting negatives, summed over all anchors/levels and normalized by the **total number of positive anchors** in the batch (MMDet `avg_factor`). Set `loss.loss_type` to **`focal_weighted`** to scale each class column (positives and negatives) by the same dataset-derived `loss.class_weight_*` used for ROI heads. `focal` (recipe default) stays unweighted. `background_weight` does not apply (no background class).
 - Inference scores are **`sigmoid(logits)`** per class; the best class per anchor is kept (labels stay 1-indexed downstream). Final NMS is **class-aware** by default (`model.nms_class_agnostic: false`). Set **`model.nms_class_agnostic: true`** (and **`production.nms_class_agnostic`** if deploy should match) for one NMS over all classes.
 
 This replaced an earlier softmax background+K formulation whose background-bias init plus uniform-alpha focal loss starved the classification head of gradients (cls grad norm ~1000x smaller than bbox), producing 0 detections after 12 epochs.
@@ -96,7 +96,7 @@ This replaced an earlier softmax background+K formulation whose background-bias 
 - **Coder:** `DistanceAnglePointCoder` — point → `(left, top, right, bottom, angle)` (channel order matches MMRotate code).
 - **Assigner:** center-in-OBB + per-level `regress_ranges` + optional center sampling (radius 1.5×stride).
 - **Head:** GN+ReLU cls/reg towers, `conv_cls` / `conv_bbox`(4) / `conv_angle` / `conv_centerness`; `norm_on_bbox`, `centerness_on_reg`, `scale_angle`.
-- **Losses:** sigmoid focal (cls), centerness BCE, and box reg via **`box_reg_loss_type`**:
+- **Losses:** sigmoid focal (cls; `focal_weighted` applies the same `loss.class_weight_*` column scales as RetinaNet), centerness BCE, and box reg via **`box_reg_loss_type`**:
   - **`l1`** (default / L1 recipes): centerness-weighted L1 on encoded ltrb + le90-wrapped angle L1.
   - **`kfiou`**: decode to absolute OBBs (×stride when `norm_on_bbox`), then centerness-weighted [`kfiou_loss_per_box`](../ops/kfiou.py).
   - **`riou`**: same decode path, then centerness-weighted [`riou_loss_per_box`](../ops/diff_iou_rotated.py) (`1 -` differentiable polygon IoU). Not sampling `pairwise_rotated_iou`.
@@ -105,7 +105,7 @@ This replaced an earlier softmax background+K formulation whose background-bias 
 
 Configs: `configs/rotated_fcos/dota_le90_1x.json` (rIoU 1×), `dota_le90_3x.json` (rIoU 3× Hub recipe), `dota_le90_1x_l1_kfiou_aux.json` (L1 + KFIoU aux 1×). Results: [`configs/rotated_fcos/README.md`](../../configs/rotated_fcos/README.md).
 
-**1× L1 recipe:** `learning_rate=2.5e-4`, `max_detections_per_image=2000`, NMS IoU **0.1**. L1 **3×** eval-val **73.92%** (local baseline). **Hub:** 3× decoded rIoU **82.32%** (`rotated_fcos_dota_le90_3x`, `runs/rotated_fcos/20260831-052647`); report [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md). 3× L1 + KFIoU aux **77.18%** remains as `rotated_fcos_dota_le90_3x_kfiou_aux`.
+**1× L1 recipe:** `learning_rate=2.5e-4`, `max_detections_per_image=2000`, NMS IoU **0.1**. L1 **3×** eval-val **73.92%** (local baseline). **Hub:** 3× decoded rIoU **82.32%** (`rotated_fcos_dota_le90_3x`, `runs/rotated_fcos/20260831-052647`); report [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md).
 
 **Checkpoint break (v0.1.1):** RetinaNet now uses MMRotate-style **separate cls/reg 4-conv towers** with **3×3 prediction heads** and **P6/P7 convs on C5** (`LastLevelP6P7`). Pre-change checkpoints (`head.convs`, 1×1 `conv_cls`/`conv_bbox`, `extra_fpn_conv`) are incompatible.
 

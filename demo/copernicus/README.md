@@ -1,6 +1,6 @@
 # Copernicus / Sentinel-2 demo
 
-Sample tiles for zero-shot **ship** detection with the DOTA-pretrained Oriented R-CNN (`oriented_rcnn_dota_le90_1x`).
+Sample tiles for zero-shot **ship** detection with the DOTA-pretrained Oriented R-CNN (`oriented_rcnn_dota_le90_3x`).
 
 ## Files
 
@@ -14,7 +14,7 @@ Sample tiles for zero-shot **ship** detection with the DOTA-pretrained Oriented 
 ```bash
 python tools/image_demo.py \
   demo/copernicus/T30NZM_20260616T101021_TCI_10m_2976_7936.png \
-  hf://oriented_rcnn_dota_le90_1x \
+  hf://oriented_rcnn_dota_le90_3x \
   --out-file demo/copernicus/T30NZM_20260616T101021_TCI_10m_2976_7936_detections.png \
   --score-thr 0.15 \
   --nms-thr 0.2 \
@@ -35,7 +35,7 @@ Process every PNG/JPG in a directory with `image_demo.py` (one model load, outpu
 ```bash
 python tools/image_demo.py \
   "/path/to/S2C_..._SAFE_dataset 1/images" \
-  hf://oriented_rcnn_dota_le90_1x \
+  hf://oriented_rcnn_dota_le90_3x \
   --out-dir "/path/to/S2C_..._SAFE_dataset 1/detections" \
   --score-thr 0.15 \
   --nms-thr 0.2 \

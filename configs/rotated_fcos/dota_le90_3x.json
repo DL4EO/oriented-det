@@ -13,7 +13,7 @@
     "use_exact_rotated_iou_for_final_map": true
   },
   "production": {
-    "score_threshold": null
+    "score_threshold": 0.2
   },
   "checkpoint": {
     "load_from_checkpoint": null,

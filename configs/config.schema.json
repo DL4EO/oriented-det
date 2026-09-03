@@ -169,6 +169,23 @@
         "hard_tile_metric_column": { "type": "string", "default": "f1", "description": "Column in tile_metrics_csv compared to hard_tile_threshold." },
         "hard_tile_threshold": { "type": "number", "default": 0.8, "description": "Tiles with metric strictly below this are oversampled." },
         "hard_tile_oversample_factor": { "type": "number", "default": 2.0, "description": "Sampling weight multiplier for hard tiles (WeightedRandomSampler)." },
+        "class_tile_oversample_classes": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "default": null,
+          "description": "Train-tile oversampling by GT class presence (no metrics CSV). Tiles with at least class_tile_oversample_min_count boxes whose class_name is in this list (case-sensitive exact, after loader ignore/difficult/lookalike filtering) are upweighted. null or [] disables. Lookalike routing labels are never a match. Unknown names are warned once and ignored."
+        },
+        "class_tile_oversample_factor": {
+          "type": "number",
+          "default": 1.0,
+          "description": "Sampling weight multiplier for class-matched train tiles. 1.0 = no extra weight. Composes with hard-tile weights by multiplication when both are enabled (final_weight = hard_weight * class_weight)."
+        },
+        "class_tile_oversample_min_count": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "description": "A train tile matches if it has at least this many GT boxes whose class_name is in class_tile_oversample_classes (after the loader's existing ignore/difficult/lookalike filtering)."
+        },
         "drop_easy_empty_tiles": {
           "type": "boolean",
           "default": false,
@@ -416,14 +433,14 @@
       },
       "additionalProperties": false,
       "properties": {
-        "loss_type": { "type": "string", "enum": ["cross_entropy", "class_weighted", "focal", "focal_weighted", "none"], "default": "class_weighted", "description": "Experiment-level ROI loss recipe: cross_entropy = plain CE (MMRotate-style), class_weighted = CE with dataset-derived weights, focal = unweighted focal, focal_weighted = focal with dataset-derived weights, none = legacy fallback to model.roi_loss_type." },
+        "loss_type": { "type": "string", "enum": ["cross_entropy", "class_weighted", "focal", "focal_weighted", "none"], "default": "class_weighted", "description": "Experiment-level classification loss: cross_entropy = plain ROI CE (two-stage), class_weighted = ROI CE with dataset-derived weights, focal = unweighted focal (ROI or FCOS/RetinaNet sigmoid focal), focal_weighted = same focal plus dataset-derived class weights (ROI heads and FCOS/RetinaNet per-class column scales), none = legacy fallback to model.roi_loss_type." },
         "class_weight_method": { "type": "string", "enum": ["sqrt", "inv_freq", "effective_num", "log_inv_freq"], "default": "sqrt", "description": "How to compute class weights from counts." },
         "class_weight_beta": { "type": "number", "default": 0.9999, "description": "effective_num only: beta parameter close to 1.0 for smoother weights." },
-        "class_weight_schedule_type": { "type": ["string", "null"], "default": null, "enum": [null, "linear_ramp"], "description": "Optional schedule for ROI class weights. When set to 'linear_ramp', weights ramp from uniform -> computed weights between start/end epochs." },
+        "class_weight_schedule_type": { "type": ["string", "null"], "default": null, "enum": [null, "linear_ramp"], "description": "Optional schedule for class weights (ROI heads and FCOS/RetinaNet sigmoid focal). When set to 'linear_ramp', weights ramp from uniform -> computed weights between start/end epochs." },
         "class_weight_schedule_start_epoch": { "type": "integer", "default": 0, "description": "Schedule start epoch (inclusive) for class weight ramp." },
         "class_weight_schedule_end_epoch": { "type": "integer", "default": 0, "description": "Schedule end epoch (inclusive-ish). Must be > start_epoch to enable ramp." },
         "class_weight_schedule_power": { "type": "number", "default": 1.0, "description": "Ramp exponent: 1.0 linear, >1 delays the effect (eases in), <1 speeds it up." },
-        "background_weight": { "type": ["number", "null"], "default": null, "description": "Optional weight override for background class (index 0) in ROI classifier." },
+        "background_weight": { "type": ["number", "null"], "default": null, "description": "Optional weight override for background class (index 0) in the two-stage ROI classifier. Ignored by FCOS/RetinaNet one-hot sigmoid focal (no background class)." },
         "focal_alpha": { "type": "number", "default": 1.0, "description": "Focal loss alpha (when loss_type is focal or focal_weighted)." },
         "focal_gamma": { "type": "number", "default": 2.0, "description": "Focal loss gamma (when loss_type is focal or focal_weighted)." },
         "class_weight_overrides": { "type": ["object", "null"], "additionalProperties": { "type": "number" }, "description": "Optional per-class weight overrides, e.g. {\"truck\": 0.25} to reduce dominant-class bias." },

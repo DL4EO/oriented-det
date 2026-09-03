@@ -49,7 +49,6 @@ python tools/image_demo.py demo/demo.jpg configs/oriented_rcnn/dota_le90_1x.json
 
 # Registered pretrained weights (sidecar config auto-resolved)
 python tools/image_demo.py demo/demo.jpg hf://oriented_rcnn_dota_le90_3x --out-file result.jpg
-python tools/image_demo.py demo/demo.jpg hf://oriented_rcnn_dota_le90_1x --out-file result.jpg
 
 # All images in a directory (writes to demo/out by default)
 python tools/image_demo.py demo configs/.../config.json runs/.../checkpoints/best.pth --out-dir demo/out
@@ -157,7 +156,7 @@ Configuration is loaded from JSON files in the `configs/` directory. Each config
 - Dataset paths (`data_root`, `train_tiles_dir`, `val_tiles_dir`)
 - Model configuration (`backbone`, `anchor_scales`, `anchor_ratios`, etc.)
 - Training hyperparameters (`batch_size`, `learning_rate`, `num_epochs`, etc.)
-- Loss configuration (class weighting, focal loss, etc.)
+- Loss configuration (class weighting, focal loss; `focal_weighted` also scales FCOS/RetinaNet sigmoid focal)
 - Evaluation settings
 - Checkpoint settings
 
@@ -211,6 +210,8 @@ Use the printed **primary** LR (or another heuristic) in your config’s `traini
 From the repo root you can run: `make lr-finder` or `make lr-finder CONFIG=configs/.../config.json` (optional: `OUTPUT=lr_finder.png`).
 
 ### `train.py` (continued)
+
+**`--wizard`:** `odet train --config … --wizard` (or `make wizard`) scans the training split and prints geometry/density stats plus config nudges. FPN/box-reg advice is **class-agnostic**: it uses pooled GT width vs finest FPN stride (cells on P3/P4/…), not class names. Small boxes (few cells, or a non-trivial share under 2 cells) get “keep finest level + decoded `kfiou`”; larger boxes do not. No run directory is created.
 
 **Features:**
 - Config-based training (all parameters in JSON files)
@@ -349,6 +350,16 @@ Sweep controls:
 **Per-tile metrics CSV:** Pass `--tile-metrics-csv path.csv` (relative paths are resolved under the run output directory). Writes one row per image (columns match `per_image_metrics` in the analysis JSON), for joining with training oversampling (`dataset.tile_metrics_csv` in config). Tiles with **no ground truth and no predictions** above the chosen global threshold get **precision = recall = F1 = F2 = 1.0** (correct empty image), so they are not treated as low-F1 failures. Training still ignores `tp=fp=fn=0` rows as hard tiles when reusing older CSVs that stored F1=0 for those cases.
 
 **Hard-tile oversampling in training:** From the repo root, `make train-preds` runs the train split (latest experiment) and writes `tile_metrics.csv` under `<latest_exp>/train_tile_eval/` by default (override with `SAVE_TRAIN_PRED_OUT=/path`). Equivalent manual command: `python tools/save_predictions.py --data-split train --tile-metrics-csv tile_metrics.csv ...`. Then set in your training config: `dataset.tile_metrics_csv` to that CSV path, plus optional `hard_tile_metric_column` (default `f1`), `hard_tile_threshold` (default `0.8`), `hard_tile_oversample_factor` (default `2.0`). Single-GPU training uses `WeightedRandomSampler`; multi-GPU expands the dataset index list so `DistributedSampler` sees more draws of hard tiles. Optional **`dataset.drop_easy_empty_tiles: true`** (requires the CSV) removes train tiles with `tp=fp=fn=0` before `max_train_samples` and oversampling, so you can keep `filter_empty_gt: false` in the loader: easy empty tiles leave the epoch, empty tiles with false positives stay and can be oversampled. Tiles with no CSV row are kept. Validation is unchanged.
+
+**Class-tile oversampling in training:** Optional second path that upweights train tiles from ground-truth class presence only (no metrics CSV). Set `dataset.class_tile_oversample_classes` to a list of `class_name` strings (case-sensitive exact, same as `class_map` / `map_labels` outputs), plus optional `class_tile_oversample_factor` (default `1.0` = no extra weight) and `class_tile_oversample_min_count` (default `1`). A tile matches if it has at least that many remaining GT boxes whose `class_name` is in the list (after the loader’s ignore / difficult / lookalike filtering). Lookalike routing labels are never a match. Unknown names in the list are warned once and ignored. `null` or `[]` disables. Reuses the same `WeightedRandomSampler` / DDP index expansion as hard-tile oversampling: per-index weight starts at `1.0`, hard-tile (when the CSV is set) applies as before, then class-matched indices are multiplied by `class_tile_oversample_factor`. Both can be on: `final_weight = hard_weight * class_weight`. Example:
+
+```json
+"dataset": {
+  "class_tile_oversample_classes": ["class-a", "class-b"],
+  "class_tile_oversample_factor": 3.0,
+  "class_tile_oversample_min_count": 1
+}
+```
 
 **`make preds` / `make metrics` (Makefile):** The root `Makefile` does **not** pass score, IoU, overlap, or NMS overrides. **`make preds`** runs `tools/save_predictions.py` with **`--no-diagnostics`** only; the global score floor is **`evaluation.preds_score_threshold`** or **0.05**, NMS IoU prefers **`evaluation.final_nms_iou_threshold`**, and tiling uses **`production.overlap_pixels`**. For tiled DOTA, **all tiles** under the split roots are included (**`dataset.filter_empty_gt` is not applied** at inference; training may still drop empty tiles). **`make metrics`** runs **`--metrics-from-json`** with no extra flags: mAP/PR reuse **`predictions.json`** metadata (the values written at inference time). To re-run metrics with different thresholds, call `python tools/save_predictions.py --metrics-from-json <dir> --score-threshold …` yourself.
 

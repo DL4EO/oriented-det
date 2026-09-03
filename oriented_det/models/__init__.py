@@ -19,6 +19,7 @@ from .utils import (
     extract_backbone_features,
     setup_anchors,
     ClassWeightsMixin,
+    SigmoidFocalClassWeightsMixin,
     derive_fpn_strides_from_grid,
     warn_if_fpn_strides_mismatch,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "extract_backbone_features",
     "setup_anchors",
     "ClassWeightsMixin",
+    "SigmoidFocalClassWeightsMixin",
     "derive_fpn_strides_from_grid",
     "warn_if_fpn_strides_mismatch",
 ]
