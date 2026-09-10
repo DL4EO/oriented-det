@@ -106,9 +106,9 @@
     "roi_inference_top_class_only": true
   },
   "production": {
-    "score_threshold": 0.05,
+    "score_threshold": 0.6,
     "inference_pre_nms_score_threshold": 0.05,
-    "final_nms_iou_threshold": 0.3,
+    "final_nms_iou_threshold": 0.1,
     "rpn_pre_nms_top_n": 6000,
     "rpn_post_nms_top_n": 6000,
     "max_detections_per_image": 2000,

@@ -101,7 +101,7 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     assert call_kw["backbone_name"] == "resnet18"
     assert call_kw["pretrained_backbone"] is False
     assert call_kw["trainable_layers"] == 3
-    assert "anchor_angles" not in call_kw
+    assert call_kw["anchor_angles"] is None
     assert call_kw["anchor_scales"] == [4, 8]
     assert call_kw["anchor_ratios"] == [0.5, 2.0]
     assert call_kw["norm_factor"] == pytest.approx(3.0)
@@ -130,6 +130,56 @@ def test_create_model_retinanet_passes_pre_nms_score_from_config():
     assert call_kw["final_nms_iou_schedule_values"] == [0.6, 0.4, 0.2]
     assert call_kw["roi_box_reg_aux_schedule_epochs"] == [10, 20]
     assert call_kw["roi_box_reg_aux_schedule_values"] == [0.2, 0.1, 0.0]
+
+
+def test_anchor_angles_deg_to_rad_none_and_empty():
+    from oriented_det.train.config import anchor_angles_deg_to_rad
+
+    assert anchor_angles_deg_to_rad(None) is None
+    assert anchor_angles_deg_to_rad([]) is None
+
+
+def test_create_model_retinanet_converts_anchor_angles_degrees_to_radians():
+    import math
+
+    train = _load_train_module()
+    mock_cls = MagicMock()
+    inst = MagicMock()
+    inst.to = MagicMock(return_value=inst)
+    mock_cls.return_value = inst
+
+    cfg = _minimal_config("rotated_retinanet")
+    cfg.model.anchor_angles = [-45.0, 0.0, 45.0]
+    device = torch.device("cpu")
+    with patch.object(train, "RotatedRetinaNet", mock_cls):
+        train.create_model_from_config(
+            cfg, num_classes=2, device=device, roi_class_weights=None
+        )
+    angles = mock_cls.call_args.kwargs["anchor_angles"]
+    assert len(angles) == 3
+    assert angles[0] == pytest.approx(-math.pi / 4)
+    assert angles[1] == pytest.approx(0.0)
+    assert angles[2] == pytest.approx(math.pi / 4)
+
+
+def test_retinanet_1x_rr_recipe_enables_pm180_rotate():
+    from pathlib import Path
+
+    from oriented_det.train.config import TrainingExperimentConfig
+
+    root = Path(__file__).resolve().parents[1]
+    hub = TrainingExperimentConfig.load(
+        root / "configs" / "rotated_retinanet" / "dota_le90_1x.json"
+    )
+    rr = TrainingExperimentConfig.load(
+        root / "configs" / "rotated_retinanet" / "dota_le90_1x_rr.json"
+    )
+    assert hub.preprocessing.enable_random_rotate is False
+    assert rr.preprocessing.enable_random_rotate is True
+    assert rr.preprocessing.random_rotate_prob == 0.5
+    assert rr.preprocessing.random_rotate_angle_range == 180
+    assert rr.preprocessing.enable_flip_diagonal is True
+    assert rr.model.box_reg_loss_type == "l1"
 
 
 def test_create_model_fcos_passes_config_fields():
@@ -189,18 +239,25 @@ def test_fcos_riou_1x_recipe_loads_lr_and_loss_type():
     assert cfg.model.box_reg_loss_type == "riou"
     assert cfg.training.learning_rate == pytest.approx(0.0025)
     assert float(cfg.model.aux_loss_weight or 0.0) == pytest.approx(0.0)
+    assert cfg.production.score_threshold == pytest.approx(0.2)
 
 
-def test_fcos_riou_3x_recipe_keeps_lr_and_extends_schedule():
+def test_dota_recipes_inherit_dataset_normalization():
+    """One-stage DOTA 1× must use dota_le90.json mean/std, not ImageNet defaults."""
     root = Path(__file__).resolve().parents[1]
-    cfg = TrainingExperimentConfig.load(root / "configs" / "rotated_fcos" / "dota_le90_3x.json")
-    assert cfg.model_type == "rotated_fcos"
-    assert cfg.model.box_reg_loss_type == "riou"
-    assert cfg.training.learning_rate == pytest.approx(0.0025)
-    assert cfg.training.num_epochs == 36
-    assert cfg.training.lr_scheduler_milestones == [24, 33]
-    assert cfg.training.lr_warmup_steps == 2000
-    assert float(cfg.model.aux_loss_weight or 0.0) == pytest.approx(0.0)
+    dota_mean = [0.307941, 0.311986, 0.297761]
+    dota_std = [0.192315, 0.187769, 0.181551]
+    recipes = [
+        "configs/oriented_rcnn/dota_le90_1x.json",
+        "configs/rotated_faster_rcnn/dota_le90_1x.json",
+        "configs/rotated_fcos/dota_le90_1x.json",
+        "configs/rotated_retinanet/dota_le90_1x.json",
+    ]
+    for rel in recipes:
+        cfg = TrainingExperimentConfig.load(root / rel)
+        assert cfg.preprocessing.normalize_mean == pytest.approx(dota_mean), rel
+        assert cfg.preprocessing.normalize_std == pytest.approx(dota_std), rel
+        assert cfg.dataset.data_root == Path("/path/to/data/DOTA-v1.0-tiled"), rel
 
 
 def test_fcos_l1_kfiou_aux_1x_recipe_loads():
@@ -254,6 +311,7 @@ def test_load_model_from_checkpoint_retinanet_passes_fpn_and_anchor_config():
     assert call_kw["scales_per_octave"] == 3
     assert call_kw["stacked_convs"] == 4
     assert call_kw["norm_factor"] == pytest.approx(3.0)
+    assert call_kw["anchor_angles"] is None
 
 
 def test_load_model_from_checkpoint_prefers_pretrained_sidecar_for_canonical_config(tmp_path):

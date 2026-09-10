@@ -32,16 +32,17 @@ CI runs `pytest tests/` on push/PR (see `.github/workflows/test.yml`).
 
 - **test_geometry.py**, **test_geometry_transforms.py** — Geometry (poly, rbox, qbox, transforms)
 - **test_iou.py**, **test_nms.py**, **test_ops_utils.py**, **test_gpu_ops.py**, **test_kfiou.py**, **test_probiou.py**, **test_exact_rotated_iou.py** — IoU/NMS and ops
-- **test_dota.py**, **test_dota_tile_roots.py**, **test_tiling.py**, **test_train_flips.py**, **test_train_rotates.py** — Data loading and augmentation
+- **test_dota.py**, **test_dota_tile_roots.py**, **test_dota_task1.py**, **test_tiling.py**, **test_tile_dota.py**, **test_train_flips.py**, **test_train_rotates.py** — Data loading, unlabeled test discovery, Task 1 export, `odet tile-dota` JPEG/PNG, and augmentation
 - **test_models.py**, **test_rpn.py**, **test_roi.py**, **test_bbox_coder.py**, **test_sigmoid_focal_class_weights.py** — Models and heads; FCOS/RetinaNet class-weighted sigmoid focal
 - **test_train.py**, **test_wizard.py**, **test_hard_tile_oversampling.py**, **test_class_tile_oversampling.py**, **test_grouped_ce.py**, **test_cosine_tail_scheduler.py**, **test_optimizer_param_groups.py** — Training engine, wizard diagnostics, hard-tile / class-tile oversampling, and schedulers
 - **test_score_thresholds.py**, **test_evaluation.py** — Metrics and mAP
 - **test_utils_config.py**, **test_utils_viz.py** — Config and visualization
-- **test_config_behavior.py**, **test_config_model_wiring.py**, **test_training_config_strict.py** — JSON config strictness and wiring
+- **test_config_behavior.py**, **test_config_model_wiring.py**, **test_training_config_strict.py** — JSON config strictness and wiring; DOTA 3× is 1× + 36 epochs
 - **test_airbus_playground.py** — Airbus Playground CSV dataset
 - **test_hrsc2016.py** — HRSC2016 XML loader, ImageSets splits, DOTA export
+- **test_fair1m.py** — FAIR1M XML loader, holdout split, DOTA export, 1× recipes
 - **test_pretrained_hub.py** — Hugging Face Hub manifest and download helpers
-- **test_sliding_window_margin.py**, **test_metrics_margin_filter.py** — Inference margin helpers; pad vs DOTA native sliding-window routing
+- **test_sliding_window_margin.py**, **test_metrics_margin_filter.py** — Inference margin helpers; last-tile flush to image edge; pad vs DOTA native sliding-window routing; window micro-batch default (8 GPU / no auto-probe)
 - **test_deploy_generate_description.py** — Deploy script smoke
 
 See the [main README](../README.md) for installation and [docs/contributing.md](../docs/contributing.md) for contribution guidelines.

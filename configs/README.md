@@ -12,14 +12,17 @@ OrientedDet publishes **DOTA le90 pretrain** checkpoints on Hugging Face Hub. Se
 - **Evaluation: val** — mAP is on the **val** tile set only.
 - This is **not** a fine-tune train/val holdout: val tiles are included in training.
 
-**mAP in README tables** uses **`make eval-val`** mAP50 (all 7,669 val tiles, `filter_empty_gt=false`, rotated IoU ≥ 0.50). Training-time periodic mAP may be higher (non-empty tiles only).
+**mAP in README tables** for Faster R-CNN, FCOS, and Oriented R-CNN 1× DOTA is **official Task 1** (hidden test). Oriented R-CNN 3× / RetinaNet DOTA still quote **`make eval-val`** mAP50 (7,669 val tiles, `filter_empty_gt=false`, rotated IoU ≥ 0.50). Training-time periodic mAP may be higher (non-empty tiles only). Val tiles are in the train union.
 
-| Model | Config | Hub slug | eval-val mAP50 |
+| Model | Config | Hub slug | mAP50 |
 |-------|--------|----------|----------------|
-| Oriented R-CNN 3× | [oriented_rcnn/dota_le90_3x.json](oriented_rcnn/dota_le90_3x.json) | `oriented_rcnn_dota_le90_3x` | 79.40% |
-| Rotated RetinaNet 3× | [rotated_retinanet/dota_le90_3x.json](rotated_retinanet/dota_le90_3x.json) | `rotated_retinanet_dota_le90_3x` | 71.52% |
-| Rotated Faster R-CNN 3× | [rotated_faster_rcnn/dota_le90_3x.json](rotated_faster_rcnn/dota_le90_3x.json) | `rotated_faster_rcnn_dota_le90_3x` | 83.46% |
-| Rotated FCOS 3× rIoU | [rotated_fcos/dota_le90_3x.json](rotated_fcos/dota_le90_3x.json) | `rotated_fcos_dota_le90_3x` | 82.32% |
+| Oriented R-CNN 1× | [oriented_rcnn/dota_le90_1x.json](oriented_rcnn/dota_le90_1x.json) | `oriented_rcnn_dota_le90_1x` | **76.73%** official Task 1 |
+| Oriented R-CNN 3× | [oriented_rcnn/dota_le90_3x.json](oriented_rcnn/dota_le90_3x.json) | `oriented_rcnn_dota_le90_3x` | 79.40% eval-val |
+| Rotated RetinaNet 3× | [rotated_retinanet/dota_le90_3x.json](rotated_retinanet/dota_le90_3x.json) | `rotated_retinanet_dota_le90_3x` | 71.52% eval-val |
+| Rotated Faster R-CNN 1× | [rotated_faster_rcnn/dota_le90_1x.json](rotated_faster_rcnn/dota_le90_1x.json) | `rotated_faster_rcnn_dota_le90_1x` | **74.42%** official Task 1 |
+| Rotated Faster R-CNN 3× | [rotated_faster_rcnn/dota_le90_3x.json](rotated_faster_rcnn/dota_le90_3x.json) | `rotated_faster_rcnn_dota_le90_3x` | **74.48%** official Task 1 |
+| Rotated FCOS 1× rIoU | [rotated_fcos/dota_le90_1x.json](rotated_fcos/dota_le90_1x.json) | `rotated_fcos_dota_le90_1x` | **73.07%** official Task 1 |
+| Rotated FCOS 3× rIoU | [rotated_fcos/dota_le90_3x.json](rotated_fcos/dota_le90_3x.json) | `rotated_fcos_dota_le90_3x` | 82.32% eval-val |
 
 ## HRSC2016 pretrained models
 
@@ -30,6 +33,16 @@ OrientedDet publishes **DOTA le90 pretrain** checkpoints on Hugging Face Hub. Se
 | Oriented R-CNN 3× | [oriented_rcnn/hrsc2016_le90_3x.json](oriented_rcnn/hrsc2016_le90_3x.json) | `oriented_rcnn_hrsc2016_le90_3x` | 90.41% |
 | Rotated Faster R-CNN 3× | [rotated_faster_rcnn/hrsc2016_le90_3x.json](rotated_faster_rcnn/hrsc2016_le90_3x.json) | `rotated_faster_rcnn_hrsc2016_le90_3x` | 88.77% |
 | Rotated FCOS 3× rIoU | [rotated_fcos/hrsc2016_le90_3x.json](rotated_fcos/hrsc2016_le90_3x.json) | `rotated_fcos_hrsc2016_le90_3x` | 88.34% |
+
+### FAIR1M le90 (train locally — finetune DOTA 1× Hub; no FAIR1M zoo)
+
+| Recipe | Config |
+|--------|--------|
+| Oriented R-CNN 1× | [oriented_rcnn/fair1m_le90_1x.json](oriented_rcnn/fair1m_le90_1x.json) |
+| Rotated Faster R-CNN 1× | [rotated_faster_rcnn/fair1m_le90_1x.json](rotated_faster_rcnn/fair1m_le90_1x.json) |
+| Rotated FCOS 1× rIoU | [rotated_fcos/fair1m_le90_1x.json](rotated_fcos/fair1m_le90_1x.json) |
+
+See [Data guide — FAIR1M](../docs/user-guide/data.md#fair1m).
 
 Download: `odet pretrained download <slug>` or `"load_from_checkpoint": "hf://<slug>"`. Published eval-val reports: [`docs/eval-reports/`](../docs/eval-reports/) (markdown + analysis JSON; `predictions.json` stays in gitignored [`predictions/`](../predictions/) for the viewer).
 
@@ -85,12 +98,12 @@ All options, types, and defaults: **[config.schema.json](config.schema.json)** (
 |--------|-------------|
 | `_base_` | Base config path(s): relative to current file, `@odet:…`, or absolute |
 | `model_type` | `oriented_rcnn`, `rotated_faster_rcnn`, `rotated_retinanet`, or `rotated_fcos` |
-| `dataset` | data_root, format (dota / airbus_playground / hrsc2016), train_tiles_dir, val_tiles_dir, **train_tiles_dirs**, **val_tiles_dirs** (optional lists; union without on-disk merge), **same_folder** (DOTA: images and .txt in same dir), **overlap** (tile overlap px, even; deploy uses margin = overlap/2), annotations_file, split_file, **val_split_id**, **train_includes_val** (Airbus: train on all folds; val fold for monitoring only), **train_split** / **val_split** (HRSC2016 ImageSets; defaults trainval / test), difficult_strategy, **difficult_tags** (Airbus: exact tags → difficult=1 + strip, e.g. `["Partially Hidden"]`; use with strategy `ignore` for don't-care — not lookalike), **filter_empty_gt** (drop tiles/images with no GT after filters; MMRotate parity), **drop_easy_empty_tiles** (with `tile_metrics_csv`: drop train `tp=fp=fn=0` tiles, keep empty+FP for hard-tile oversampling), **class_tile_oversample_classes** / **class_tile_oversample_factor** / **class_tile_oversample_min_count** (optional GT class-presence oversampling; composes with hard-tile weights), max_train_samples, max_val_samples, **max_samples_shuffle_seed** (deterministic spread when capping), allowed_classes, ignore_labels, map_labels, **lookalike_labels** (optional aliases; reserved name `lookalike` is always a hard-negative token, never a class — map confusers with `map_labels`, e.g. `{"Confuser":"lookalike"}`; see [data.md — Lookalike confusers](../docs/user-guide/data.md#lookalike-confusers)) |
+| `dataset` | data_root, format (dota / airbus_playground / hrsc2016 / fair1m), train_tiles_dir, val_tiles_dir, **train_tiles_dirs**, **val_tiles_dirs** (optional lists; union without on-disk merge), **same_folder** (DOTA: images and .txt in same dir), **overlap** (tile overlap px, even; deploy uses margin = overlap/2), annotations_file, split_file, **val_split_id**, **train_includes_val** (Airbus: train on all folds; val fold for monitoring only), **train_split** / **val_split** (HRSC2016 ImageSets / FAIR1M splits; HRSC defaults trainval/test, FAIR1M train/val), difficult_strategy, **difficult_tags** (Airbus: exact tags → difficult=1 + strip, e.g. `["Partially Hidden"]`; use with strategy `ignore` for don't-care — not lookalike), **filter_empty_gt** (drop tiles/images with no GT after filters; MMRotate parity), **drop_easy_empty_tiles** (with `tile_metrics_csv`: drop train `tp=fp=fn=0` tiles, keep empty+FP for hard-tile oversampling), **class_tile_oversample_classes** / **class_tile_oversample_factor** / **class_tile_oversample_min_count** (optional GT class-presence oversampling; composes with hard-tile weights), max_train_samples, max_val_samples, **max_samples_shuffle_seed** (deterministic spread when capping), allowed_classes, ignore_labels, map_labels, **lookalike_labels** (optional aliases; reserved name `lookalike` is always a hard-negative token, never a class — map confusers with `map_labels`, e.g. `{"Confuser":"lookalike"}`; see [data.md — Lookalike confusers](../docs/user-guide/data.md#lookalike-confusers)) |
 | `data_loader` | batch_size, num_workers, shuffle, pin_memory |
 | `model` | backbone, fpn_*, anchor_*, target_means/stds, roi_* (loss, batch, iou, schedule, **roi_proj_xy**), rpn_*, use_hbb_for_matching, add_gt_as_proposals, **rpn_nms_threshold** (proposal NMS), **final_nms_iou_threshold** / **final_nms_iou_schedule_*** (post–ROI-head NMS), **final_nms_use_cpu** (exact polygon final NMS on CPU), nms_class_agnostic, max_detections_per_image, inference_pre_nms_score_threshold |
 | `training` | **lr_scheduler_type** first, then lr_scheduler_*, lr_warmup_steps, lr_scaling_*, use_lr_param_groups, lr_mult_*, then num_epochs, learning_rate, momentum, weight_decay, use_amp, gradient_accumulation_steps, max_grad_norm, loss_weights. See [Training — Learning rate scheduling](../docs/user-guide/training.md#learning-rate-scheduling) and [_base_/schedules/README.md](_base_/schedules/README.md). |
 | `evaluation` | score_threshold (train val), **`preds_score_threshold`** for **`odet preds` / `make eval-val`** (null → **0.05**), iou_threshold, compute_map_*; **`final_nms_iou_threshold`** for eval-val NMS only (DOTA+HRSC: **0.1**, MMRotate test parity) |
-| `production` | Optional overrides: **train val / deploy score** — `score_threshold` overrides `evaluation.score_threshold` when set (`odet preds` ignores it). DOTA 3× Hub recipes set this to eval-val global F1 − **0.05** (Oriented R-CNN **0.7**, Faster R-CNN **0.6**, RetinaNet **0.45**, FCOS **0.2**); HRSC 3× Hub recipes do the same (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). `per_class_score_threshold` merges on top of `evaluation` (mAP IoU is `evaluation.iou_threshold` only). **Decode (deploy / `image_demo`)** — RPN/NMS/threshold fields patch the loaded model via `apply_inference_config_to_model` (DOTA+HRSC: final NMS **0.3**). **`odet preds`** prefers `evaluation.final_nms_iou_threshold` when set. Not applied during `tools/train.py` (training uses `model.*`, final NMS **0.1**). **Deploy / tiling** — `overlap_pixels`, `ignore_margin_pixels`, canvas flags (see **config.schema.json**). |
+| `production` | Optional overrides: **train val / deploy score** — `score_threshold` overrides `evaluation.score_threshold` when set (`odet preds` ignores it). DOTA 1× recipes set this to eval-val global F1 − **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet **0.45**, FCOS **0.2**); 3× inherits those floors except Oriented R-CNN 3×, which pins **0.7**. HRSC 1× recipes do the same (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). `per_class_score_threshold` merges on top of `evaluation` (mAP IoU is `evaluation.iou_threshold` only). **Decode (deploy / `image_demo`)** — RPN/NMS/threshold fields patch the loaded model via `apply_inference_config_to_model` (DOTA+HRSC+FAIR1M: final NMS **0.1**). **`odet preds`** prefers `evaluation.final_nms_iou_threshold` when set. Not applied during `tools/train.py` (training uses `model.*`, final NMS **0.1**). **Deploy / tiling** — `overlap_pixels`, `ignore_margin_pixels`, canvas flags (see **config.schema.json**). |
 | `checkpoint` | load_from_checkpoint, load_from_experiment, **discover_previous_run**, resume_from_checkpoint_epoch, load_optimizer_state, load_scheduler_state, load_include_prefixes, load_exclude_prefixes, start_epoch, best_metric, higher_is_better |
 | `loss` | loss_type (`focal_weighted` now also scales FCOS/RetinaNet sigmoid focal per class; `background_weight` is ROI-only), class_weight_method, background_weight, focal_alpha, focal_gamma, label_smoothing, **roi_grouped_ce_*** (coarse-to-fine ROI classifier curriculum in one run) |
 | `preprocessing` | resize_mode, target_size, normalize_mean, normalize_std, pad_size_divisor, enable_flip_horizontal, enable_flip_vertical, enable_flip_diagonal, enable_random_rotate, random_rotate_prob, random_rotate_angle_range |

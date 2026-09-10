@@ -47,6 +47,10 @@ def test_detect_tier_hrsc2016():
     assert detect_tier(["ship"], "hrsc2016") == "hrsc2016"
 
 
+def test_detect_tier_fair1m():
+    assert detect_tier(["Boeing737", "Small Car"], "fair1m") == "fair1m"
+
+
 def test_detect_tier_generic():
     assert detect_tier(["x"], "custom") == "generic"
 

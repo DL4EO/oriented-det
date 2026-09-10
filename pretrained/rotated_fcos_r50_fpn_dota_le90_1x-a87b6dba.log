@@ -1,0 +1,697 @@
+Loading configuration from: configs/rotated_fcos/dota_le90_1x.json
+Training log file: /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531/train.log
+================================================================================
+ROTATED_FCOS Training
+================================================================================
+Source git: v0.2.0-4-gb242d27-dirty (dirty working tree)
+Source branch: main
+Source commit date: 2026-09-03T03:08:27+00:00
+Package: oriented-det 0.1.0
+PyTorch Version: 2.3.0+cu121
+CUDA Available: True
+MPS (Apple Silicon) Available: False
+CUDA Device: NVIDIA L4
+Mixed Precision (AMP): False
+
+Checking dataset directories...
+Train tiles (2 root(s)):
+  /path/to/data/DOTA-v1.0-tiled/train
+    Images exist: True
+    Labels exist: True
+  /path/to/data/DOTA-v1.0-tiled/val
+    Images exist: True
+    Labels exist: True
+
+Val tiles (1 root(s)):
+  /path/to/data/DOTA-v1.0-tiled/val
+    Images exist: True
+    Labels exist: True
+
+
+Loading datasets...
+DOTA filter_empty_gt (MMRotate-style):
+  train: filter_empty_gt dropped 19464 / 33155 tiles (13691 kept)
+  val: filter_empty_gt dropped 4548 / 7669 tiles (3121 kept)
+
+Found 15 classes:
+  0: baseball-diamond
+  1: basketball-court
+  2: bridge
+  3: ground-track-field
+  4: harbor
+  5: helicopter
+  6: large-vehicle
+  7: plane
+  8: roundabout
+  9: ship
+  10: small-vehicle
+  11: soccer-ball-field
+  12: storage-tank
+  13: swimming-pool
+  14: tennis-court
+
+Number of classes (foreground): 15
+Class mapping: {'baseball-diamond': 1, 'basketball-court': 2, 'bridge': 3, 'ground-track-field': 4, 'harbor': 5, 'helicopter': 6, 'large-vehicle': 7, 'plane': 8, 'roundabout': 9, 'ship': 10, 'small-vehicle': 11, 'soccer-ball-field': 12, 'storage-tank': 13, 'swimming-pool': 14, 'tennis-court': 15}
+
+Analyzing class distribution in training set...
+
+================================================================================
+Class Distribution Analysis - Training Set
+================================================================================
+Total objects: 264,176
+Total classes: 15
+
+Class Name           Count        Percentage  
+--------------------------------------------------------------------------------
+ship                     82,131       31.09%
+small-vehicle            63,156       23.91%
+large-vehicle            45,972       17.40%
+plane                    20,023        7.58%
+harbor                   17,028        6.45%
+storage-tank             14,971        5.67%
+tennis-court              6,149        2.33%
+swimming-pool             4,273        1.62%
+bridge                    4,122        1.56%
+helicopter                1,286        0.49%
+basketball-court          1,269        0.48%
+baseball-diamond          1,120        0.42%
+roundabout                1,017        0.38%
+soccer-ball-field           874        0.33%
+ground-track-field          785        0.30%
+--------------------------------------------------------------------------------
+
+Imbalance Ratio (max/min): 104.63x
+Most frequent class: ship (82,131 instances)
+Least frequent class: ground-track-field (785 instances)
+
+Class weighting disabled (loss_type=focal)
+
+Loss configuration: focal
+  Focal Loss Alpha: 0.25
+  Focal Loss Gamma: 2.0
+
+
+Training configuration created:
+  Model type: rotated_fcos
+  Experiment timestamp: 20260908-023531
+  Number of classes: 15
+  Batch size: 2
+  Learning rate: 0.0025
+  Epochs: 12
+
+Creating collate functions...
+  - Training: no Albumentations augmentation (flips: horizontal, vertical, diagonal; rotate off)
+  - Validation: no augmentation
+
+Creating data loaders...
+Training samples: 13691
+Validation samples: 3121
+Batches per epoch: 6846
+
+Creating model...
+Using device: cuda
+
+Complete ROTATED_FCOS model created:
+  Backbone: resnet50
+  Number of classes: 15 (foreground)
+  Pretrained backbone: True
+  Trainable backbone layers: 3 (last 3 stages) (frozen_stages=1)
+  Anchor scales: [8, 16, 32]
+  Anchor ratios: [0.5, 1.0, 2.0]
+  FPN strides: [8, 16, 32, 64, 128]
+  FPN levels: 5 (P3, P4, P5, P6, P7)
+  ROI Loss Type: focal
+
+  Total parameters: 36,223,451
+  Trainable parameters: 36,001,051
+
+Configuration saved to: /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531/config.json
+
+Learning rate warmup enabled: 500 optimizer steps
+  Warmup: 0 → 0.0025 over 500 steps
+  After warmup: MultiStepLR at epochs [8, 11], gamma=0.1
+
+Experiment directory: /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531
+TensorBoard logging enabled. Logs saved to: /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531
+View logs with: tensorboard --logdir /home/jeffaudi/oriented-det/runs/rotated_fcos
+View this experiment with: tensorboard --logdir /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531
+
+Training configuration:
+  Epochs: 12
+  Learning rate: 0.002500
+  Batch size per GPU: 2
+  Gradient accumulation: 1
+  Best checkpoint metric: mAP (higher_is_better=True)
+  Effective batch size: 2
+  Mixed precision: False
+  Eval (mAP / val matching): score_threshold=0.2, iou_threshold=0.5 (production.score_threshold overrides evaluation when set)
+  Eval IoU backend (mAP / GT cover): GPU sampling (approx)
+  Eval IoU backend (final mAP): GPU sampling (approx)
+
+Starting training from scratch (no checkpoint loaded)
+
+Starting epoch: 0
+
+Profiling disabled
+
+================================================================================
+Starting training...
+================================================================================
+TensorBoard: tensorboard --logdir /home/jeffaudi/oriented-det/runs/rotated_fcos
+================================================================================
+
+Training started at: 2026-09-08T02:36:09+00:00
+
+Epoch 1/12
+--------------------------------------------------
+/home/jeffaudi/.pyenv/versions/3.12.12/envs/oriented-det/lib/python3.12/site-packages/torch/nn/modules/conv.py:456: UserWarning: Plan failed with a cudnnException: CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR: cudnnFinalize Descriptor Failed cudnn_status: CUDNN_STATUS_NOT_SUPPORTED (Triggered internally at ../aten/src/ATen/native/cudnn/Conv_v8.cpp:919.)
+  return F.conv2d(input, weight, bias, self.stride,
+/home/jeffaudi/.pyenv/versions/3.12.12/envs/oriented-det/lib/python3.12/site-packages/torch/autograd/graph.py:744: UserWarning: Plan failed with a cudnnException: CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR: cudnnFinalize Descriptor Failed cudnn_status: CUDNN_STATUS_NOT_SUPPORTED (Triggered internally at ../aten/src/ATen/native/cudnn/Conv_v8.cpp:919.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+Epoch 1/12 complete: 6846/6846 batches, loss: 1.5646
+  Effective LR: ref=2.500e-03 (0=2.500e-03)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 2.56
+  Avg Detections per Image (score≥0.5): 0.08
+  Max detection score: 0.634
+  Mean detection score: 0.123
+  Time per Step: 0.1716
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 12 classes
+  Timing: 32m 23s this epoch (avg 32m 23s) | ETA ~5h 56m for 11 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 2/12
+--------------------------------------------------
+Epoch 2/12 complete: 6846/6846 batches, loss: 1.4063
+  Effective LR: ref=2.500e-03 (0=2.500e-03)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 10.12  ↑7.56
+  Avg Detections per Image (score≥0.5): 1.32  ↑1.23
+  Max detection score: 0.814
+  Mean detection score: 0.185
+  Time per Step: 0.1984  ↓0.0268
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 33m 45s this epoch (avg 33m 4s) | ETA ~5h 30m for 10 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 3/12
+--------------------------------------------------
+Epoch 3/12 complete: 6846/6846 batches, loss: 1.3279
+  Effective LR: ref=2.500e-03 (0=2.500e-03)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 12.13  ↑2.01
+  Avg Detections per Image (score≥0.5): 1.72  ↑0.40
+  Max detection score: 0.810
+  Mean detection score: 0.245
+  Time per Step: 0.1983  ↑0.0001
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 33m 3s this epoch (avg 33m 4s) | ETA ~4h 57m for 9 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 4/12
+--------------------------------------------------
+Epoch 4/12 complete: 6846/6846 batches, loss: 1.2771
+  Effective LR: ref=2.500e-03 (0=2.500e-03)
+
+Computing mAP (periodic evaluation: every 4 epoch(s))...
+Validation complete: 1561 batches
+
+Computing mAP (this may take a while)...
+  Eval filters: score≥0.2000, IoU≥0.50
+  Images: 3,121
+  Total detections (post score filter): 60,160 (19.3 per image)
+  Total ground truths: 57,768 (18.5 per image)
+  Warning: Large number of detections may slow down mAP computation
+  Consider increasing evaluation.score_threshold (current: 0.2) for faster mAP matching
+  Computing AP for baseball-diamond: 414 dets, 364 GTs (150,696 IoU calculations)
+  Computing AP for basketball-court: 407 dets, 278 GTs (113,146 IoU calculations)
+  Computing AP for bridge: 500 dets, 666 GTs (333,000 IoU calculations)
+  WARNING: harbor has 18,743,578 IoU calculations (4,361 dets × 4,298 GTs). This will be slow!
+  Computing AP for harbor: 4,361 dets, 4,298 GTs (18,743,578 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for harbor (18,743,578 calculations)
+    Processing 4,361 detections in chunks of 1,163
+  WARNING: large-vehicle has 92,570,300 IoU calculations (9,850 dets × 9,398 GTs). This will be slow!
+  Computing AP for large-vehicle: 9,850 dets, 9,398 GTs (92,570,300 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for large-vehicle (92,570,300 calculations)
+    Processing 9,850 detections in chunks of 532
+  WARNING: plane has 22,514,829 IoU calculations (4,759 dets × 4,731 GTs). This will be slow!
+  Computing AP for plane: 4,759 dets, 4,731 GTs (22,514,829 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for plane (22,514,829 calculations)
+    Processing 4,759 detections in chunks of 1,056
+  WARNING: ship has 353,239,506 IoU calculations (19,059 dets × 18,534 GTs). This will be slow!
+  Computing AP for ship: 19,059 dets, 18,534 GTs (353,239,506 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for ship (353,239,506 calculations)
+    Processing 19,059 detections in chunks of 269
+  WARNING: small-vehicle has 157,408,020 IoU calculations (13,860 dets × 11,357 GTs). This will be slow!
+  Computing AP for small-vehicle: 13,860 dets, 11,357 GTs (157,408,020 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for small-vehicle (157,408,020 calculations)
+    Processing 13,860 detections in chunks of 440
+  WARNING: storage-tank has 18,000,918 IoU calculations (3,578 dets × 5,031 GTs). This will be slow!
+  Computing AP for storage-tank: 3,578 dets, 5,031 GTs (18,000,918 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for storage-tank (18,000,918 calculations)
+    Processing 3,578 detections in chunks of 993
+  Computing AP for swimming-pool: 702 dets, 693 GTs (486,486 IoU calculations)
+  Computing AP for tennis-court: 2,029 dets, 1,529 GTs (3,102,341 IoU calculations)
+  mAP computation completed in 26m 45s. mAP: 0.6408
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 13.92  ↑1.78
+  Avg Detections per Image (score≥0.5): 2.49  ↑0.77
+  Max detection score: 0.862
+  Mean detection score: 0.218
+  Time per Step: 0.2029  ↓0.0046
+  Accuracy: 0.7668 (76.68%)
+  Correct Predictions: 46130/60160 (matched detections)
+  Ground Truth objects: 57768
+  GT covered pre-eval-threshold: 49514/57768
+  GT covered post-eval-threshold: 46159/57768
+  GT lost by eval-threshold filtering: 3355
+  GT cover rate pre-eval-threshold: 85.71%
+  GT cover rate post-eval-threshold: 79.90%
+  GT IoU vs raw dets (eval IoU threshold=0.50; per-GT max IoU over all dets / over same-class dets):
+    mean best IoU (any class): 0.6780, median: 0.7297
+    mean best IoU (correct class): 0.6668, median: 0.7268
+    per-class mean best IoU (raw detections):
+      | class              | gts | mean_any | mean_same | med_same |
+      |--------------------|-----:|----------:|-----------:|----------:|
+      | baseball-diamond   | 364 |   0.6699 |    0.6656 |   0.7005 |
+      | basketball-court   | 278 |   0.7453 |    0.7389 |   0.7997 |
+      | bridge             | 666 |   0.5141 |    0.5072 |   0.5840 |
+      | ground-track-field | 216 |   0.7137 |    0.6727 |   0.7520 |
+      | harbor             | 4298 |   0.5903 |    0.5834 |   0.6150 |
+      | helicopter         | 157 |   0.6974 |    0.6128 |   0.6982 |
+      | large-vehicle      | 9398 |   0.6796 |    0.6336 |   0.6993 |
+      | plane              | 4731 |   0.7600 |    0.7593 |   0.7958 |
+      | roundabout         | 256 |   0.6929 |    0.6613 |   0.7761 |
+      | ship               | 18534 |   0.7146 |    0.7114 |   0.7485 |
+      | small-vehicle      | 11357 |   0.6519 |    0.6502 |   0.7118 |
+      | soccer-ball-field  | 260 |   0.6589 |    0.5133 |   0.6420 |
+      | storage-tank       | 5031 |   0.5908 |    0.5870 |   0.7087 |
+      | swimming-pool      | 693 |   0.5559 |    0.5511 |   0.6297 |
+      | tennis-court       | 1529 |   0.8092 |    0.8039 |   0.8528 |
+      | global             | 57768 |   0.6780 |    0.6668 |   0.7268 |
+    GTs with IoU≥thresh but no same-class hit (wrong-class / misaligned): 833
+    GTs with no detection above IoU thresh (missed / poor loc): 7318
+    GTs with 0% best IoU vs any detection (no spatial overlap): 727 (1.26% of GTs)
+    histogram best IoU (any class) [0,0.25)/[0.25,0.5)/[0.5,0.75)/[0.75,1]: 3083/4235/25806/24644
+    histogram best IoU (correct class) [0,0.25)/[0.25,0.5)/[0.5,0.75)/[0.75,1]: 3989/4162/25392/24225
+  Class-agnostic duplicate rate (post score thresh; IoU≥0.50 vs a higher-score box): micro=0.69% (413/60160 boxes), macro mean over images with detections=0.61% (3009 images)
+  mAP: 0.6408 (64.08%)
+  Per-Class AP:
+    baseball-diamond: 0.7176 (71.76%)
+    basketball-court: 0.7485 (74.85%)
+    bridge: 0.4511 (45.11%)
+    ground-track-field: 0.5837 (58.37%)
+    harbor: 0.5543 (55.43%)
+    helicopter: 0.4868 (48.68%)
+    large-vehicle: 0.7587 (75.87%)
+    plane: 0.8986 (89.86%)
+    roundabout: 0.6017 (60.17%)
+    ship: 0.7943 (79.43%)
+    small-vehicle: 0.6226 (62.26%)
+    soccer-ball-field: 0.3564 (35.64%)
+    storage-tank: 0.6241 (62.41%)
+    swimming-pool: 0.5075 (50.75%)
+    tennis-court: 0.9066 (90.66%)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 1h 3m this epoch (avg 40m 34s) | ETA ~5h 24m for 8 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 5/12
+--------------------------------------------------
+Epoch 5/12 complete: 6846/6846 batches, loss: 1.2400
+  Effective LR: ref=2.500e-03 (0=2.500e-03)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 14.82  ↑0.90
+  Avg Detections per Image (score≥0.5): 3.01  ↑0.52
+  Max detection score: 0.860
+  Mean detection score: 0.245
+  Time per Step: 0.2012  ↑0.0017
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 32m 57s this epoch (avg 39m 2s) | ETA ~4h 33m for 7 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 6/12
+--------------------------------------------------
+Epoch 6/12 complete: 6846/6846 batches, loss: 1.2115
+  Effective LR: ref=2.500e-03 (0=2.500e-03)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 14.96  ↑0.14
+  Avg Detections per Image (score≥0.5): 2.82  ↓0.19
+  Max detection score: 0.752
+  Mean detection score: 0.253
+  Time per Step: 0.1939  ↑0.0073
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 32m 0s this epoch (avg 37m 52s) | ETA ~3h 47m for 6 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 7/12
+--------------------------------------------------
+Epoch 7/12 complete: 6846/6846 batches, loss: 1.1883
+  Effective LR: ref=2.500e-03 (0=2.500e-03)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 15.37  ↑0.41
+  Avg Detections per Image (score≥0.5): 2.92  ↑0.10
+  Max detection score: 0.873
+  Mean detection score: 0.228
+  Time per Step: 0.1919  ↑0.0020
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 32m 35s this epoch (avg 37m 6s) | ETA ~3h 5m for 5 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 8/12
+--------------------------------------------------
+Epoch 8/12 complete: 6846/6846 batches, loss: 1.1693
+  Effective LR: ref=2.500e-03 (0=2.500e-03)
+
+Computing mAP (periodic evaluation: every 4 epoch(s))...
+Validation complete: 1561 batches
+
+Computing mAP (this may take a while)...
+  Eval filters: score≥0.2000, IoU≥0.50
+  Images: 3,121
+  Total detections (post score filter): 63,285 (20.3 per image)
+  Total ground truths: 57,768 (18.5 per image)
+  Warning: Large number of detections may slow down mAP computation
+  Consider increasing evaluation.score_threshold (current: 0.2) for faster mAP matching
+  Computing AP for baseball-diamond: 351 dets, 364 GTs (127,764 IoU calculations)
+  Computing AP for bridge: 1,077 dets, 666 GTs (717,282 IoU calculations)
+  WARNING: harbor has 20,677,678 IoU calculations (4,811 dets × 4,298 GTs). This will be slow!
+  Computing AP for harbor: 4,811 dets, 4,298 GTs (20,677,678 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for harbor (20,677,678 calculations)
+    Processing 4,811 detections in chunks of 1,163
+  WARNING: large-vehicle has 87,316,818 IoU calculations (9,291 dets × 9,398 GTs). This will be slow!
+  Computing AP for large-vehicle: 9,291 dets, 9,398 GTs (87,316,818 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for large-vehicle (87,316,818 calculations)
+    Processing 9,291 detections in chunks of 532
+  WARNING: plane has 22,746,648 IoU calculations (4,808 dets × 4,731 GTs). This will be slow!
+  Computing AP for plane: 4,808 dets, 4,731 GTs (22,746,648 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for plane (22,746,648 calculations)
+    Processing 4,808 detections in chunks of 1,056
+  WARNING: ship has 361,357,398 IoU calculations (19,497 dets × 18,534 GTs). This will be slow!
+  Computing AP for ship: 19,497 dets, 18,534 GTs (361,357,398 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for ship (361,357,398 calculations)
+    Processing 19,497 detections in chunks of 269
+  WARNING: small-vehicle has 175,045,441 IoU calculations (15,413 dets × 11,357 GTs). This will be slow!
+  Computing AP for small-vehicle: 15,413 dets, 11,357 GTs (175,045,441 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for small-vehicle (175,045,441 calculations)
+    Processing 15,413 detections in chunks of 440
+  Computing AP for soccer-ball-field: 483 dets, 260 GTs (125,580 IoU calculations)
+  WARNING: storage-tank has 22,875,957 IoU calculations (4,547 dets × 5,031 GTs). This will be slow!
+  Computing AP for storage-tank: 4,547 dets, 5,031 GTs (22,875,957 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for storage-tank (22,875,957 calculations)
+    Processing 4,547 detections in chunks of 993
+  Computing AP for swimming-pool: 567 dets, 693 GTs (392,931 IoU calculations)
+  Computing AP for tennis-court: 1,536 dets, 1,529 GTs (2,348,544 IoU calculations)
+  mAP computation completed in 27m 51s. mAP: 0.7346
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 15.99  ↑0.61
+  Avg Detections per Image (score≥0.5): 3.49  ↑0.57
+  Max detection score: 0.864
+  Mean detection score: 0.250
+  Time per Step: 0.1905  ↑0.0014
+  Accuracy: 0.7840 (78.40%)
+  Correct Predictions: 49616/63285 (matched detections)
+  Ground Truth objects: 57768
+  GT covered pre-eval-threshold: 52490/57768
+  GT covered post-eval-threshold: 49643/57768
+  GT lost by eval-threshold filtering: 2847
+  GT cover rate pre-eval-threshold: 90.86%
+  GT cover rate post-eval-threshold: 85.94%
+  GT IoU vs raw dets (eval IoU threshold=0.50; per-GT max IoU over all dets / over same-class dets):
+    mean best IoU (any class): 0.7221, median: 0.7617
+    mean best IoU (correct class): 0.7149, median: 0.7608
+    per-class mean best IoU (raw detections):
+      | class              | gts | mean_any | mean_same | med_same |
+      |--------------------|-----:|----------:|-----------:|----------:|
+      | baseball-diamond   | 364 |   0.6914 |    0.6899 |   0.7248 |
+      | basketball-court   | 278 |   0.8069 |    0.8044 |   0.8467 |
+      | bridge             | 666 |   0.5904 |    0.5898 |   0.6344 |
+      | ground-track-field | 216 |   0.6621 |    0.4639 |   0.6600 |
+      | harbor             | 4298 |   0.6349 |    0.6312 |   0.6634 |
+      | helicopter         | 157 |   0.6936 |    0.6590 |   0.7024 |
+      | large-vehicle      | 9398 |   0.7277 |    0.6986 |   0.7525 |
+      | plane              | 4731 |   0.7886 |    0.7880 |   0.8342 |
+      | roundabout         | 256 |   0.7207 |    0.7188 |   0.7795 |
+      | ship               | 18534 |   0.7519 |    0.7509 |   0.7793 |
+      | small-vehicle      | 11357 |   0.6977 |    0.6949 |   0.7357 |
+      | soccer-ball-field  | 260 |   0.7298 |    0.7192 |   0.7679 |
+      | storage-tank       | 5031 |   0.6667 |    0.6644 |   0.7433 |
+      | swimming-pool      | 693 |   0.6080 |    0.6079 |   0.6621 |
+      | tennis-court       | 1529 |   0.8398 |    0.8345 |   0.8721 |
+      | global             | 57768 |   0.7221 |    0.7149 |   0.7608 |
+    GTs with IoU≥thresh but no same-class hit (wrong-class / misaligned): 504
+    GTs with no detection above IoU thresh (missed / poor loc): 4707
+    GTs with 0% best IoU vs any detection (no spatial overlap): 360 (0.62% of GTs)
+    histogram best IoU (any class) [0,0.25)/[0.25,0.5)/[0.5,0.75)/[0.75,1]: 1720/2987/21526/31535
+    histogram best IoU (correct class) [0,0.25)/[0.25,0.5)/[0.5,0.75)/[0.75,1]: 2319/2892/21263/31294
+  Class-agnostic duplicate rate (post score thresh; IoU≥0.50 vs a higher-score box): micro=0.33% (206/63285 boxes), macro mean over images with detections=0.60% (3074 images)
+  mAP: 0.7346  ↑0.0938 (73.46%)
+  Per-Class AP:
+    baseball-diamond: 0.7817  ↑0.0641 (78.17%)
+    basketball-court: 0.8922  ↑0.1437 (89.22%)
+    bridge: 0.5704  ↑0.1193 (57.04%)
+    ground-track-field: 0.3488  ↓0.2349 (34.88%)
+    harbor: 0.6625  ↑0.1082 (66.25%)
+    helicopter: 0.8004  ↑0.3136 (80.04%)
+    large-vehicle: 0.7884  ↑0.0297 (78.84%)
+    plane: 0.9028  ↑0.0042 (90.28%)
+    roundabout: 0.7461  ↑0.1445 (74.61%)
+    ship: 0.8869  ↑0.0926 (88.69%)
+    small-vehicle: 0.7331  ↑0.1105 (73.31%)
+    soccer-ball-field: 0.7203  ↑0.3640 (72.03%)
+    storage-tank: 0.7104  ↑0.0863 (71.04%)
+    swimming-pool: 0.5660  ↑0.0585 (56.60%)
+    tennis-court: 0.9089  ↑0.0023 (90.89%)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 1h 3m this epoch (avg 40m 22s) | ETA ~2h 41m for 4 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 9/12
+--------------------------------------------------
+Epoch 9/12 complete: 6846/6846 batches, loss: 1.1469
+  Effective LR: ref=2.500e-04 (0=2.500e-04)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 16.19  ↑0.20
+  Avg Detections per Image (score≥0.5): 3.74  ↑0.26
+  Max detection score: 0.859
+  Mean detection score: 0.303
+  Time per Step: 0.1869  ↑0.0036
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 32m 0s this epoch (avg 39m 26s) | ETA ~1h 58m for 3 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 10/12
+--------------------------------------------------
+Epoch 10/12 complete: 6846/6846 batches, loss: 1.1280
+  Effective LR: ref=2.500e-04 (0=2.500e-04)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 16.37  ↑0.18
+  Avg Detections per Image (score≥0.5): 4.02  ↑0.27
+  Max detection score: 0.865
+  Mean detection score: 0.304
+  Time per Step: 0.1841  ↑0.0028
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 32m 3s this epoch (avg 38m 42s) | ETA ~1h 17m for 2 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 11/12
+--------------------------------------------------
+Epoch 11/12 complete: 6846/6846 batches, loss: 1.1120
+  Effective LR: ref=2.500e-04 (0=2.500e-04)
+Validation complete: 1561 batches
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 16.53  ↑0.16
+  Avg Detections per Image (score≥0.5): 4.28  ↑0.26
+  Max detection score: 0.868
+  Mean detection score: 0.316
+  Time per Step: 0.1817  ↑0.0024
+  Accuracy / GT cover: (skipped — computed on mAP epochs)
+  Ground Truth objects: 57768
+  mAP: (skipped)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 32m 4s this epoch (avg 38m 6s) | ETA ~38m 6s for 1 epoch(s) left, mAP every 4 epoch(s).
+
+Epoch 12/12
+--------------------------------------------------
+Epoch 12/12 complete: 6846/6846 batches, loss: 1.0980
+  Effective LR: ref=2.500e-05 (0=2.500e-05)
+
+Computing mAP (periodic evaluation: every 4 epoch(s))...
+Validation complete: 1561 batches
+
+Computing mAP (this may take a while)...
+  Eval filters: score≥0.2000, IoU≥0.50
+  Images: 3,121
+  Total detections (post score filter): 58,068 (18.6 per image)
+  Total ground truths: 57,768 (18.5 per image)
+  Warning: Large number of detections may slow down mAP computation
+  Consider increasing evaluation.score_threshold (current: 0.2) for faster mAP matching
+  Computing AP for baseball-diamond: 415 dets, 364 GTs (151,060 IoU calculations)
+  Computing AP for bridge: 683 dets, 666 GTs (454,878 IoU calculations)
+  WARNING: harbor has 19,444,152 IoU calculations (4,524 dets × 4,298 GTs). This will be slow!
+  Computing AP for harbor: 4,524 dets, 4,298 GTs (19,444,152 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for harbor (19,444,152 calculations)
+    Processing 4,524 detections in chunks of 1,163
+  WARNING: large-vehicle has 93,651,070 IoU calculations (9,965 dets × 9,398 GTs). This will be slow!
+  Computing AP for large-vehicle: 9,965 dets, 9,398 GTs (93,651,070 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for large-vehicle (93,651,070 calculations)
+    Processing 9,965 detections in chunks of 532
+  WARNING: plane has 22,183,659 IoU calculations (4,689 dets × 4,731 GTs). This will be slow!
+  Computing AP for plane: 4,689 dets, 4,731 GTs (22,183,659 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for plane (22,183,659 calculations)
+    Processing 4,689 detections in chunks of 1,056
+  WARNING: ship has 355,167,042 IoU calculations (19,163 dets × 18,534 GTs). This will be slow!
+  Computing AP for ship: 19,163 dets, 18,534 GTs (355,167,042 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for ship (355,167,042 calculations)
+    Processing 19,163 detections in chunks of 269
+  WARNING: small-vehicle has 125,506,207 IoU calculations (11,051 dets × 11,357 GTs). This will be slow!
+  Computing AP for small-vehicle: 11,051 dets, 11,357 GTs (125,506,207 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for small-vehicle (125,506,207 calculations)
+    Processing 11,051 detections in chunks of 440
+  WARNING: storage-tank has 20,511,387 IoU calculations (4,077 dets × 5,031 GTs). This will be slow!
+  Computing AP for storage-tank: 4,077 dets, 5,031 GTs (20,511,387 IoU calculations)
+    Using chunked batch IoU computation (GPU-accelerated) for storage-tank (20,511,387 calculations)
+    Processing 4,077 detections in chunks of 993
+  Computing AP for swimming-pool: 761 dets, 693 GTs (527,373 IoU calculations)
+  Computing AP for tennis-court: 1,504 dets, 1,529 GTs (2,299,616 IoU calculations)
+  mAP computation completed in 25m 43s. mAP: 0.7837
+Validation Metrics:
+--------------------------------------------------
+  Eval thresholds (mAP / matching): score≥0.2000, IoU≥0.50
+  Avg Detections per Image (score≥0.2000): 16.70  ↑0.17
+  Avg Detections per Image (score≥0.5): 4.55  ↑0.27
+  Max detection score: 0.875
+  Mean detection score: 0.313
+  Time per Step: 0.1797  ↑0.0019
+  Accuracy: 0.8667 (86.67%)
+  Correct Predictions: 50329/58068 (matched detections)
+  Ground Truth objects: 57768
+  GT covered pre-eval-threshold: 53633/57768
+  GT covered post-eval-threshold: 50352/57768
+  GT lost by eval-threshold filtering: 3281
+  GT cover rate pre-eval-threshold: 92.84%
+  GT cover rate post-eval-threshold: 87.16%
+  GT IoU vs raw dets (eval IoU threshold=0.50; per-GT max IoU over all dets / over same-class dets):
+    mean best IoU (any class): 0.7541, median: 0.7947
+    mean best IoU (correct class): 0.7493, median: 0.7940
+    per-class mean best IoU (raw detections):
+      | class              | gts | mean_any | mean_same | med_same |
+      |--------------------|-----:|----------:|-----------:|----------:|
+      | baseball-diamond   | 364 |   0.7424 |    0.7423 |   0.7603 |
+      | basketball-court   | 278 |   0.8470 |    0.8467 |   0.8815 |
+      | bridge             | 666 |   0.6397 |    0.6381 |   0.6852 |
+      | ground-track-field | 216 |   0.7082 |    0.6243 |   0.7779 |
+      | harbor             | 4298 |   0.6840 |    0.6811 |   0.7164 |
+      | helicopter         | 157 |   0.7277 |    0.6957 |   0.7472 |
+      | large-vehicle      | 9398 |   0.7803 |    0.7693 |   0.8064 |
+      | plane              | 4731 |   0.8175 |    0.8173 |   0.8589 |
+      | roundabout         | 256 |   0.7505 |    0.7505 |   0.8258 |
+      | ship               | 18534 |   0.7777 |    0.7768 |   0.8034 |
+      | small-vehicle      | 11357 |   0.7171 |    0.7081 |   0.7574 |
+      | soccer-ball-field  | 260 |   0.7709 |    0.7496 |   0.8348 |
+      | storage-tank       | 5031 |   0.6913 |    0.6907 |   0.7876 |
+      | swimming-pool      | 693 |   0.6324 |    0.6324 |   0.6820 |
+      | tennis-court       | 1529 |   0.8874 |    0.8822 |   0.9158 |
+      | global             | 57768 |   0.7541 |    0.7493 |   0.7940 |
+    GTs with IoU≥thresh but no same-class hit (wrong-class / misaligned): 343
+    GTs with no detection above IoU thresh (missed / poor loc): 3784
+    GTs with 0% best IoU vs any detection (no spatial overlap): 440 (0.76% of GTs)
+    histogram best IoU (any class) [0,0.25)/[0.25,0.5)/[0.5,0.75)/[0.75,1]: 1661/2123/15513/38471
+    histogram best IoU (correct class) [0,0.25)/[0.25,0.5)/[0.5,0.75)/[0.75,1]: 2042/2085/15385/38256
+  Class-agnostic duplicate rate (post score thresh; IoU≥0.50 vs a higher-score box): micro=0.25% (148/58068 boxes), macro mean over images with detections=0.48% (3078 images)
+  mAP: 0.7837  ↑0.0492 (78.37%)
+  Per-Class AP:
+    baseball-diamond: 0.8692  ↑0.0876 (86.92%)
+    basketball-court: 0.9010  ↑0.0088 (90.10%)
+    bridge: 0.6673  ↑0.0970 (66.73%)
+    ground-track-field: 0.5353  ↑0.1865 (53.53%)
+    harbor: 0.7623  ↑0.0998 (76.23%)
+    helicopter: 0.8111  ↑0.0107 (81.11%)
+    large-vehicle: 0.8805  ↑0.0921 (88.05%)
+    plane: 0.9061  ↑0.0034 (90.61%)
+    roundabout: 0.7825  ↑0.0364 (78.25%)
+    ship: 0.8936  ↑0.0067 (89.36%)
+    small-vehicle: 0.6904  ↓0.0427 (69.04%)
+    soccer-ball-field: 0.7884  ↑0.0681 (78.84%)
+    storage-tank: 0.7178  ↑0.0074 (71.78%)
+    swimming-pool: 0.6418  ↑0.0758 (64.18%)
+    tennis-court: 0.9088  ↓0.0001 (90.88%)
+  Ground Truth Classes: 15 classes
+  Predicted Classes: 15 classes
+  Timing: 1h 0m this epoch (avg 39m 57s) | Training loop finished (no final mAP).
+
+================================================================================
+Training timing summary
+================================================================================
+  Started:   2026-09-08T02:36:09+00:00
+  Finished:  2026-09-08T10:35:40+00:00
+  Total wall: 7h 59m (28771.2 s)
+  Epochs:    12 completed (mean 39m 57s, min 32m 0s, max 1h 3m)
+================================================================================
+
+================================================================================
+Training completed successfully!
+================================================================================
+Experiment directory: /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531
+  Checkpoints saved to: /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531/checkpoints
+  TensorBoard logs saved to: /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531
+  Config saved to: /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531/config.json
+
+View TensorBoard with:
+  tensorboard --logdir /home/jeffaudi/oriented-det/runs/rotated_fcos
+  tensorboard --logdir /home/jeffaudi/oriented-det/runs/rotated_fcos/20260908-023531

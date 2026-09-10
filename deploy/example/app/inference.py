@@ -335,7 +335,7 @@ class InferenceEngine:
                 sh,
             )
         else:
-            win_margin = self._overlap_pixels / 2.0
+            win_margin = 0.0
             logger.info(
                 "Inference path: sliding-window tiling (image %dx%d > canvas %dx%d, "
                 "overlap_pixels=%s, per-window centroid margin=%s px)",
@@ -358,7 +358,7 @@ class InferenceEngine:
             overlap_pixels=self._overlap_pixels,
             per_class_score_threshold=self._per_class_threshold,
             class_names=self._class_names,
-            window_margin_pixels=self._overlap_pixels / 2.0,
+            window_margin_pixels=0.0,
         )
         detections = apply_nms_to_detections(detections, iou_threshold=self._nms_threshold)
 

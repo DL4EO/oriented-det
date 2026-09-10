@@ -63,11 +63,12 @@ Benchmark vs Shapely: ``python tools/measure_sampled_riou_error.py`` (see [tools
 
 ### Geometry-based rIoU sampling — rationale & metrics
 
-Training **anchor/proposal matching** uses GPU sampling IoU (`oriented_box_iou_gpu`).
-That path is **approximate**; **mAP and optional final NMS** use **exact Shapely polygon IoU**
-on CPU. The geometry defaults below were chosen so matching IoU is close enough to
-polygon IoU across DOTA-like scales without paying a fixed 10×10 (100-point) grid on
-every tiny anchor.
+Training **two-stage** anchor/proposal matching uses GPU sampling IoU (`oriented_box_iou_gpu`).
+**Rotated RetinaNet** assignment uses `models/retinanet_assign.py` instead (AABB prune +
+fixed 100-sample pairwise IoU). Both paths are **approximate**; **mAP and optional final NMS**
+use **exact Shapely polygon IoU** on CPU. The geometry defaults below apply to
+`oriented_box_iou_gpu` so two-stage matching IoU is close enough to polygon IoU across
+DOTA-like scales without paying a fixed 10×10 (100-point) grid on every tiny anchor.
 
 #### Problem
 

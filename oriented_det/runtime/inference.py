@@ -125,6 +125,33 @@ def uses_native_sliding_window(
     return int(image_height) > slice_h or int(image_width) > slice_w
 
 
+def _sliding_window_axis_origins(length: int, slice_size: int, stride: int) -> List[int]:
+    """Top-left origins along one axis; last window flushes to the image edge.
+
+    Same convention as ``tools/tile_dota.py`` (``no_no_data=True``): when the
+    image is larger than the slice, the last origin is ``length - slice_size``
+    so the window is a full canvas of real pixels (no right/bottom zero-pad).
+    Images that fit in one slice return ``[0]``.
+    """
+    if length <= slice_size:
+        return [0]
+    origins: List[int] = []
+    pos = 0
+    while pos < length:
+        origins.append(pos)
+        pos += stride
+        if pos >= length:
+            break
+    origins[-1] = max(0, length - slice_size)
+    out: List[int] = []
+    seen = set()
+    for origin in origins:
+        if origin not in seen:
+            out.append(origin)
+            seen.add(origin)
+    return out
+
+
 def _sliding_window_grid(
     image_height: int,
     image_width: int,
@@ -140,6 +167,10 @@ def _sliding_window_grid(
     - **Pixel mode:** ``overlap_pixels`` (used for both axes, clamped to ``[0, min(slice)-1]``).
       If ``overlap_ratio is None`` and ``overlap_pixels is None``, **200** px is used (DOTA tile default).
     If ``overlap_ratio is not None``, it takes precedence over ``overlap_pixels``.
+
+    The last row/column origin is flushed to the image edge (full slice of real
+    pixels), matching ``tile_dota.py``. Zero-pad remains only when an image side
+    is smaller than the slice.
     """
     if image_height <= slice_h and image_width <= slice_w:
         return [(0, 0)]
@@ -159,23 +190,9 @@ def _sliding_window_grid(
         overlap_h, overlap_w = float(oh), float(ow)
     stride_y = max(1, int(round(slice_h - overlap_h)))
     stride_x = max(1, int(round(slice_w - overlap_w)))
-    positions = []
-    y0 = 0
-    while y0 < image_height:
-        x0 = 0
-        while x0 < image_width:
-            positions.append((x0, y0))
-            if image_width <= slice_w:
-                break
-            x0 += stride_x
-            if x0 >= image_width:
-                break
-        if image_height <= slice_h:
-            break
-        y0 += stride_y
-        if y0 >= image_height:
-            break
-    return positions
+    xs = _sliding_window_axis_origins(image_width, slice_w, stride_x)
+    ys = _sliding_window_axis_origins(image_height, slice_h, stride_y)
+    return [(x0, y0) for y0 in ys for x0 in xs]
 
 
 def resolve_sliding_window_margin_pixels(
@@ -185,27 +202,16 @@ def resolve_sliding_window_margin_pixels(
     slice_h: int = 1024,
     slice_w: int = 1024,
 ) -> Tuple[float, float]:
-    """Per-axis interior margin for sliding-window merges (default: half of tile overlap).
+    """Per-axis interior margin for sliding-window merges (default: **0**).
 
-    When ``window_margin_pixels`` is set, the same margin applies on both axes.
-    Otherwise derives from ``overlap_ratio`` or ``overlap_pixels`` (same convention as
-    :func:`_sliding_window_grid`). Pass ``0`` or set margin to ``0`` to disable.
+    Default **0** keeps overlap copies and relies on NMS after the stitch.
+    Pass a positive ``window_margin_pixels`` to drop centroids in the overlap
+    band (opt-in). ``overlap_ratio`` / ``overlap_pixels`` / slice size are unused
+    for the default; they remain in the signature for existing callers.
     """
-    if window_margin_pixels is not None:
-        m = max(0.0, float(window_margin_pixels))
-        return m, m
-    if overlap_ratio is not None:
-        oh = float(overlap_ratio) * slice_h
-        ow = float(overlap_ratio) * slice_w
-        return max(0.0, oh / 2.0), max(0.0, ow / 2.0)
-    op = 200 if overlap_pixels is None else int(overlap_pixels)
-    if op < 0:
-        raise ValueError("overlap_pixels must be >= 0")
-    max_oh = max(0, slice_h - 1)
-    max_ow = max(0, slice_w - 1)
-    oh = min(op, max_oh)
-    ow = min(op, max_ow)
-    return oh / 2.0, ow / 2.0
+    del overlap_ratio, overlap_pixels, slice_h, slice_w
+    m = 0.0 if window_margin_pixels is None else max(0.0, float(window_margin_pixels))
+    return m, m
 
 
 def _centroid_in_sliding_window_interior(
@@ -266,6 +272,14 @@ def count_sliding_window_positions(
 
 # Cached result of OOM-sweep for sliding-window micro-batch size (per model + canvas + device).
 _WINDOW_BATCH_SIZE_CACHE: Dict[Tuple, int] = {}
+DEFAULT_WINDOW_BATCH_SIZE_CPU = 4
+DEFAULT_WINDOW_BATCH_SIZE_GPU = 8
+
+
+def _default_window_batch_size(device: str) -> int:
+    if torch.device(device).type == "cpu":
+        return DEFAULT_WINDOW_BATCH_SIZE_CPU
+    return DEFAULT_WINDOW_BATCH_SIZE_GPU
 
 
 def _probe_max_window_batch_size(
@@ -356,9 +370,10 @@ def resolve_window_batch_size(
     """Resolve sliding-window micro-batch: how many windows per model forward.
 
     * ``override`` (e.g. CLI ``--window-batch-size``) if a positive int wins.
-    * **Env** ``ORIENTED_DET_WINDOW_BATCH_SIZE``: a **positive int** = fixed; ``auto`` / **unset** =
-      binary-search on **CUDA** / **MPS** (cached; one probe per process); **CPU** uses 4.
-    * Old default 8: set ``ORIENTED_DET_WINDOW_BATCH_SIZE=8`` explicitly if needed.
+    * **Env** ``ORIENTED_DET_WINDOW_BATCH_SIZE``: a **positive int** = fixed;
+      ``auto`` / ``probe`` = CUDA/MPS binary search (cached; one probe per process).
+    * **Default** (unset): **8** on CUDA/MPS, **4** on CPU. Empty-canvas probing
+      overestimates two-stage VRAM (RPN/ROI on dense tiles) and can OOM mid-run.
     """
     if override is not None and int(override) > 0:
         return int(override)
@@ -371,6 +386,9 @@ def resolve_window_batch_size(
                 return v
         except ValueError:
             pass
+    want_probe = t in ("auto", "probe")
+    if not want_probe:
+        return _default_window_batch_size(device)
     slice_h, slice_w = get_model_size(preprocessing)
     key = (
         id(model),
@@ -392,7 +410,7 @@ def resolve_window_batch_size(
     if torch.device(device).type in ("cuda", "mps") and n >= 1:
         print(
             f"[inference] ORIENTED_DET window batch (auto) = {n} "
-            f"(override: env ORIENTED_DET_WINDOW_BATCH_SIZE, CLI --window-batch-size; use e.g. 8 to fix a value)",
+            f"(override: env ORIENTED_DET_WINDOW_BATCH_SIZE, CLI --window-batch-size)",
             flush=True,
         )
     return n
@@ -597,19 +615,22 @@ def run_inference_sliding_window(
 ):
     """Run inference via sliding windows (or one padded canvas if the image fits in one window).
 
-    Pads partial windows at image edges with zeros; images smaller than ``(slice_h, slice_w)``
-    use a single padded canvas (no resize stretch). Returns detections in original image coords.
+    Last row/column windows flush to the image edge (full slice of real pixels,
+    same as ``tile_dota.py``). Zero-pad remains when an image side is smaller than
+    the slice. Returns detections in original image coords.
 
     Overlap: ``overlap_ratio`` in ``[0,1)`` if set; else ``overlap_pixels`` per axis (default 200),
     same convention as :func:`_sliding_window_grid`.
 
-    Before merging windows, detections whose centroid falls in the overlap band of a window
-    are dropped on interior sides (margin defaults to half of overlap per axis; see
-    :func:`resolve_sliding_window_margin_pixels`). Sides that touch the full-image border
-    keep the margin band so edge objects are not removed.
+    Before merging windows, detections whose centroid falls in the overlap band of a
+    window can be dropped on interior sides (see
+    :func:`resolve_sliding_window_margin_pixels`). Default margin is **0** (keep overlap
+    copies, then NMS). Pass a positive ``window_margin_pixels`` to drop the band.
+    Sides that touch the full-image border skip the margin so edge objects are kept.
 
     ``window_batch_size``: if a positive int, use it; if ``None``, use
-    :func:`resolve_window_batch_size` (env / auto on GPU).
+    :func:`resolve_window_batch_size` (CLI/env, else **8** on GPU / **4** on CPU;
+    set ``ORIENTED_DET_WINDOW_BATCH_SIZE=auto`` to probe).
 
     ``image``: PIL Image (RGB) or numpy array (H, W, 3).
     """
@@ -740,7 +761,7 @@ def run_inference_auto(
     Raw output is only available for single-image path (non-sliding).
 
     ``window_batch_size``: if a positive int, use for sliding micro-batch; if ``None``,
-    :func:`resolve_window_batch_size` (env or auto on GPU) applies.
+    :func:`resolve_window_batch_size` (CLI/env, else 8 on GPU / 4 on CPU) applies.
     """
     if image is None and image_path is None:
         raise ValueError("Provide image_path or image")
@@ -1208,7 +1229,7 @@ def main():
         default=None,
         help=(
             "Sliding-window micro-batch (windows per forward). If omitted, uses "
-            "ORIENTED_DET_WINDOW_BATCH_SIZE (int) or auto on CUDA/MPS (binary search; cached per run)."
+            "ORIENTED_DET_WINDOW_BATCH_SIZE or 8 on GPU / 4 on CPU. Set the env to auto to probe."
         ),
     )
 

@@ -7,7 +7,11 @@ from pathlib import Path
 import torch
 
 from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedRetinaNet, RotatedFCOS
-from oriented_det.train.config import TrainingExperimentConfig, apply_inference_config_to_model
+from oriented_det.train.config import (
+    TrainingExperimentConfig,
+    apply_inference_config_to_model,
+    anchor_angles_deg_to_rad,
+)
 
 
 def _config_matches_source_recipe(config_path: str | Path, source_recipe: str) -> bool:
@@ -344,6 +348,9 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             anchor_ratios=m.anchor_ratios if m else None,
             octave_base_scale=getattr(m, "anchor_octave_base_scale", None) if m else None,
             scales_per_octave=getattr(m, "anchor_scales_per_octave", None) if m else None,
+            anchor_angles=anchor_angles_deg_to_rad(
+                getattr(m, "anchor_angles", None) if m else None
+            ),
             stacked_convs=getattr(m, "retinanet_stacked_convs", 4) if m else 4,
             positive_iou_threshold=getattr(m, "rpn_positive_iou_threshold", 0.5) if m else 0.5,
             negative_iou_threshold=getattr(m, "rpn_negative_iou_threshold", 0.4) if m else 0.4,

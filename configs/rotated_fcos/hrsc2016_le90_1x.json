@@ -86,9 +86,9 @@
     "max_detections_per_image": 2000
   },
   "production": {
-    "score_threshold": 0.05,
+    "score_threshold": 0.2,
     "inference_pre_nms_score_threshold": 0.05,
-    "final_nms_iou_threshold": 0.3,
+    "final_nms_iou_threshold": 0.1,
     "max_detections_per_image": 2000,
     "overlap_pixels": 0,
     "ignore_margin_pixels": 0,

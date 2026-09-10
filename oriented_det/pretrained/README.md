@@ -10,16 +10,19 @@ Manifest-driven downloads from [Hugging Face Hub](https://huggingface.co/docs/hu
 
 Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 
+- `oriented_rcnn_dota_le90_1x`
 - `oriented_rcnn_dota_le90_3x`
 - `oriented_rcnn_hrsc2016_le90_3x`
+- `rotated_faster_rcnn_dota_le90_1x`
 - `rotated_faster_rcnn_dota_le90_3x`
 - `rotated_faster_rcnn_hrsc2016_le90_3x`
 - `rotated_retinanet_dota_le90_3x`
+- `rotated_fcos_dota_le90_1x`
 - `rotated_fcos_dota_le90_3x`
 - `rotated_fcos_hrsc2016_le90_3x`
 
 On-disk / Hub filenames include a **SHA-256[:8]** suffix (see `tools/publish_checkpoint.py`).
-Each published weight can have sidecar artifacts beside it in `pretrained/`: `<weight-stem>.json` for the exact final run config and `<weight-stem>.log` for the training log. DOTA 3× sidecars set `production.score_threshold` to eval-val F1 − **0.05** (Oriented R-CNN **0.7**, Faster R-CNN **0.6**, RetinaNet **0.45**, FCOS **0.2**). HRSC 3× sidecars use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**).
+Each published weight can have sidecar artifacts beside it in `pretrained/`: `<weight-stem>.json` for the exact final run config and `<weight-stem>.log` for the training log. DOTA Hub sidecars set `production.score_threshold` to eval-val F1 − **0.05** (Oriented R-CNN 1× **0.55**, 3× **0.7**, Faster R-CNN **0.6**, RetinaNet **0.45**, FCOS **0.2**). HRSC sidecars use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). Recipes and Hub sidecars use **`production.final_nms_iou_threshold: 0.1`**.
 
 ## Usage
 
@@ -32,6 +35,8 @@ path = ensure_checkpoint("hf://oriented_rcnn_dota_le90_3x")
 ```bash
 odet pretrained download oriented_rcnn_dota_le90_3x
 odet pretrained list
+odet dota-submit --checkpoint hf://oriented_rcnn_dota_le90_3x \
+  --test-dir /path/to/DOTA-v1.0/test --output-dir work_dirs/Task1
 ```
 
 Training (`tools/train.py`) and inference call `ensure_checkpoint` when `checkpoint.load_from_checkpoint` points at a registered asset that is missing locally.

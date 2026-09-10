@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Union, Tuple
 import json
+import math
 import warnings
 
 from oriented_det.utils.config import MUTED_KEY_PREFIX, load_config
@@ -41,6 +42,18 @@ def _strict_section(
             f"Valid keys: {sorted(allowed)}"
         )
     return {k: active_raw[k] for k in allowed if k in active_raw}
+
+
+def anchor_angles_deg_to_rad(
+    angles_deg: Optional[List[float]],
+) -> Optional[List[float]]:
+    """JSON ``model.anchor_angles`` is degrees; model constructors take radians.
+
+    ``None`` or empty keeps the constructor default (horizontal ``[0.0]``).
+    """
+    if angles_deg is None or len(angles_deg) == 0:
+        return None
+    return [math.radians(float(a)) for a in angles_deg]
 
 
 def _normalize_legacy_loss_type(config_dict: Dict[str, Any]) -> None:
@@ -192,7 +205,7 @@ def _normalize_legacy_cosine_t_max(config_dict: Dict[str, Any]) -> None:
 class DatasetConfig:
     """Dataset configuration."""
     data_root: Path
-    format: str = "dota"  # Options: "dota", "airbus_playground", "hrsc2016"
+    format: str = "dota"  # Options: "dota", "airbus_playground", "hrsc2016", "fair1m"
     train_tiles_dir: Optional[Path] = None
     val_tiles_dir: Optional[Path] = None
     # Optional list of tile roots (MMRotate trainval-style union without on-disk merge).
@@ -230,8 +243,9 @@ class DatasetConfig:
     # instead of the first N in dataset order (see capped_subset_indices in train.utils).
     max_samples_shuffle_seed: Optional[int] = None
     allowed_classes: Optional[List[str]] = None
-    # HRSC2016 / FAIR1M ImageSets name used for the training-loop train/val roles.
+    # HRSC2016 / FAIR1M split name used for the training-loop train/val roles.
     # HRSC defaults (when null): train → trainval, val → test (MMRotate).
+    # FAIR1M defaults (when null): train → train, val → val.
     train_split: Optional[str] = None
     val_split: Optional[str] = None
     # Optional CSV from tools/save_predictions (--save-tile-metrics-csv); join on image_id / stem
@@ -335,6 +349,8 @@ class ModelConfig:
     # Anchors
     anchor_scales: List[int] = field(default_factory=lambda: [8, 16, 32])
     anchor_ratios: List[float] = field(default_factory=lambda: [0.5, 1.0, 2.0])
+    # Degrees. ``None`` / empty → model default (horizontal ``[0]`` rad). Constructors take radians.
+    anchor_angles: Optional[List[float]] = None
     anchor_octave_base_scale: Optional[float] = None
     anchor_scales_per_octave: Optional[int] = None
     # Box regression targets [dx, dy, dw, dh, dangle]
@@ -1077,6 +1093,11 @@ class TrainingExperimentConfig:
             elif self.dataset.format == "hrsc2016":
                 print(f"  Train Split (ImageSets): {self.dataset.train_split or 'trainval'}")
                 print(f"  Val Split (ImageSets): {self.dataset.val_split or 'test'}")
+            elif self.dataset.format == "fair1m":
+                print(f"  Train Split: {self.dataset.train_split or 'train'}")
+                print(f"  Val Split: {self.dataset.val_split or 'val'}")
+                if self.dataset.map_labels:
+                    print(f"  Map Labels: {len(self.dataset.map_labels)} key(s)")
             else:
                 if self.dataset.train_tiles_dirs:
                     print(f"  Train Tiles: {self.dataset.train_tiles_dirs}")

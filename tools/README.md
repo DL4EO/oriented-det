@@ -24,6 +24,7 @@ make train-multi-gpu  # Multi-GPU training (same CONFIG)
 make eval-val           # `make preds` then `make metrics` on newest `predictions/<ts>/`
 make preds              # Val inference → `predictions/<ts>/` (experiment `production.*`; no GPU mAP)
 make metrics            # Offline mAP/PR from latest `predictions/*/` or `METRICS_PRED_DIR=...` (defaults from JSON metadata)
+make dota-submit        # Task 1 zip: FROM_JSON=, CHECKPOINT=hf://<slug>, or EXPERIMENT= + TEST_DIR= (OUT= required)
 make viewer             # Gradio: browse latest tiled predictions under `predictions/` (run `make preds` first)
 make demo               # image_demo on all top-level images in demo/ (latest exp; see demo/README.md)
 make free-gpu         # Kill GPU processes to free memory
@@ -60,7 +61,7 @@ python tools/image_demo.py demo/demo.jpg config.json checkpoint.pth \
     --window-batch-size 8 --json-per-image --json-batch demo/out/json
 ```
 
-**Arguments:** `img` (file or directory), then either `checkpoint` alone (registered pretrained checkpoint with sidecar config) or `config` + `checkpoint`. Optional: `--out-file`, `--out-dir`, `--device`, `--score-thr`, `--nms-thr`, `--classes`, `--zoom`, `--overlap-pixels` (default from `production.overlap_pixels`, else 200), `--ignore-margin-pixels` (default from `production.ignore_margin_pixels`, else dataset overlap/2), `--overlap-ratio` (pad/tile path only; ratio overrides pixels), `--window-batch-size` (fixed sliding-window micro-batch; skips auto GPU probing), `--json-per-image` (rich JSON next to each visualization: rbox, polygon, run metadata), or `--json-batch [PATH]` (compact batch JSON for pipelines: per-image files plus combined `detections.json` when `img` is a directory).
+**Arguments:** `img` (file or directory), then either `checkpoint` alone (registered pretrained checkpoint with sidecar config) or `config` + `checkpoint`. Optional: `--out-file`, `--out-dir`, `--device`, `--score-thr`, `--nms-thr`, `--classes`, `--zoom`, `--overlap-pixels` (default from `production.overlap_pixels`, else 200), `--ignore-margin-pixels` (default **0**, keep overlap copies then NMS; else `production.ignore_margin_pixels`), `--overlap-ratio` (pad/tile path only; ratio overrides pixels), `--window-batch-size` (windows per forward; default 8 on GPU), `--json-per-image` (rich JSON next to each visualization: rbox, polygon, run metadata), or `--json-batch [PATH]` (compact batch JSON for pipelines: per-image files plus combined `detections.json` when `img` is a directory).
 
 Demo images: place test images in `demo/` (see `demo/README.md` for a sample image or using your own).
 
@@ -253,6 +254,14 @@ dota_root/
 
 See `tools/tile_dota.py` to create tiles from large DOTA images.
 
+Hub zoo (no `runs/` directory):
+
+```bash
+odet preds --checkpoint hf://oriented_rcnn_dota_le90_3x --data-split val --no-diagnostics
+odet preds --checkpoint hf://oriented_rcnn_dota_le90_3x --data-split test \
+  --test-dir /path/to/DOTA-v1.0/test --no-diagnostics
+```
+
 ### `oriented_det.runtime.inference`
 
 Run inference with trained models.
@@ -282,8 +291,7 @@ python -m oriented_det.runtime.inference image.jpg \
 # With config: pad/tile when image size ≠ model input (e.g. large 2048×2048 or small 512×512 vs 1024×1024)
 python -m oriented_det.runtime.inference large_image.png --checkpoint best.pth --config runs/.../config.json --output out.png
 # Optional: --overlap-pixels 200 (default) or --overlap-ratio 0.2
-# Speed: use batched sliding-window inference (more GPU utilization)
-ORIENTED_DET_WINDOW_BATCH_SIZE=16 python -m oriented_det.runtime.inference large_image.png --checkpoint best.pth --config runs/.../config.json --output out.png
+# Window batch default is 8; override with --window-batch-size or ORIENTED_DET_WINDOW_BATCH_SIZE
 ```
 
 **Features:**
@@ -293,14 +301,14 @@ ORIENTED_DET_WINDOW_BATCH_SIZE=16 python -m oriented_det.runtime.inference large
 - Apply NMS to filter detections
 - Visualize results with labels
 - Print detection summaries
-- **Padded-canvas / sliding-window inference:** With `--config`, inference **always** uses pad/tile windows to the model input (`preprocessing.target_size`): zero-pad small images, tile large ones; no full-image resize and no rescaling of box coordinates afterward. Before merge, each window drops detections whose centroid lies in the overlap band (**margin = overlap / 2** per axis; interior window sides only — full-image borders are exempt). Detections are merged and NMS runs in original image coordinates. Use **`--overlap-pixels`** (default **200** per axis, aligned with `tile_dota.py`) or **`--overlap-ratio`** in `[0,1)` (if set, overrides pixel overlap) when multiple tiles are used.
-- **Sliding-window batching:** Sliding-window inference batches multiple windows per forward. **Default: auto** on CUDA/MPS (one-time binary search for the largest safe batch; cached) unless you set a positive int via `--window-batch-size` or `ORIENTED_DET_WINDOW_BATCH_SIZE=8` (or `auto` explicitly). CPU defaults to 4.
+- **Padded-canvas / sliding-window inference:** With `--config`, inference **always** uses pad/tile windows to the model input (`preprocessing.target_size`): zero-pad small images, tile large ones (last row/column **flush to the image edge**, same as `tile_dota.py`); no full-image resize and no rescaling of box coordinates afterward. Default per-window margin is **0** (keep overlap copies, then NMS). Pass **`--ignore-margin-pixels`** to drop detections whose centroid lies in the overlap band (interior window sides only — full-image borders are exempt). Detections are merged and NMS runs in original image coordinates. Use **`--overlap-pixels`** (default **200** per axis, aligned with `tile_dota.py`) or **`--overlap-ratio`** in `[0,1)` (if set, overrides pixel overlap) when multiple tiles are used.
+- **Sliding-window batching:** Sliding-window inference batches multiple windows per forward. **Default: 8** on CUDA/MPS and **4** on CPU. Override with `--window-batch-size` or `ORIENTED_DET_WINDOW_BATCH_SIZE=16`. Set `ORIENTED_DET_WINDOW_BATCH_SIZE=auto` to probe the largest empty-canvas batch (cached). That probe overestimates two-stage VRAM on dense tiles and can OOM mid-run.
 
 ### `save_predictions.py`
 
-Run inference on a validation (or train) split, save predictions to JSON, and optionally compute mAP in the same process (`--no-diagnostics` skips GPU-side metrics). Use **`make eval-val`** for inference plus offline metrics in one step, or after **`make preds`**, run **`make metrics`** (or `python tools/save_predictions.py --metrics-from-json path/to/dir`) to recompute mAP/PR with different `--iou-threshold`, `--metrics-margin-pixels`, PR sweep steps, etc., **without** re-running inference (metrics rebuild GT/det maps from `predictions.json`). Uses `oriented_det.runtime.inference.run_inference_auto`: **`resize_mode: pad`** (HRSC2016) always runs one training-style whole-image forward (scale long edge to `target_size`, then pad). **`fixed` / `crop`** (DOTA) use a single training-style forward when the image fits the canvas, and padded sliding windows when it is larger. Supports **override of the validation folder** for non-tiled DOTA val (e.g. to compare with literature mAP on full-size images). Model construction reads `model.fpn_returned_layers`, `model.fpn_strides`, and `model.trainable_layers` / `frozen_stages` from the experiment `config.json` so the backbone matches training (required when FPN does not use all ResNet stages, e.g. `[1,2,3]` without C5).
+Run inference on a validation (or train) split, save predictions to JSON, and optionally compute mAP in the same process (`--no-diagnostics` skips GPU-side metrics). Use **`make eval-val`** for inference plus offline metrics in one step, or after **`make preds`**, run **`make metrics`** (or `python tools/save_predictions.py --metrics-from-json path/to/dir`) to recompute mAP/PR with different `--iou-threshold`, `--metrics-margin-pixels`, PR sweep steps, etc., **without** re-running inference (metrics rebuild GT/det maps from `predictions.json`). Uses `oriented_det.runtime.inference.run_inference_auto`: **`resize_mode: pad`** (HRSC2016) always runs one training-style whole-image forward (scale long edge to `target_size`, then pad). **`fixed` / `crop`** (DOTA) use a single training-style forward when the image fits the canvas, and sliding windows when it is larger (last tiles flush to the image edge). **`--window-margin-pixels`** default **0** (keep overlap copies, then NMS). Supports **override of the validation folder** for non-tiled DOTA val (e.g. to compare with literature mAP on full-size images). Model construction reads `model.fpn_returned_layers`, `model.fpn_strides`, and `model.trainable_layers` / `frozen_stages` from the experiment `config.json` so the backbone matches training (required when FPN does not use all ResNet stages, e.g. `[1,2,3]` without C5).
 
-**GPU / cuDNN:** If every val image fits in one model tile, the script **does not** run the sliding-window batch probe (inference is already one forward per image). When some images need multiple tiles, the one-time probe may print `Plan failed with an OutOfMemoryError` **warnings** from cuDNN v8 trying convolution algorithms—that is usually the planner discarding a bad plan, not a failed run. If inference stalls or fragments memory after a probe, set `ORIENTED_DET_CUDNN_BENCHMARK=0` or a fixed `ORIENTED_DET_WINDOW_BATCH_SIZE` (see `oriented_det/runtime/inference.py`).
+**GPU / cuDNN:** If every val image fits in one model tile, inference is already one forward per image (no window batching). If a large raster still OOMs, lower `ORIENTED_DET_WINDOW_BATCH_SIZE` (see `oriented_det/runtime/inference.py`). `ORIENTED_DET_CUDNN_BENCHMARK=0` can help if cuDNN algorithm search fragments memory.
 
 **Label / image coordinates:** For layouts with `images/` and `labels/` (or `labelTxt/`), each `basename.txt` must describe objects in **the same coordinate system** as `basename.jpg` (or `.png`)—pixel coords on that raster, top-left origin. The tool does not rescale or reproject labels to match the image.
 
@@ -318,7 +326,7 @@ python tools/save_predictions.py --config runs/.../config.json --val-dir /path/t
 python tools/save_predictions.py --config runs/.../config.json --val-dir /path/to/non-tiled/val --overlap-ratio 0.25
 ```
 
-**Options:** `--val-dir` overrides `config.dataset.val_tiles_dir` so you can point to a non-tiled validation folder (e.g. DOTA full-size images in `images/` and `labels/` or `labelTxt/`) while the config still references the tiled val. **`--no-diagnostics`** skips mAP/PR/analysis (inference-only JSON). **`--metrics-from-json PATH`** loads an existing `predictions.json` (PATH may be the file or its directory), recomputes metrics from stored boxes/scores/GTs, writes `analysis_*.json` / plots beside it, and refreshes `metadata.diagnostics`. Sliding-window overlap: **`--overlap-pixels`** (omit to use `production.overlap_pixels` from the experiment config when set, else **200**) or **`--overlap-ratio`** in `[0,1)` (if set, overrides pixels). Metrics edge margin: `--metrics-margin-pixels` discards GT/detections whose centroids fall in the outer overlap band (`[0, margin)` or `(W-margin, W]` per axis); keeps the tile interior `[margin, W-margin]` for **metrics only** (mAP/PR/per-image metrics), same rule as deploy `MARGIN`; when omitted, uses **`production.ignore_margin_pixels`** from the experiment config when set, else **overlap/2** (or the value stored in metadata when re-running metrics unless overridden on the CLI). If `--nms-threshold` is omitted, the tool uses `config.model.final_nms_iou_threshold` (fallback: 0.5; legacy `nms_threshold` is migrated on load). If `--iou-threshold` is omitted, mAP / PR matching uses **`effective_eval_metric_thresholds`** so **`production.iou_threshold`** overrides **`evaluation.iou_threshold`** when set, same merge order as validation during training—this is **rotated GT–det IoU**, not NMS IoU. If `--score-threshold` is omitted, the post-NMS filter for `run_inference_auto` and diagnostics uses **`resolve_preds_score_threshold`** (CLI → **`evaluation.preds_score_threshold`** → **0.05**), not `production.score_threshold` or train-val `evaluation.score_threshold`. Logs print **`mAP50`-style** names (e.g. `Final mAP50: …`) and spell out NMS IoU separately so it is not confused with DOTA’s 0.1 NMS.
+**Options:** `--val-dir` overrides `config.dataset.val_tiles_dir` so you can point to a non-tiled validation folder (e.g. DOTA full-size images in `images/` and `labels/` or `labelTxt/`) while the config still references the tiled val. **`--data-split test`** lists **unlabeled** official test rasters (`data_root/test` or **`--test-dir`**: `test/` with `images/` or a flat png/jpg folder). Missing labels yield empty GT (use `--no-diagnostics`). **`--no-diagnostics`** skips mAP/PR/analysis (inference-only JSON). **`--metrics-from-json PATH`** loads an existing `predictions.json` (PATH may be the file or its directory), recomputes metrics from stored boxes/scores/GTs, writes `analysis_*.json` / plots beside it, and refreshes `metadata.diagnostics`. Sliding-window overlap: **`--overlap-pixels`** (omit to use `production.overlap_pixels` from the experiment config when set, else **200**) or **`--overlap-ratio`** in `[0,1)` (if set, overrides pixels). Last tiles flush to the image edge. Per-window centroid margin: **`--window-margin-pixels`** (default **0**, keep overlap copies then NMS). Metrics edge margin: `--metrics-margin-pixels` discards GT/detections whose centroids fall in the outer overlap band (`[0, margin)` or `(W-margin, W]` per axis); keeps the tile interior `[margin, W-margin]` for **metrics only** (mAP/PR/per-image metrics), same rule as deploy `MARGIN`; when omitted, uses **`production.ignore_margin_pixels`** from the experiment config when set, else **overlap/2** (or the value stored in metadata when re-running metrics unless overridden on the CLI). If `--nms-threshold` is omitted, the tool uses `config.model.final_nms_iou_threshold` (fallback: 0.5; legacy `nms_threshold` is migrated on load). If `--iou-threshold` is omitted, mAP / PR matching uses **`effective_eval_metric_thresholds`** so **`production.iou_threshold`** overrides **`evaluation.iou_threshold`** when set, same merge order as validation during training—this is **rotated GT–det IoU**, not NMS IoU. If `--score-threshold` is omitted, the post-NMS filter for `run_inference_auto` and diagnostics uses **`resolve_preds_score_threshold`** (CLI → **`evaluation.preds_score_threshold`** → **0.05**), not `production.score_threshold` or train-val `evaluation.score_threshold`. Logs print **`mAP50`-style** names (e.g. `Final mAP50: …`) and spell out NMS IoU separately so it is not confused with DOTA’s 0.1 NMS.
 
 **Inference-time knob overrides (without editing config.json):** You can override the model’s proposal / prefilter behavior for evaluation-only runs:
 - `--inference-pre-nms-score-threshold`: overrides `model.inference_pre_nms_score_threshold` (prefilter before final/merge NMS)
@@ -459,7 +467,7 @@ python tools/preview_augmentation.py --config configs/.../config.json --output-d
 
 Also writes `grid_all.png` (all rows stacked) and `meta.json` (config path, indices, seed, variants).
 
-**Config loading:** Uses lenient parsing when the config contains unknown keys (e.g. older run configs); unknown section fields are dropped so preview still runs. Supports DOTA tiled datasets, Airbus Playground, and HRSC2016 (`dataset.format`).
+**Config loading:** Uses lenient parsing when the config contains unknown keys (e.g. older run configs); unknown section fields are dropped so preview still runs. Supports DOTA tiled datasets, Airbus Playground, HRSC2016, and FAIR1M (`dataset.format`).
 
 **Typical workflow:** Run `dataset_stats.py` for normalization and class balance, then `preview_augmentation.py` to verify augmentations look reasonable on real tiles.
 
@@ -517,6 +525,54 @@ python tools/hrsc_to_dota.py --data-root /path/to/HRSC2016 --output-dir /tmp/hrs
 
 See [Data guide — HRSC2016](../docs/user-guide/data.md#hrsc2016).
 
+### `fair1m_to_dota.py`
+
+Export **FAIR1M** XML + images to DOTA-format image + `.txt` folders. Default `--image-format original` copies JPEG/PNG (TIFF → PNG). Prefer this + `odet tile-dota` over whole-image training. Official FAIR1M-1.0 at `/path/to/data/FAIR1M` already has labeled train/val — omit `--val-fraction`. Use `--val-fraction` only when the dump has no val. Point recipes at `.../tiles_1024`, not the parent split folder.
+
+**Usage:**
+```bash
+odet fair1m-to-dota --data-root /path/to/data/FAIR1M --output-dir /path/to/data/FAIR1M-dota \
+  --splits train,val
+odet tile-dota /path/to/data/FAIR1M-dota/train --tile-size 1024 --overlap 200 --min-overlap 0.7
+odet tile-dota /path/to/data/FAIR1M-dota/val --tile-size 1024 --overlap 200 --min-overlap 0.7
+```
+
+See [Data guide — FAIR1M](../docs/user-guide/data.md#fair1m).
+
+### `dota_task1_submit.py`
+
+Write **DOTA v1.0 Task 1** `Task1_{class}.txt` files + a zip for the [official evaluation server](https://captain-whu.github.io/DOTA/evaluation.html). Test **labels are not public**; there is no local test mAP.
+
+Convert an existing `predictions.json` (from `odet preds --data-split test --no-diagnostics`), or run unlabeled test inference then convert. Prefer a **Hub zoo** slug (`hf://…`) so you do not need a local `runs/` directory; the checkpoint sidecar JSON is loaded automatically. Classes with zero detections get a dummy low-score line (the server rejects empty files). Use `--no-dummy` only if you will add lines yourself.
+
+**Usage:**
+```bash
+# Hub zoo (recommended): sidecar config, unlabeled official test
+odet dota-submit --checkpoint hf://oriented_rcnn_dota_le90_3x \
+  --test-dir /path/to/DOTA-v1.0/test --output-dir work_dirs/Task1_orcnn
+make dota-submit CHECKPOINT=hf://oriented_rcnn_dota_le90_3x \
+  TEST_DIR=/path/to/DOTA-v1.0/test OUT=work_dirs/Task1_orcnn
+
+# Other DOTA slugs: hf://rotated_faster_rcnn_dota_le90_1x hf://rotated_faster_rcnn_dota_le90_3x
+#   hf://rotated_fcos_dota_le90_1x  hf://rotated_retinanet_dota_le90_3x
+
+# Local training run
+odet dota-submit --experiment-dir runs/oriented_rcnn/<id> \
+  --test-dir /path/to/DOTA-v1.0/test --output-dir work_dirs/Task1_orcnn
+
+# Existing predictions.json
+odet preds --checkpoint hf://oriented_rcnn_dota_le90_3x --data-split test \
+  --test-dir /path/to/DOTA-v1.0/test --no-diagnostics
+odet dota-submit --from-json predictions/<ts>/predictions.json --output-dir work_dirs/Task1_orcnn
+make dota-submit FROM_JSON=predictions/<ts> OUT=work_dirs/Task1_orcnn
+```
+
+Score **0.05** follows the eval-val resolver. **`odet dota-submit` forces final NMS 0.1** (Hub sidecars often still have `production.final_nms_iou_threshold` 0.5). Inference on full test rasters uses **sliding windows** (1024 / overlap 200): last tiles **flush to the image edge** (same as `tile_dota.py`), **keep overlap copies** (per-window margin default **0**), then NMS. That is live ResultMerge-style, not MMRotate’s on-disk pre-tile merge. Pass `--window-margin-pixels` to drop the overlap band. Use this zip to compare oriented-det checkpoints on the hidden test set; do not subtract MMRotate zoo 71.28 / 73.40 / 75.69 without that distinction.
+
+Upload the zip (15 `Task1_*.txt` at the archive root) to DOTA-v1.0 Task 1. On server failure, the site allows emailing `dotawebsite3@gmail.com` with team/institute. Task 2 (HBB) is out of scope.
+
+See [Data guide — official test / Task 1](../docs/user-guide/data.md#dota-v10-official-test-task-1).
+
 ### `tile_dota.py`
 
 Tile large DOTA format images into smaller patches for training.
@@ -538,6 +594,9 @@ python tools/tile_dota.py /path/to/dota/train \
 # Overwrite existing tiles
 python tools/tile_dota.py /path/to/dota/train --overwrite
 
+# Tile format: auto (JPEG→jpg, PNG/TIFF→png), or force png/jpg
+python tools/tile_dota.py /path/to/dota/train --output-format jpg --jpeg-quality 95
+
 # Legacy: last row/column may extend past the image (zero-padded tiles)
 python tools/tile_dota.py /path/to/dota/train --pad-edge-tiles
 ```
@@ -551,13 +610,14 @@ python tools/tile_dota.py /path/to/dota/train --pad-edge-tiles
 - By default, last row/column of tiles align on the image edge (no right/bottom zero-padding); use `--pad-edge-tiles` for the old stride-only edge behavior
 - Computes minimum rotated rectangles for truncated objects
 - Outputs official DOTA annotation format (comma-separated)
+- Reads PNG, JPEG, TIFF, and BMP; default `--output-format auto` writes JPEG tiles from JPEG sources and PNG otherwise (`--output-format png|jpg` to force; `--jpeg-quality` default 95)
 
 **Input Structure:**
 ```
 data_dir/
   images/
     P0001.png
-    P0002.png
+    P0002.jpg
     ...
   labels/
     P0001.txt
@@ -571,7 +631,7 @@ data_dir/tiles_{size}/
   images/
     P0001_0_0.png
     P0001_960_0.png
-    P0002_0_0.png
+    P0002_0_0.jpg
     ...
   labels/
     P0001_0_0.txt

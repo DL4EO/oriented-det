@@ -53,7 +53,7 @@ python tools/image_demo.py \
 |---------|-------|-------|
 | `--zoom` | 4 | 4× in-memory upscale; 64 windows per tile |
 | `--overlap-pixels` | 512 | Larger than biggest ship footprint |
-| `--ignore-margin-pixels` | 256 | Half overlap; dedup at tile seams |
+| `--ignore-margin-pixels` | 256 | Opt-in seam drop (default is 0: NMS only) |
 | `--score-thr` | 0.15 | Post-decode filter |
 | `--nms-thr` | 0.2 | Merge NMS after tiling |
 | `--classes` | ship | Drop non-ship categories |

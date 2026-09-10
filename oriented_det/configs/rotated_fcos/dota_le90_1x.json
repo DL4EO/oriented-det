@@ -1,5 +1,6 @@
 {
   "_base_": [
+    "../_base_/datasets/dota_le90.json",
     "../_base_/models/rotated_fcos_r50.json",
     "../_base_/schedules/1x.json",
     "../_base_/preprocessing.json"
@@ -42,7 +43,6 @@
     "focal_gamma": 2.0
   },
   "dataset": {
-    "data_root": "/path/to/data/DOTA-v1.0-tiled",
     "train_tiles_dirs": [
       "/path/to/data/DOTA-v1.0-tiled/train",
       "/path/to/data/DOTA-v1.0-tiled/val"
@@ -50,9 +50,9 @@
     "val_tiles_dirs": [
       "/path/to/data/DOTA-v1.0-tiled/val"
     ],
+    "filter_empty_gt": true,
     "overlap": 200,
     "difficult_strategy": "keep",
-    "filter_empty_gt": true,
     "ignore_labels": [
       "container-crane",
       "airport",
@@ -97,9 +97,9 @@
     "max_detections_per_image": 2000
   },
   "production": {
-    "score_threshold": 0.05,
+    "score_threshold": 0.2,
     "inference_pre_nms_score_threshold": 0.05,
-    "final_nms_iou_threshold": 0.3,
+    "final_nms_iou_threshold": 0.1,
     "max_detections_per_image": 3000,
     "overlap_pixels": 200,
     "ignore_margin_pixels": 0,

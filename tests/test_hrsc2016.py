@@ -244,7 +244,7 @@ def test_hrsc2016_recipes_load():
         assert cfg.preprocessing.random_rotate_angle_range == 20
     for cfg in (one_x, three_x, frcnn_1x, frcnn_3x, fcos_1x, fcos_3x):
         assert cfg.model.final_nms_iou_threshold == 0.1
-        assert cfg.production.final_nms_iou_threshold == 0.3
+        assert cfg.production.final_nms_iou_threshold == 0.1
         assert cfg.evaluation.final_nms_iou_threshold == 0.1
     for cfg in (one_x, three_x):
         assert cfg.model.roi_box_reg_main_loss_type == "smooth_l1"
@@ -278,3 +278,9 @@ def test_hrsc2016_recipes_load():
     assert fcos_3x.training.learning_rate == 0.0025
     assert fcos_1x.production.max_detections_per_image == 2000
     assert fcos_3x.production.max_detections_per_image == 2000
+    assert one_x.production.score_threshold == 0.85
+    assert three_x.production.score_threshold == 0.85
+    assert frcnn_1x.production.score_threshold == 0.85
+    assert frcnn_3x.production.score_threshold == 0.85
+    assert fcos_1x.production.score_threshold == 0.2
+    assert fcos_3x.production.score_threshold == 0.2

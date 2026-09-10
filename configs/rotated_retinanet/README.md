@@ -10,8 +10,9 @@ See the [main README](../../README.md) for installation and [configs/README.md](
 
 | File | Purpose |
 |------|---------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** (12 epochs, lr 0.0025, batch 2, train+val tiles, H+V+diagonal flips). Rotated IoU anchor matching; mAP every **4** epochs. |
-| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** (36 epochs, milestones [24, 33]); inherits 1×. `compute_map_final: true`, exact CPU IoU for final mAP. Deploy `production.score_threshold` **0.45** (eval-val F1 0.50 − 0.05). Hub: `rotated_retinanet_dota_le90_3x`. |
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** (12 epochs, lr 0.0025, batch 2, train+val tiles, H+V+diagonal flips). Inherits [`dota_le90.json`](../_base_/datasets/dota_le90.json) (DOTA `odet stats` mean/std, not ImageNet). Rotated IoU anchor matching; mAP every **4** epochs. Horizontal priors (`θ = 0`). Deploy `production.score_threshold` **0.45** (eval-val F1 0.50 − 0.05). |
+| [`dota_le90_1x_rr.json`](./dota_le90_1x_rr.json) | **1× + RR** (not Hub): same as 1× plus `PolyRandomRotate` p=0.5 **±180°** after flips (`auto_bound=False`). Same SS 1024/200 tiles and `θ = 0` priors. |
+| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Hub: `rotated_retinanet_dota_le90_3x`. |
 
 Recipes keep `loss.loss_type: focal` (unweighted). Set `focal_weighted` to apply `loss.class_weight_*` to sigmoid-focal class columns; `background_weight` is ignored.
 
@@ -22,6 +23,18 @@ Hub **`eval_map50`** in the manifest is from **`odet preds`** on val tiles (see 
 ```bash
 python tools/train.py --config configs/rotated_retinanet/dota_le90_1x.json
 ```
+
+### 1× + RR (ablation)
+
+Same L1 1× (H+V+D flips, `θ = 0` priors, 1024/200 tiles) with MMRotate `PolyRandomRotate` after flips: p=0.5, **±180°**, `auto_bound=False`. Compare eval-val to Hub 1× **64.14%** (same SS val tiles). Not Hub.
+
+```bash
+make train CONFIG=configs/rotated_retinanet/dota_le90_1x_rr.json
+```
+
+### Oriented priors (tried; not a recipe)
+
+A 1× L1 run with `model.anchor_angles: [-45, 0, 45]` (27 priors/location) was **+0.5 mAP** vs Hub 1× (64.63% vs 64.14% eval-val) with ship/small-vehicle/bridge regressions. No checked-in recipe. Hub 1×/3× stay `θ = 0`.
 
 ### ProbIoU as primary (tried; not a Hub recipe)
 
@@ -35,7 +48,7 @@ We ran a **1× ProbIoU primary** ablation (decoded ProbIoU + encoded L1 aux **0.
 python tools/train.py --config configs/rotated_retinanet/dota_le90_3x.json
 ```
 
-Uses `evaluation.score_threshold: 0.3` and `model.max_detections_per_image: 300` during training validation (faster mAP). Deploy `production.score_threshold` is **0.45** (eval-val F1 0.50 − 0.05); `max_detections_per_image` stays **2000**. Final mAP uses exact CPU IoU on the best checkpoint.
+Same train-val decode as 1× (`evaluation.score_threshold: 0.05`, `model.max_detections_per_image: 2000`). Deploy `production.score_threshold` is **0.45** (eval-val F1 0.50 − 0.05).
 
 **TensorBoard:** The focal classification loss is logged as `train/loss_classifier` (same tag as Rotated Faster R-CNN), alongside `train/loss_box_reg`.
 
@@ -70,12 +83,13 @@ The detection head consists of two parallel branches attached to each FPN level:
 
 ### Anchor Design
 
-MMRotate’s `RotatedAnchorGenerator` builds **horizontal** priors in axis-aligned form, then represents them as `(cx, cy, w, h, theta)` with **`theta = 0`** at anchor init (rotation is predicted by the regression branch; see [MMRotate `RotatedAnchorGenerator`](https://mmrotate.readthedocs.io/en/stable/_modules/mmrotate/core/anchor/anchor_generator.html)). This repo matches that: **one reference angle per location** (`0` rad). **`model.anchor_angles` is not a supported config key** for any model type (strict `model` section rejects it).
+MMRotate’s `RotatedAnchorGenerator` builds priors in `(cx, cy, w, h, theta)` form. Hub 1×/3× recipes use **`theta = 0`** only (rotation comes from the regression branch). Set **`model.anchor_angles`** in **degrees** for extra prior angles (converted to radians at model build). `null` or omitted keeps `[0]`.
 
 - **Scales**: MMRotate RetinaNet uses `anchor_octave_base_scale=4` and `anchor_scales_per_octave=3` (3 scales per FPN level)
 - **Aspect Ratios**: `[0.5, 1.0, 2.0]` (1:2, 1:1, 2:1)
-- **Angles**: fixed `[0.0]` only (not user-configurable for this model family)
-- **Total Anchors**: **9** per spatial location with MMRotate parity settings (3 scales × 3 ratios × 1 angle)
+- **Angles**: Hub recipes `[0]` only (rotation from the regression branch). `model.anchor_angles` is still accepted in JSON (degrees) but has no published recipe.
+- **Total Anchors**: **9** per location (3 scales × 3 ratios × 1 angle)
+- **Box coder**: `norm_factor=None`, `edge_swap=True`, **`proj_xy=True`** (MMRotate). Local-frame dx/dy is a no-op at `θ = 0` and required when priors are rotated.
 
 ## Focal Loss
 
@@ -131,8 +145,9 @@ Rotated RetinaNet uses a 5-parameter encoding scheme for oriented bounding boxes
 - pred_angle = anchor_angle + da × (norm_factor × π), with edge_swap
 
 **Key Parameters**:
-- `norm_factor=2.0`: Scales angle delta to [-0.5, 0.5] range for le90 convention
-- `edge_swap=True`: Optimizes angle representation by swapping width/height when beneficial
+- `norm_factor=None` for Hub RetinaNet (MMRotate); ROI heads typically use `2.0`
+- `edge_swap=True`: pick (w,h) vs (h,w) to minimize |dθ|
+- `proj_xy=True`: dx/dy in the **anchor local frame** (no-op when prior θ is 0)
 
 ## Key Differences from Two-Stage Detectors
 
@@ -152,19 +167,19 @@ Rotated RetinaNet uses a 5-parameter encoding scheme for oriented bounding boxes
 [`dota_le90_1x.json`](./dota_le90_1x.json) matches [MMRotate Rotated RetinaNet 1× le90](https://github.com/open-mmlab/mmrotate/blob/main/configs/rotated_retinanet/rotated_retinanet_obb_r50_fpn_1x_dota_le90.py):
 
 - **FPN**: `fpn_returned_layers: [2, 3, 4]` (C3–C5) + `fpn_extra_level: true` for stride-128 P7
-- **Anchors**: `anchor_octave_base_scale: 4`, `anchor_scales_per_octave: 3`, ratios `[0.5, 1.0, 2.0]`, angle `0`
+- **Anchors**: `anchor_octave_base_scale: 4`, `anchor_scales_per_octave: 3`, ratios `[0.5, 1.0, 2.0]`, Hub angle `0` (`model.anchor_angles` optional degrees)
 - **Head**: separate `cls_convs` / `reg_convs` (4×3×3 each) + 3×3 `conv_cls` / `conv_bbox` (MMRotate `RetinaHead`)
 - **FPN extra levels**: `LastLevelP6P7` convs on C5 (`fpn_extra_level: true`), not max-pool P6
 - **Assigner**: rotated IoU (`use_hbb_for_matching: false`), pos 0.5 / neg 0.4, `min_pos_iou=0` with low-quality matching
 - **Evaluation**: mAP every 4 epochs (`compute_map_every_n_epochs: 4`); non-mAP val epochs skip CPU GT–IoU matching (forward + detection counts only)
 - **Inference (val/train)**: GPU sampling NMS (`model.final_nms_use_cpu: false`); class-aware by default (`model.nms_class_agnostic: false`); set `model.nms_class_agnostic: true` (and `production.nms_class_agnostic` if deploy should match) for lookalike vehicle classes; pre-NMS score filter at `inference_pre_nms_score_threshold` (0.05)
-- **Box coder**: `roi_norm_factor: null`, `roi_edge_swap: true`, L1 regression loss
+- **Box coder**: `roi_norm_factor: null`, `roi_edge_swap: true`, L1 regression loss; encode/decode **`proj_xy=True`**
 - **Schedule**: 12 epochs, lr 0.0025, milestones [8, 11], batch 2, trainval tiles, diagonal flips
 - **Inference**: score 0.05, NMS IoU **0.1**, max 2000 dets/image
 
-### MS+RR (future)
+### MS+RR (MS still future)
 
-Stronger DOTA recipes often use **MS** (multi-scale tiling, e.g. overlap 500 px) and **RR** (`PolyRandomRotate`). Neither is in the current 1×/3× Hub recipes; use `dota_le90_1x.json` / `dota_le90_3x.json` for the flip-only baseline first.
+RR alone is [`dota_le90_1x_rr.json`](./dota_le90_1x_rr.json). Stronger DOTA recipes also use **MS** (multi-scale tiling, e.g. overlap 500 px). MS is not in Hub 1×/3×; run RR on the flip-only SS tiles first.
 
 ### Anchor Assignment Strategy
 
@@ -173,7 +188,7 @@ Following MMRotate's design:
 - **Negative anchors**: IoU < 0.4 with all ground-truth boxes (configurable via `negative_iou_threshold`)
 - **Ignored anchors**: Between thresholds (0.4 ≤ IoU ≤ 0.5)
 
-Assignment uses **rotated IoU** (`use_hbb_for_matching: false`, MMRotate `RBboxOverlaps2D`).
+Assignment uses **rotated IoU** (`use_hbb_for_matching: false`, MMRotate `RBboxOverlaps2D`) through a RetinaNet-only matcher (`retinanet_assign.py`): AABB prune, then 100-sample pairwise IoU. Same MaxIoU rules (pos 0.5 / neg 0.4, `min_pos_iou=0`). Two-stage detectors keep the shared `oriented_box_iou_gpu` matcher.
 
 ### Training Configuration (MMRotate 1×)
 

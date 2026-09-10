@@ -15,8 +15,27 @@
       "sha256": "9951acc678cde9f82439f54f21c6074cc8e52b8c5b8c92f1f884e9196e5e6d4c",
       "source_recipe": "configs/rotated_faster_rcnn/dota_le90_3x.json",
       "experiment_dir": "runs/rotated_faster_rcnn/20260901-095802",
-      "eval_map50": 0.8346,
+      "eval_map50": 0.7448,
+      "eval_task1_map50": 0.7448,
       "eval_report": "docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/model_analysis.md"
+    },
+    "rotated_faster_rcnn_dota_le90_1x": {
+      "filename": "rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.pth",
+      "sha256": "1e3dabeba821e8497e987f434feedb974b3cc8775f1a5538562969792621a06c",
+      "source_recipe": "configs/rotated_faster_rcnn/dota_le90_1x.json",
+      "experiment_dir": "runs/rotated_faster_rcnn/20260907-124458",
+      "eval_map50": 0.7442,
+      "eval_task1_map50": 0.7442,
+      "eval_report": "docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/model_analysis.md"
+    },
+    "oriented_rcnn_dota_le90_1x": {
+      "filename": "oriented_rcnn_r50_fpn_dota_le90_1x-725c244f.pth",
+      "sha256": "725c244f9c50617da431e289bbcda5dc55d1fa6e1bf015a2e688d360b0381a5f",
+      "source_recipe": "configs/oriented_rcnn/dota_le90_1x.json",
+      "experiment_dir": "runs/oriented_rcnn/20260908-144807",
+      "eval_map50": 0.7673,
+      "eval_task1_map50": 0.7673,
+      "eval_report": "docs/eval-reports/oriented_rcnn_dota_le90_1x/model_analysis.md"
     },
     "oriented_rcnn_dota_le90_3x": {
       "filename": "oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.pth",
@@ -49,6 +68,14 @@
       "experiment_dir": "runs/rotated_fcos/20260831-020019",
       "eval_map50": 0.8834,
       "eval_report": "docs/eval-reports/rotated_fcos_hrsc2016_le90_3x/model_analysis.md"
+    },
+    "rotated_fcos_dota_le90_1x": {
+      "filename": "rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.pth",
+      "sha256": "a87b6dba593272599d7e905ab5f86c7218a29944932da3d68fccb07c774ef86a",
+      "source_recipe": "configs/rotated_fcos/dota_le90_1x.json",
+      "experiment_dir": "runs/rotated_fcos/20260908-023531",
+      "eval_task1_map50": 0.7307,
+      "eval_report": "docs/eval-reports/rotated_fcos_dota_le90_1x/model_analysis.md"
     },
     "rotated_fcos_dota_le90_3x": {
       "filename": "rotated_fcos_r50_fpn_dota_le90_3x-6e383331.pth",

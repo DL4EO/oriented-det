@@ -556,7 +556,7 @@ class TestRotatedRetinaNet:
                 assert all(-math.pi <= angle <= math.pi for angle in angles)
     
     def test_rotated_retinanet_different_anchor_configs(self):
-        """Test RotatedRetinaNet with different scales/ratios (reference angle fixed, MMRotate-style)."""
+        """Test RotatedRetinaNet scales/ratios and optional multi-angle priors."""
         model1 = RotatedRetinaNet(
             num_classes=15,
             anchor_scales=[8],
@@ -573,18 +573,31 @@ class TestRotatedRetinaNet:
         assert model2.anchor_angles == [0.0]
         assert model1.num_anchors == 3  # len(ratios) * single reference angle
         assert model2.num_anchors == 4
+        assert model1.proj_xy is True
 
-        # Optional constructor-only override (not available via JSON / ModelConfig).
         model_custom = RotatedRetinaNet(
             num_classes=15,
             backbone_name="resnet18",
             pretrained_backbone=False,
             anchor_scales=[8],
             anchor_ratios=[0.5, 1.0, 2.0],
-            anchor_angles=[-math.pi / 2, 0.0],
+            anchor_angles=[-math.pi / 4, 0.0, math.pi / 4],
+            octave_base_scale=4.0,
+            scales_per_octave=3,
         )
-        assert model_custom.num_anchors == 6
-        assert len(model_custom.anchor_angles) == 2
+        assert model_custom.num_anchors == 27  # 3 scales × 3 ratios × 3 angles
+        assert len(model_custom.anchor_angles) == 3
+        assert model_custom.proj_xy is True
+
+        image = torch.rand(3, 128, 128)
+        target = {
+            "rboxes": [RBox(64, 64, 32, 16, math.pi / 4)],
+            "labels": torch.tensor([1], dtype=torch.int64),
+        }
+        model_custom.train()
+        losses = model_custom([image], [target])
+        assert losses["loss_classifier"].requires_grad
+        assert losses["loss_box_reg"].requires_grad
     
     def test_rotated_retinanet_probiou_main_with_encoded_aux_backward(self):
         """ProbIoU primary + encoded L1 aux should backprop through bbox head."""

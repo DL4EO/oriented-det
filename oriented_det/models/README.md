@@ -2,9 +2,9 @@
 
 Detectors: **Oriented R-CNN**, **Rotated Faster R-CNN**, **Rotated RetinaNet**, **Rotated FCOS**. Config: [Configuration](../../docs/user-guide/configuration.md) (`model_type`). User guide: [Models](../../docs/user-guide/models.md).
 
-## RPN anchor angles (Python only)
+## RetinaNet / RPN anchor angles
 
-Training JSON / `ModelConfig` does **not** expose `anchor_angles` (horizontal RPN priors are the default and match MMRotate-style setups). For experiments or legacy checkpoint matching, you may pass **`anchor_angles=[...]`** into **`RotatedFasterRCNN`**, **`OrientedRCNN`**, or **`RotatedRetinaNet`** constructors in code. Multi-angle RPN banks are usually **not** recommended for accuracy or speed versus the default.
+Training JSON **`model.anchor_angles`** is **degrees** (RetinaNet). `null` or omitted → horizontal `[0]`. Constructors take **radians**. Two-stage detectors still default to `[0.0]` in JSON (the key is ignored by those constructors).
 
 ## Training vs export paths
 
@@ -101,11 +101,11 @@ This replaced an earlier softmax background+K formulation whose background-bias 
   - **`kfiou`**: decode to absolute OBBs (×stride when `norm_on_bbox`), then centerness-weighted [`kfiou_loss_per_box`](../ops/kfiou.py).
   - **`riou`**: same decode path, then centerness-weighted [`riou_loss_per_box`](../ops/diff_iou_rotated.py) (`1 -` differentiable polygon IoU). Not sampling `pairwise_rotated_iou`.
 - **Aux:** **`aux_loss_type`** (`kfiou` / `probiou`) + **`aux_loss_weight`** (0 disables). Decoded, centerness-weighted; logged as `loss_box_reg_aux`. Gaussian overlap plus an aspect-gated heading term (`aux_angle_weight`, default 1.0; `aux_angle_lambda` default 1.0). Prefer L1 primary + aux 0.1. Aux `riou` is rejected.
-- **Inference:** `sigmoid(cls) * sigmoid(centerness)` → decode → rotated NMS. Default is **class-aware** (`model.nms_class_agnostic: false`, DOTA / HRSC). Set **`model.nms_class_agnostic: true`** (and **`production.nms_class_agnostic`** if deploy should match) for one NMS over all classes (lookalike vehicles). Recipes: **`model` / `evaluation.final_nms_iou_threshold: 0.1`** for train val and `odet preds` / eval-val; **`production.final_nms_iou_threshold: 0.3`** for deploy / `image_demo`.
+- **Inference:** `sigmoid(cls) * sigmoid(centerness)` → decode → rotated NMS. Default is **class-aware** (`model.nms_class_agnostic: false`, DOTA / HRSC). Set **`model.nms_class_agnostic: true`** (and **`production.nms_class_agnostic`** if deploy should match) for one NMS over all classes (lookalike vehicles). Recipes: **`model` / `evaluation` / `production.final_nms_iou_threshold: 0.1`** for train val, `odet preds` / eval-val, and deploy / `image_demo`.
 
-Configs: `configs/rotated_fcos/dota_le90_1x.json` (rIoU 1×), `dota_le90_3x.json` (rIoU 3× Hub recipe), `dota_le90_1x_l1_kfiou_aux.json` (L1 + KFIoU aux 1×). Results: [`configs/rotated_fcos/README.md`](../../configs/rotated_fcos/README.md).
+Configs: `configs/rotated_fcos/dota_le90_1x.json` (rIoU 1× Hub recipe), `dota_le90_1x_l1_kfiou_aux.json` (L1 + KFIoU aux 1×). Results: [`configs/rotated_fcos/README.md`](../../configs/rotated_fcos/README.md).
 
-**1× L1 recipe:** `learning_rate=2.5e-4`, `max_detections_per_image=2000`, NMS IoU **0.1**. L1 **3×** eval-val **73.92%** (local baseline). **Hub:** 3× decoded rIoU **82.32%** (`rotated_fcos_dota_le90_3x`, `runs/rotated_fcos/20260831-052647`); report [`docs/eval-reports/rotated_fcos_dota_le90_3x/`](../../docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md).
+**Hub:** 1× decoded rIoU official Task 1 **73.07%** (`rotated_fcos_dota_le90_1x`, `runs/rotated_fcos/20260908-023531`); report [`docs/eval-reports/rotated_fcos_dota_le90_1x/`](../../docs/eval-reports/rotated_fcos_dota_le90_1x/model_analysis.md).
 
 **Checkpoint break (v0.1.1):** RetinaNet now uses MMRotate-style **separate cls/reg 4-conv towers** with **3×3 prediction heads** and **P6/P7 convs on C5** (`LastLevelP6P7`). Pre-change checkpoints (`head.convs`, 1×1 `conv_cls`/`conv_bbox`, `extra_fpn_conv`) are incompatible.
 
@@ -116,7 +116,7 @@ Configs: `configs/rotated_fcos/dota_le90_1x.json` (rIoU 1×), `dota_le90_3x.json
 - **5 FPN levels (P3–P7)** with strides `[8, 16, 32, 64, 128]` when `fpn_returned_layers: [2,3,4]`.
 - **`min_pos_iou=0`** in anchor assignment (MMRotate `MaxIoUAssigner`).
 - **Regression loss:** encoded L1/SmoothL1 summed over positives, normalized by batch positive count (MMDet `avg_factor`).
-- **Rotated IoU assignment** (`use_hbb_for_matching: false`).
+- **Rotated IoU assignment** (`use_hbb_for_matching: false`) via `retinanet_assign.match_retinanet_anchors_to_gt` (AABB prune + 100-sample pairwise IoU). Two-stage RPN/ROI matching is unchanged.
 - **le90 angle wrap in `edge_swap` encoding** (`norm_angle_le90` in `encode_oriented_boxes`).
 
 ### `final_nms_use_cpu` (exact final NMS)
@@ -124,6 +124,8 @@ Configs: `configs/rotated_fcos/dota_le90_1x.json` (rIoU 1×), `dota_le90_3x.json
 Set **`model.final_nms_use_cpu`** to **`true`** in JSON / `ModelConfig` so **post-head final oriented NMS only** uses the **polygon IoU Python path on CPU** (`rotated_nms(..., force_cpu=True)` for two-stage models; RetinaNet skips its GPU NMS branch). RPN NMS, anchor/ROI matching, and `ORIENTED_DET_ROTATED_BACKEND` elsewhere are unchanged—so training stays fast; validation/inference final dedup is slower but matches exact greedy NMS on true rotated IoU.
 
 RPN anchor assignment also uses HBB overlap when `use_hbb_for_matching` is true. That path computes HBB IoU in large chunks and keeps only the best GT per anchor and best anchor per GT. This avoids thousands of tiny GPU launches and avoids materializing a full `anchors x GT` matrix for P2, where a single image can have millions of anchors.
+
+**Rotated RetinaNet** does not call `match_oriented_anchors_to_gt` for rotated assignment. `retinanet_assign.py` keeps MaxIoU (pos 0.5 / neg 0.4, `min_pos_iou=0`) but only samples rotated IoU on AABB-overlapping pairs with a fixed 100-point grid. That is what makes 27-anchor P3 grids trainable; `oriented_box_iou_gpu` (geometry-sized grids, per-chunk `.item()` syncs) stays on two-stage / shared ops. HBB RetinaNet still delegates to the shared matcher.
 
 First-batch timing probes are gated by code-only debug flags and are disabled by
 default: `TRACE_FIRST_TRAIN_FORWARD_TIMING` in `oriented_rcnn.py` and

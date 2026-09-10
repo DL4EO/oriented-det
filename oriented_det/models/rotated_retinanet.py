@@ -30,8 +30,8 @@ from .oriented_rpn import (
     generate_oriented_anchors,
     encode_oriented_boxes,
     decode_oriented_boxes,
-    match_oriented_anchors_to_gt,
 )
+from .retinanet_assign import match_retinanet_anchors_to_gt
 from .utils import (
     rboxes_to_tensor,
     tensor_to_rboxes,
@@ -217,6 +217,7 @@ def _compute_retinanet_reg_loss_from_positives(
     target_stds: Optional[Tuple[float, float, float, float, float]],
     norm_factor: Optional[float],
     edge_swap: bool,
+    proj_xy: bool,
 ) -> torch.Tensor:
     """Regression loss on a positive anchor set (already matched to GT)."""
     main_lt = _normalize_main_reg_loss_type(main_loss_type)
@@ -239,6 +240,7 @@ def _compute_retinanet_reg_loss_from_positives(
                 normalize_le90=True,
                 norm_factor=norm_factor,
                 edge_swap=edge_swap,
+                proj_xy=proj_xy,
             )
             loss_iou = mean_auxiliary_box_reg_loss(
                 decoded_boxes,
@@ -258,6 +260,7 @@ def _compute_retinanet_reg_loss_from_positives(
         normalize_le90=True,
         norm_factor=norm_factor,
         edge_swap=edge_swap,
+        proj_xy=proj_xy,
     )
     reg_loss = mean_auxiliary_box_reg_loss(
         decoded_boxes,
@@ -291,6 +294,7 @@ def compute_oriented_retinanet_loss(
     target_norm_factor: Optional[float] = None,
     norm_factor: Optional[float] = None,
     edge_swap: bool = False,
+    proj_xy: bool = True,
     box_reg_aux_weight: float = 0.0,
     box_reg_aux_loss_type: Optional[str] = None,
     box_reg_kfiou_fun: Optional[str] = None,
@@ -324,13 +328,15 @@ def compute_oriented_retinanet_loss(
         target_norm_factor: Optional angle scale for loss (when norm_factor used in encode; default None)
         norm_factor: Optional angle scaling for encode (MMRotate Rotated RetinaNet uses None)
         edge_swap: Whether to use edge_swap in bbox encode/decode (MMRotate uses True)
+        proj_xy: Encode/decode dx/dy in the anchor local frame (MMRotate True).
         box_reg_aux_weight: Auxiliary box-reg weight (decoded when main is encoded; encoded
             L1/Smooth L1 when main is decoded). 0 disables aux.
         box_reg_aux_loss_type: ``probiou`` / ``riou`` / ``kfiou`` when main is encoded;
             ``smooth_l1`` when main is decoded. Encoded flavor still follows ``box_reg_loss_type``.
         box_reg_kfiou_fun: Optional KFIoU overlap transform when using ``kfiou``.
         box_reg_probiou_mode: ``l1`` (default) or ``l2`` when using ``probiou``.
-        use_hbb_for_matching: If True, use HBB (axis-aligned) IoU for anchor-GT matching (recommended for single angle).
+        use_hbb_for_matching: If True, use HBB (axis-aligned) IoU via the shared matcher.
+            Rotated matching uses ``match_retinanet_anchors_to_gt`` (RetinaNet-only).
         box_reg_loss_type: ``smooth_l1`` (default) or ``l1`` (MMRotate RetinaNet).
         main_loss_type: ``smooth_l1`` (encoded primary via ``box_reg_loss_type``) or decoded
             ``probiou`` / ``riou`` / ``kfiou``.
@@ -461,7 +467,7 @@ def compute_oriented_retinanet_loss(
                 img_gt_lookalike = None
                 if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
                     img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
-                labels, matched_indices = match_oriented_anchors_to_gt(
+                labels, matched_indices = match_retinanet_anchors_to_gt(
                     img_anchors,
                     img_gt_boxes,
                     positive_iou_threshold,
@@ -483,7 +489,7 @@ def compute_oriented_retinanet_loss(
                 img_gt_lookalike = None
                 if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
                     img_gt_lookalike = gt_boxes_lookalike[img_idx].to(device).detach()
-                labels, matched_indices = match_oriented_anchors_to_gt(
+                labels, matched_indices = match_retinanet_anchors_to_gt(
                     img_anchors,
                     img_gt_boxes,
                     positive_iou_threshold,
@@ -517,6 +523,7 @@ def compute_oriented_retinanet_loss(
                         target_stds=target_stds,
                         norm_factor=norm_factor,
                         edge_swap=edge_swap,
+                        proj_xy=proj_xy,
                     )
             
             # Compute classification loss (sigmoid focal loss, sum reduction)
@@ -587,6 +594,7 @@ def compute_oriented_retinanet_loss(
                 target_stds=target_stds,
                 norm_factor=norm_factor,
                 edge_swap=edge_swap,
+                proj_xy=proj_xy,
             )
             reg_loss_sums.append(reg_loss * box_reg_weight)
             num_reg_pos_total += int(positive_mask.sum().item())
@@ -621,6 +629,7 @@ def compute_oriented_retinanet_loss(
                 target_stds=target_stds,
                 norm_factor=norm_factor,
                 edge_swap=edge_swap,
+                proj_xy=proj_xy,
             )
             reg_loss_sums.append(reg_loss * box_reg_weight)
             num_reg_pos_total += int(sample_idx.numel())
@@ -646,6 +655,7 @@ def compute_oriented_retinanet_loss(
                 normalize_le90=True,
                 norm_factor=norm_factor,
                 edge_swap=edge_swap,
+                proj_xy=proj_xy,
             )
             loss_iou = mean_auxiliary_box_reg_loss(
                 decoded_boxes,
@@ -707,8 +717,9 @@ class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
         trainable_layers: Number of backbone layers to keep trainable
         anchor_scales: List of anchor scales for Rotated RetinaNet
         anchor_ratios: List of anchor aspect ratios for Rotated RetinaNet
-        anchor_angles: Optional RPN anchor angles in radians (advanced, **not** in `ModelConfig` / JSON).
-            ``None`` uses horizontal priors ``[0.0]`` (recommended). Non-default multi-angle banks can hurt accuracy.
+        anchor_angles: Optional RPN anchor angles in radians. ``None`` uses horizontal
+            priors ``[0.0]``. Training JSON sets ``model.anchor_angles`` in **degrees**
+            (converted in ``train.py`` / checkpoint load). Example: ``[-π/4, 0, π/4]``.
         positive_iou_threshold: IoU threshold for positive anchors
         negative_iou_threshold: IoU threshold for negative anchors
         focal_alpha: Alpha parameter for focal loss (default: 0.25, Rotated RetinaNet standard)
@@ -723,6 +734,8 @@ class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
         target_stds: Optional stds for target normalization (MMRotate compatibility)
         norm_factor: Optional angle scaling for encode/decode (MMRotate Rotated RetinaNet uses None)
         edge_swap: Whether to use edge_swap in bbox coder (MMRotate uses True)
+        proj_xy: Encode/decode dx/dy in the anchor local frame (MMRotate ``proj_xy=True``).
+            No-op for horizontal priors; required when ``anchor_angles`` is not ``[0]``.
         use_hbb_for_matching: If True, use HBB IoU for anchor-GT matching (optional; priors use a single reference angle).
         final_nms_use_cpu: If True, skip GPU sampling NMS and run final NMS with exact polygon IoU on CPU.
         nms_class_agnostic: If True, one oriented NMS over all classes (default False = per-class).
@@ -762,6 +775,7 @@ class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
         target_stds: Optional[Tuple[float, float, float, float, float]] = None,
         norm_factor: Optional[float] = None,
         edge_swap: bool = True,
+        proj_xy: bool = True,
         box_reg_aux_weight: float = 0.0,
         box_reg_aux_loss_type: Optional[str] = None,
         box_reg_kfiou_fun: Optional[str] = None,
@@ -787,9 +801,10 @@ class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
         self.num_classes = num_classes
         self._init_sigmoid_focal_class_weights(roi_class_weights)
         
-        # Bbox coder options (MMRotate: norm_factor=None, edge_swap=True for Rotated RetinaNet)
+        # Bbox coder options (MMRotate: norm_factor=None, edge_swap=True, proj_xy=True)
         self.norm_factor = norm_factor
         self.edge_swap = edge_swap
+        self.proj_xy = bool(proj_xy)
         self.box_reg_aux_loss_type = box_reg_aux_loss_type
         self.box_reg_kfiou_fun = box_reg_kfiou_fun
         self.box_reg_probiou_mode = box_reg_probiou_mode
@@ -812,7 +827,7 @@ class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
             use_p6p7_extra_levels=fpn_extra_level,
         )
         
-        # Default: horizontal priors (theta=0), MMRotate-style. Optional anchor_angles is Python-only (not in JSON).
+        # Default: horizontal priors (theta=0). JSON ``model.anchor_angles`` is degrees.
         self.anchor_scales, self.anchor_ratios, self.anchor_angles, self.num_anchors = setup_anchors(
             anchor_scales=anchor_scales,
             anchor_ratios=anchor_ratios,
@@ -978,6 +993,7 @@ class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
                 target_norm_factor=self.norm_factor,
                 norm_factor=self.norm_factor,
                 edge_swap=self.edge_swap,
+                proj_xy=self.proj_xy,
                 box_reg_aux_weight=self.box_reg_aux_weight,
                 box_reg_aux_loss_type=self.box_reg_aux_loss_type,
                 box_reg_kfiou_fun=self.box_reg_kfiou_fun,
@@ -1052,6 +1068,7 @@ class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
                         normalize_le90=True,
                         norm_factor=self.norm_factor,
                         edge_swap=self.edge_swap,
+                        proj_xy=self.proj_xy,
                     )
                     
                     # Sigmoid per class (MMRotate use_sigmoid=True); take best foreground class per anchor

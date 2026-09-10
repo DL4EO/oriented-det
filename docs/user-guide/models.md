@@ -17,7 +17,7 @@ All detectors:
 - Preserve angle information through training and inference
 - Use oriented IoU for matching and oriented NMS for post-processing
 
-Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_3x` (79.40% eval-val mAP50), `rotated_faster_rcnn_dota_le90_3x` (83.46%), `rotated_fcos_dota_le90_3x` (82.32%), and `rotated_retinanet_dota_le90_3x` (71.52%). HRSC2016: `oriented_rcnn_hrsc2016_le90_3x` (90.41%), `rotated_faster_rcnn_hrsc2016_le90_3x` (88.77%), `rotated_fcos_hrsc2016_le90_3x` (88.34%). See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
+Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_1x` (**76.73%** official Task 1) / `oriented_rcnn_dota_le90_3x` (79.40% eval-val mAP50), `rotated_faster_rcnn_dota_le90_1x` (**74.42%** official Task 1) / `rotated_faster_rcnn_dota_le90_3x` (**74.48%** official Task 1, AP75 45.39), `rotated_fcos_dota_le90_1x` (**73.07%** official Task 1) / `rotated_fcos_dota_le90_3x` (82.32% eval-val), and `rotated_retinanet_dota_le90_3x` (71.52%). HRSC2016: `oriented_rcnn_hrsc2016_le90_3x` (90.41%), `rotated_faster_rcnn_hrsc2016_le90_3x` (88.77%), `rotated_fcos_hrsc2016_le90_3x` (88.34%). See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
 
 ## Training vs inference paths (two-stage models)
 
@@ -362,6 +362,10 @@ model = RotatedRetinaNet(
     pretrained_backbone=True
 )
 ```
+
+Hub recipes use horizontal priors (`θ = 0`). Training JSON **`model.anchor_angles`** is degrees (e.g. `[-45, 0, 45]`); the constructor takes radians. Encode/decode uses **`proj_xy=True`**.
+
+Rotated training assignment is RetinaNet-only (`match_retinanet_anchors_to_gt`): MaxIoU on sampled rotated IoU, with AABB pruning so dense P3 grids stay fast. Other detectors still use the shared RPN/ROI matcher.
 
 ### Training and Inference
 

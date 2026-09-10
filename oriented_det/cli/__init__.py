@@ -21,6 +21,8 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "playground-csv": ("tools.generate_airbus_playground_csv", "odet-playground-csv"),
     "playground-to-dota": ("tools.playground_to_dota", "odet-playground-to-dota"),
     "hrsc-to-dota": ("tools.hrsc_to_dota", "odet-hrsc-to-dota"),
+    "fair1m-to-dota": ("tools.fair1m_to_dota", "odet-fair1m-to-dota"),
+    "dota-submit": ("tools.dota_task1_submit", "odet-dota-submit"),
     "labels-to-comma": ("tools.dota_labels_to_comma", "odet-labels-to-comma"),
     "free-gpu": ("tools.free_gpu", "odet-free-gpu"),
     "pretrained": ("tools.pretrained_download", "odet-pretrained"),

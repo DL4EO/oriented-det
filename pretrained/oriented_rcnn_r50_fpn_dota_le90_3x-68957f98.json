@@ -204,7 +204,7 @@
   "production": {
     "score_threshold": 0.7,
     "per_class_score_threshold": null,
-    "final_nms_iou_threshold": 0.5,
+    "final_nms_iou_threshold": 0.1,
     "final_nms_use_cpu": true,
     "inference_pre_nms_score_threshold": 0.05,
     "max_detections_per_image": 3000,

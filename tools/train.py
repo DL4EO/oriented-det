@@ -82,6 +82,7 @@ from oriented_det.data import (
     dataset_format_name,
     format_airbus_empty_gt_filter_log,
     format_dota_empty_gt_filter_log,
+    format_fair1m_empty_gt_filter_log,
     format_hrsc_empty_gt_filter_log,
     split_class_names,
 )
@@ -101,6 +102,7 @@ from oriented_det.train.utils import (
 from oriented_det.train.config import (
     TrainingExperimentConfig,
     LossConfig,
+    anchor_angles_deg_to_rad,
     effective_eval_metric_thresholds,
     config_use_exact_rotated_iou_for_map,
     config_use_exact_rotated_iou_for_final_map,
@@ -1012,6 +1014,9 @@ def create_model_from_config(
             anchor_ratios=config.model.anchor_ratios,
             octave_base_scale=getattr(config.model, "anchor_octave_base_scale", None),
             scales_per_octave=getattr(config.model, "anchor_scales_per_octave", None),
+            anchor_angles=anchor_angles_deg_to_rad(
+                getattr(config.model, "anchor_angles", None)
+            ),
             stacked_convs=getattr(config.model, "retinanet_stacked_convs", 4),
             positive_iou_threshold=getattr(config.model, "rpn_positive_iou_threshold", 0.5),
             negative_iou_threshold=getattr(config.model, "rpn_negative_iou_threshold", 0.4),
@@ -1466,6 +1471,16 @@ def main():
             print("HRSC2016 filter_empty_gt:")
             print(format_hrsc_empty_gt_filter_log(train_dataset, split="train"))
             print(format_hrsc_empty_gt_filter_log(val_dataset, split="val"))
+    elif rank == 0 and dataset_format == "fair1m":
+        print(
+            f"\nUsing FAIR1M dataset: {config.dataset.data_root} "
+            f"(train split={getattr(train_dataset, 'split', 'train')}, "
+            f"val split={getattr(val_dataset, 'split', 'val')})"
+        )
+        if train_filter_empty:
+            print("FAIR1M filter_empty_gt:")
+            print(format_fair1m_empty_gt_filter_log(train_dataset, split="train"))
+            print(format_fair1m_empty_gt_filter_log(val_dataset, split="val"))
     elif rank == 0 and train_filter_empty:
         print("DOTA filter_empty_gt (MMRotate-style):")
         print(format_dota_empty_gt_filter_log(train_dataset, split="train"))

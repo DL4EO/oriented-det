@@ -1,5 +1,28 @@
 # Model Analysis Report
 
+Hub slug **`rotated_faster_rcnn_dota_le90_3x`**. Official DOTA v1.0 Task 1 **74.48%** (AP75 45.39, COCO mAP 43.94). Deploy `production.score_threshold` **0.6** (this sweep’s best F1 0.65 − 0.05). The mAP50 below is leaky eval-val (val tiles are in train), not the published number.
+
+## Official Task 1 (hidden test)
+
+| Class | AP50 |
+| --- | ---: |
+| plane | 0.8896 |
+| baseball-diamond | 0.8340 |
+| bridge | 0.5412 |
+| ground-track-field | 0.7322 |
+| small-vehicle | 0.7478 |
+| large-vehicle | 0.7629 |
+| ship | 0.8808 |
+| tennis-court | 0.9027 |
+| basketball-court | 0.7892 |
+| storage-tank | 0.8491 |
+| soccer-ball-field | 0.5858 |
+| roundabout | 0.6135 |
+| harbor | 0.7544 |
+| swimming-pool | 0.7201 |
+| helicopter | 0.5693 |
+| **mAP50** | **0.7448** |
+
 - Generated at: `2026-09-03T02:04:34.825330`
 
 ## Model metadata

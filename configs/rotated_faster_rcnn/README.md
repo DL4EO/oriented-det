@@ -166,58 +166,72 @@ Our implementation targets MMRotate semantics:
 
 ### Training defaults (DOTA-style recipes)
 
-Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **batch size 2**, **12 epochs**, **MultiStepLR** with milestones at epochs **8** and **11** (\(\gamma=0.1\)), **lr=0.005**, **1024×1024** tiles, and **horizontal-anchor** matching with **`use_hbb_for_matching: true`**. [`dota_le90_1x.json`](./dota_le90_1x.json) is the full 1× recipe; [`dota_le90_3x.json`](./dota_le90_3x.json) inherits it and extends training to **36 epochs** with milestones **24/33**. Both use **FP32**, cross-entropy classification, and **ProbIoU primary** ROI regression with **Smooth L1 aux** (0.1), `roi_box_reg_norm: positives_only`, `roi_box_reg_angle_weight: 1.0`.
+Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **batch size 2**, **12 epochs**, **MultiStepLR** with milestones at epochs **8** and **11** (\(\gamma=0.1\)), **lr=0.005**, **1024×1024** tiles, and **horizontal-anchor** matching with **`use_hbb_for_matching: true`**. [`dota_le90_1x.json`](./dota_le90_1x.json) is the advertised DOTA Hub recipe; [`dota_le90_3x.json`](./dota_le90_3x.json) inherits it (36 epochs, milestones 24/33). Both use **FP32**, cross-entropy classification, and **ProbIoU primary** ROI regression with **Smooth L1 aux** (0.1), `roi_box_reg_norm: positives_only`, `roi_box_reg_angle_weight: 1.0`.
 
 ## Config files in this folder
 
 | File | Purpose |
 |------|---------|
-| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain** — 12 epochs, lr 0.005, MultiStep @ 8/11, ProbIoU main + Smooth L1 aux 0.1 (`roi_box_reg_aux_*`), angle weight 1.0. |
-| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Deploy `production.score_threshold` **0.6** (eval-val F1 0.65 − 0.05). Hub: `rotated_faster_rcnn_dota_le90_3x`. |
-| [`hrsc2016_le90_1x.json`](./hrsc2016_le90_1x.json) | **1× HRSC2016** — native XML, single-class ship, `keep_ratio` + pad-32, H+V+diagonal flips (rotate **off**), same ProbIoU main + Smooth L1 aux as DOTA; model/eval-val NMS **0.1**, production NMS **0.3**, `max_detections_per_image` **2000**. |
-| [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | **3× HRSC2016** — inherits 1×; 36 epochs, milestones [24, 33], `lr_scheduler_gamma` 0.1, random rotate p=0.5 **±20°**. Deploy `production.score_threshold` **0.85** (eval-val F1 0.90 − 0.05). Hub: `rotated_faster_rcnn_hrsc2016_le90_3x`. |
+| [`dota_le90_1x.json`](./dota_le90_1x.json) | **1× DOTA pretrain / Hub** — 12 epochs, lr 0.005, MultiStep @ 8/11, ProbIoU main + Smooth L1 aux 0.1 (`roi_box_reg_aux_*`), angle weight 1.0. Deploy `production.score_threshold` **0.6** (eval-val F1 0.65 − 0.05). Hub: `rotated_faster_rcnn_dota_le90_1x`. |
+| [`dota_le90_3x.json`](./dota_le90_3x.json) | **3× DOTA pretrain** — inherits 1×; 36 epochs, milestones [24, 33]. Hub: `rotated_faster_rcnn_dota_le90_3x`. |
+| [`hrsc2016_le90_1x.json`](./hrsc2016_le90_1x.json) | **1× HRSC2016** — native XML, single-class ship, `keep_ratio` + pad-32, H+V+diagonal flips (rotate **off**), same ProbIoU main + Smooth L1 aux as DOTA; model/eval-val/production NMS **0.1**, `max_detections_per_image` **2000**. Deploy `production.score_threshold` **0.85** (eval-val F1 0.90 − 0.05). |
+| [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | **3× HRSC2016** — inherits 1×; 36 epochs, milestones [24, 33], `lr_scheduler_gamma` 0.1, random rotate p=0.5 **±20°**. Hub: `rotated_faster_rcnn_hrsc2016_le90_3x`. |
 
-### First run (1× baseline)
+### First run (1× / Hub)
 
 ```bash
 python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_1x.json
+python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
 ```
 
-### 3× (inherits standard 1× ROI loss)
+### HRSC2016
 
 ```bash
-python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
 odet train --config configs/rotated_faster_rcnn/hrsc2016_le90_1x.json
 odet train --config configs/rotated_faster_rcnn/hrsc2016_le90_3x.json
 ```
 
 If training is unstable, try `roi_box_reg_aux_weight` in `{0.05, 0.2}` (with `roi_box_reg_aux_loss_type: smooth_l1`) or `roi_box_reg_norm: sampled_all`.
 
-### Angle fine-tune (optional polish from a 3× checkpoint)
+### Angle fine-tune (optional polish from the Hub checkpoint)
 
 Low-risk polish for orientation alignment: RoI head only (backbone and RPN frozen), higher angle SmoothL1 weight, stronger encoded-regression aux (**0.3**). ProbIoU main loss has **zero angle gradient when w≈h** (Gaussian surrogate is rotation-invariant for squares), so aux must carry angle supervision for baseball-diamond–like classes. Update `checkpoint.load_from_checkpoint` if your source run differs.
 
 ```bash
-python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_3x.json
+python tools/train.py --config configs/rotated_faster_rcnn/dota_le90_1x.json
 ```
 
-Start from a 3× checkpoint (`checkpoint.load_from_checkpoint`). Set `training.freeze_backbone_epochs` high enough to keep the backbone frozen, `roi_box_reg_angle_weight: 2.0`, and `roi_box_reg_aux_weight: 0.3` (`roi_box_reg_aux_loss_type: smooth_l1`). There is no separate checked-in angle-finetune recipe.
+Start from the Hub 1× checkpoint (`checkpoint.load_from_checkpoint`: `hf://rotated_faster_rcnn_dota_le90_1x`), not 3× — see [1x vs 3x for finetune](#1x-vs-3x-for-finetune). Set `training.freeze_backbone_epochs` high enough to keep the backbone frozen, `roi_box_reg_angle_weight: 2.0`, and `roi_box_reg_aux_weight: 0.3` (`roi_box_reg_aux_loss_type: smooth_l1`). There is no separate checked-in angle-finetune recipe.
 
 If val mAP drops more than ~0.5 pt, stop early and keep the source checkpoint. To also adapt proposals, set `training.freeze_rpn_epochs` to `0`.
 
-If training is unstable on a full 1×/3× run, try `roi_box_reg_aux_weight` in `{0.05, 0.2}` or `roi_box_reg_norm: sampled_all`.
+If training is unstable on a full 1× run, try `roi_box_reg_aux_weight` in `{0.05, 0.2}` or `roi_box_reg_norm: sampled_all`.
 
 ## Results and models
 
-DOTA1.0 (pretrain: **train+val / val**). mAP = **`make eval-val`** mAP50 (7,669 val tiles). Hub manifest **`eval_map50`** uses the same `odet preds` protocol — not training **`compute_map_final`** mAP (see [pretrained/README.md](../../pretrained/README.md)).
+DOTA1.0 (pretrain: **train+val / val**). Published mAP is **official DOTA v1.0 Task 1** (hidden test). See [pretrained/README.md](../../pretrained/README.md).
 
-| Backbone | mAP (eval-val) | Angle | lr schd | Aug | BS | Config | Final config | Final log | Download |
+| Backbone | Official Task 1 | Angle | lr schd | Aug | BS | Config | Final config | Final log | Download |
 | :----------------------: | :---: | :---: | :-----: | :-: | :--: | :----: | :----------: | :-------: | :----: |
-| ResNet50 (1024,1024,200) | 77.57 | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-0733c506.log) | — |
-| ResNet50 (1024,1024,200) | 83.46 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log) | `hf://rotated_faster_rcnn_dota_le90_3x` |
-| ResNet50 (1024,1024,200) | 75.58 | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x_ce-c077eeee.log) | — (CE baseline) |
+| ResNet50 (1024,1024,200) | **74.42** | le90 | 1× | H+V+D | 2 | [`dota_le90_1x.json`](./dota_le90_1x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.log) | `hf://rotated_faster_rcnn_dota_le90_1x` |
+| ResNet50 (1024,1024,200) | **74.48** | le90 | 3× | H+V+D | 2 | [`dota_le90_3x.json`](./dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log`](../../pretrained/rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log) | `hf://rotated_faster_rcnn_dota_le90_3x` |
 
-Eval reports: [`docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/model_analysis.md), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/model_analysis.md), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x_ce/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x_ce/model_analysis.md).
+Eval reports: [`docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_1x/model_analysis.md) (1× Task 1 AP75 41.90), [`docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/`](../../docs/eval-reports/rotated_faster_rcnn_dota_le90_3x/model_analysis.md) (3× Task 1 AP75 45.39). Advertised short schedule stays 1× (AP50 is a wash).
+
+### 1x vs 3x for finetune
+
+Use **1×** (`hf://rotated_faster_rcnn_dota_le90_1x`) as the DOTA init. The extra 24 epochs overfit the train+val *tiles*; they do not buy official Task 1 AP50.
+
+| Checkpoint | Leaky eval-val | Official AP50 | Official AP75 | eval-val − Task 1 |
+|------------|----------------|---------------|---------------|-------------------|
+| 1× | 77.55 | 74.42 | 41.90 | **3.1** |
+| 3× | 83.46 | 74.48 | 45.39 | **9.0** |
+
+Train-time mAP on 3× still climbs after the 1× schedule (non-empty val tiles ~71 → 88). Official AP50 does not. AP75 **did** generalize (+3.5): localization got better; ranking at IoU 0.5 did not.
+
+- **Default:** 1×. Same held-out AP50, less tile specialization. [`fair1m_le90_1x.json`](./fair1m_le90_1x.json) and the angle polish above already load this slug.
+- **Try 3×** only if the target needs tight boxes (high IoU) and you have a real holdout. Do not pick it because 83% eval-val looks better.
+- HRSC recipes in this folder train from scratch (`load_from_checkpoint: null`).
 
 HRSC2016 (trainval / test, 453 images). mAP = **`make eval-val`** mAP50.
 

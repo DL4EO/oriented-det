@@ -45,21 +45,21 @@ def test_strict_section_ignores_muted_keys():
     assert kwargs == {"data_root": "/x"}
 
 
-def test_load_rejects_model_anchor_angles_in_json(tmp_path: Path):
-    """RPN reference angles are fixed in code (horizontal priors); not a config knob."""
-    p = tmp_path / "bad_anchor_angles.json"
+def test_load_accepts_model_anchor_angles_degrees(tmp_path: Path):
+    """RetinaNet JSON stores prior angles in degrees; two-stage recipes may set the same key."""
+    p = tmp_path / "anchor_angles.json"
     p.write_text(
         json.dumps(
             {
-                "model_type": "rotated_faster_rcnn",
+                "model_type": "rotated_retinanet",
                 "dataset": {"data_root": str(tmp_path)},
-                "model": {"anchor_angles": [0.0], "backbone": "resnet18"},
+                "model": {"anchor_angles": [-45, 0, 45], "backbone": "resnet18"},
             }
         ),
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="Unknown key\\(s\\) in config section 'model'"):
-        TrainingExperimentConfig.load(p)
+    cfg = TrainingExperimentConfig.load(p)
+    assert cfg.model.anchor_angles == [-45, 0, 45]
 
 
 def test_production_section_load_and_strict(tmp_path: Path):

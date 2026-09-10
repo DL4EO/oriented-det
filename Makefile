@@ -1,5 +1,5 @@
 .PHONY: help install check-install docs-deps train wizard train-wizard train-multi-gpu train-help lr-finder stats tensorboard free-gpu clean \
-	preds metrics eval-val train-preds viewer demo test docs docs-serve sync-configs check-configs build twine-check publish-deps publish-testpypi publish-pypi upload-pretrained
+	preds metrics eval-val dota-submit train-preds viewer demo test docs docs-serve sync-configs check-configs build twine-check publish-deps publish-testpypi publish-pypi upload-pretrained
 
 .DEFAULT_GOAL := help
 
@@ -19,13 +19,15 @@ PYTHONPATH ?= $(shell pwd)
 # Training / wizard / stats / lr-finder
 CONFIG ?= configs/oriented_rcnn/dota_le90_1x.json
 
-# Sliding-window micro-batch for large-image inference (env consumed by save_predictions / oriented_det.runtime.inference).
-ORIENTED_DET_WINDOW_BATCH_SIZE ?= 64
+# Sliding-window micro-batch for large-image inference (consumed by save_predictions / runtime.inference).
+# Default 8 in code; set auto to probe max GPU batch (can OOM on dense two-stage images).
+ORIENTED_DET_WINDOW_BATCH_SIZE ?= 32
 
 # Prefer pip-installed cuDNN over system /usr/local/cuda (avoids libcudnn_cnn_train.so.8 / GET engine errors)
 CUDNN_LIB := $(shell python -c "import os, site; p=[x for x in site.getsitepackages() if 'site-packages' in x][0]; print(os.path.join(p,'nvidia/cudnn/lib'))" 2>/dev/null)
 # 30 min NCCL/Gloo timeout so a DDP reducer hang dies instead of spinning for 24h
 TRAIN_ENV := TORCH_DIST_TIMEOUT_SECONDS=1800 \
+        ORIENTED_DET_WINDOW_BATCH_SIZE="$(ORIENTED_DET_WINDOW_BATCH_SIZE)" \
         LD_LIBRARY_PATH="$(CUDNN_LIB):$$LD_LIBRARY_PATH"
 
 # VIEWER_PRED_DIR: predictions dir for make viewer (default: latest under predictions/)
@@ -86,6 +88,7 @@ help:
 	@echo "  make preds                  - Val inference → predictions/<ts>/predictions.json (eval NMS via evaluation.final_nms_iou_threshold; no GPU mAP)"
 	@echo "  make metrics                - Offline mAP/PR on METRICS_PRED_DIR or latest predictions/"
 	@echo "  make train-preds            - Train split + tile_metrics.csv (latest exp; SAVE_TRAIN_PRED_OUT= optional)"
+	@echo "  make dota-submit            - Task 1 zip from FROM_JSON=, CHECKPOINT=hf://<slug>, or EXPERIMENT= + TEST_DIR="
 	@echo ""
 	@echo "=== Viewers, demos, TensorBoard ==="
 	@echo "  make tensorboard            - TensorBoard for all experiments under runs/"
@@ -108,7 +111,7 @@ help:
 	@echo "  Default CONFIG: $(CONFIG)"
 	@echo "  Pin experiment when newest run is wrong or has no checkpoint:"
 	@echo "    EXPERIMENT=runs/<model>/<timestamp>     (preds, train-preds)"
-	@echo "  Pin directories: METRICS_PRED_DIR=  SAVE_TRAIN_PRED_OUT="
+	@echo "  Pin directories: METRICS_PRED_DIR=  SAVE_TRAIN_PRED_OUT=  FROM_JSON=  CHECKPOINT=  TEST_DIR=  OUT="
 	@echo "  Newest experiment dir: latest timestamp under runs/<model>/<timestamp>/ (sort by timestamp, not model name)"
 	@echo "  Checkpoint pick order: checkpoint_best.pth → best_*.pth → newest checkpoint_epoch_*.pth"
 	@echo "  DOTA_DATA_ROOT: if unset for preds / train-preds, data paths come from experiment config.json"
@@ -122,6 +125,7 @@ help:
 	@echo "=== Multi-GPU / environment ==="
 	@echo "  Prefer make train-multi-gpu over raw python: tools/train_multi_gpu.py / torchrun, DDP env, and"
 	@echo "  TRAIN_ENV (pip cuDNN first on LD_LIBRARY_PATH — avoids GET engine / libcudnn mismatch)."
+	@echo "  Sliding-window batch: ORIENTED_DET_WINDOW_BATCH_SIZE=$(ORIENTED_DET_WINDOW_BATCH_SIZE) (auto = GPU probe)."
 	@echo "  Full process log: TRAIN_MULTI_GPU_LOG=$(TRAIN_MULTI_GPU_LOG) (stdout+stderr tee)."
 
 # --- Config vendoring (repo configs/ → oriented_det/configs/) ---
@@ -326,6 +330,44 @@ metrics: check-install
 	fi; \
 	echo "metrics: $$PRED (recompute mAP/PR from JSON; pass CLI flags to save_predictions.py to override thresholds)"; \
 	$(TRAIN_ENV) odet preds --metrics-from-json "$$PRED"
+
+# DOTA v1.0 Task 1 zip for the official evaluation server (no local test mAP).
+# Convert existing JSON:
+#   make dota-submit FROM_JSON=predictions/<ts> OUT=work_dirs/Task1_orcnn
+# Hub zoo (sidecar config; unlabeled official test):
+#   make dota-submit CHECKPOINT=hf://oriented_rcnn_dota_le90_3x TEST_DIR=/data/DOTA-v1.0/test OUT=work_dirs/Task1_orcnn
+# Or a local training run:
+#   make dota-submit EXPERIMENT=runs/oriented_rcnn/<id> TEST_DIR=/path/to/DOTA/test OUT=work_dirs/Task1_orcnn
+dota-submit: check-install
+	@if [ -z "$(OUT)" ]; then \
+		echo "Error: set OUT= to a Task1 output directory (e.g. work_dirs/Task1_orcnn)."; \
+		exit 1; \
+	fi; \
+	if [ -n "$(FROM_JSON)" ]; then \
+		$(TRAIN_ENV) odet dota-submit --from-json "$(FROM_JSON)" --output-dir "$(OUT)" $(if $(ZIP),--zip "$(ZIP)",); \
+	elif [ -n "$(CHECKPOINT)" ]; then \
+		if [ -z "$(TEST_DIR)" ] && [ -z "$(DOTA_DATA_ROOT)" ]; then \
+			echo "Error: set TEST_DIR= or DOTA_DATA_ROOT= for unlabeled official test images."; \
+			exit 1; \
+		fi; \
+		$(TRAIN_ENV) odet dota-submit --checkpoint "$(CHECKPOINT)" \
+			$(if $(TEST_DIR),--test-dir "$(TEST_DIR)",) \
+			$(if $(DOTA_DATA_ROOT),--data-root "$(DOTA_DATA_ROOT)",) \
+			$(if $(SUBMIT_CONFIG),--config "$(SUBMIT_CONFIG)",) \
+			--output-dir "$(OUT)" $(if $(ZIP),--zip "$(ZIP)",); \
+	elif [ -n "$(EXPERIMENT)" ]; then \
+		if [ -z "$(TEST_DIR)" ] && [ -z "$(DOTA_DATA_ROOT)" ]; then \
+			echo "Error: set TEST_DIR= or DOTA_DATA_ROOT= for unlabeled official test images."; \
+			exit 1; \
+		fi; \
+		$(TRAIN_ENV) odet dota-submit --experiment-dir "$(EXPERIMENT)" \
+			$(if $(TEST_DIR),--test-dir "$(TEST_DIR)",) \
+			$(if $(DOTA_DATA_ROOT),--data-root "$(DOTA_DATA_ROOT)",) \
+			--output-dir "$(OUT)" $(if $(ZIP),--zip "$(ZIP)",); \
+	else \
+		echo "Error: set FROM_JSON=, CHECKPOINT=hf://<slug>, or EXPERIMENT=runs/<model>/<id> (plus TEST_DIR=)."; \
+		exit 1; \
+	fi
 
 # Train split: run save_predictions with --data-split train and write tile_metrics.csv (for dataset.tile_metrics_csv / hard-tile oversampling).
 # Default output: SAVE_TRAIN_PRED_OUT or <latest_exp>/train_tile_eval (predictions.json, analysis_*.json, tile_metrics.csv).

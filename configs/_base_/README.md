@@ -1,6 +1,6 @@
 # Base configs
 
-These files are **base configs** only. They are not used as top-level training configs; they are included via `_base_` in configs under [oriented_rcnn/](../oriented_rcnn/), [rotated_faster_rcnn/](../rotated_faster_rcnn/), and [rotated_retinanet/](../rotated_retinanet/).
+These files are **base configs** only. They are not used as top-level training configs; they are included via `_base_` in configs under [oriented_rcnn/](../oriented_rcnn/), [rotated_faster_rcnn/](../rotated_faster_rcnn/), [rotated_retinanet/](../rotated_retinanet/), and [rotated_fcos/](../rotated_fcos/).
 
 ## Contents
 

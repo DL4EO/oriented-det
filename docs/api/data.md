@@ -27,6 +27,10 @@ The DOTA loader supports three modes for organizing your dataset:
 
 `HRSC2016Dataset` reads official XML (`mbox_cx/cy/w/h/ang` in **radians**) and ImageSets. Every object is class `ship`. Angles are converted through `polygon_to_rbox` so training uses le90. Config: `dataset.format: hrsc2016`. See [Data loading](../user-guide/data.md#hrsc2016).
 
+### FAIR1M
+
+`FAIR1MDataset` reads Pascal-VOC-like XML (`points` polygons + `possibleresult/name`) for **37** fine-grained classes (`FAIR1M_CLASSES`). Config: `dataset.format: fair1m`. Tiled training uses `odet fair1m-to-dota` then `format: dota`. See [Data loading](../user-guide/data.md#fair1m).
+
 ### Data Augmentation
 
 OrientedDet supports two types of data augmentation:

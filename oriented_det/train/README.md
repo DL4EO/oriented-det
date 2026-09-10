@@ -15,9 +15,11 @@ Use these fields to compare runs when the recipe JSON is unchanged but code move
 
 To reconstruct provenance for an old run without stamps, align `train.log` start time with `git rev-list -1 --before='<started_at>' HEAD` on the framework repo.
 
-## RPN anchor priors
+## RPN / RetinaNet anchor angles
 
-Anchor-based detectors (`RotatedFasterRCNN`, `OrientedRCNN`, `RotatedRetinaNet`) default to **horizontal RPN priors** (`theta = 0`), aligned with MMRotate-style generators. **`model.anchor_angles` is not a config field**—if present in JSON, strict loading rejects it as an unknown `model` key. Advanced use: pass **`anchor_angles=...`** only when constructing a model in Python (see `oriented_det/models/README.md`).
+Anchor-based detectors default to **horizontal priors** (`theta = 0`). Rotated RetinaNet accepts **`model.anchor_angles`** in **degrees** (e.g. `[-45, 0, 45]`); `train.py` and checkpoint load convert to radians. `null` or omitted keeps `[0]`. Two-stage recipes do not use this key.
+
+Rotated RetinaNet assignment is **`retinanet_assign.match_retinanet_anchors_to_gt`** (not the shared two-stage matcher). That path is required for dense 27-anchor P3 grids.
 
 `RotatedFCOS` is anchor-free (`model_type: rotated_fcos`) and does not use RPN anchors.
 
@@ -27,10 +29,10 @@ Anchor-based detectors (`RotatedFasterRCNN`, `OrientedRCNN`, `RotatedRetinaNet`)
 
 ## FCOS box regression (`model.box_reg_loss_type`, `model.aux_loss_type`)
 
-- **`box_reg_loss_type`**: `l1` (default), `kfiou`, or `riou` (decoded differentiable polygon IoU). DOTA Hub FCOS is 3× rIoU ([`dota_le90_3x.json`](../../configs/rotated_fcos/dota_le90_3x.json), lr **2.5e-3**).
+- **`box_reg_loss_type`**: `l1` (default), `kfiou`, or `riou` (decoded differentiable polygon IoU). DOTA Hub FCOS is 1× rIoU ([`dota_le90_1x.json`](../../configs/rotated_fcos/dota_le90_1x.json), lr **2.5e-3**).
 - **`aux_loss_type`** / **`aux_loss_weight`**: decoded `kfiou` or `probiou` on positives (centerness-weighted). Weight **0** disables. Typical **0.1**. Aux `riou` is rejected. Logged as `loss_box_reg_aux`. Aux is Gaussian overlap plus an aspect-gated heading term (`ω sin²(2Δθ)`); **`aux_angle_weight`** (default **1.0**, **0** disables the heading term) and **`aux_angle_lambda`** (default **1.0**) control it.
 
-Recipes: [`configs/rotated_fcos/dota_le90_1x.json`](../../configs/rotated_fcos/dota_le90_1x.json), [`dota_le90_3x.json`](../../configs/rotated_fcos/dota_le90_3x.json), [`dota_le90_1x_l1_kfiou_aux.json`](../../configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json).
+Recipes: [`configs/rotated_fcos/dota_le90_1x.json`](../../configs/rotated_fcos/dota_le90_1x.json), [`dota_le90_1x_l1_kfiou_aux.json`](../../configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json).
 
 ## Debug mode (`--debug`)
 
@@ -56,11 +58,11 @@ Optional root section **`production`** holds overrides for:
 
 - **Eval-val / `odet preds` score** — **`resolve_preds_score_threshold`**: CLI → **`evaluation.preds_score_threshold`** → **0.05**. Ignores **`production.score_threshold`** and train-val **`evaluation.score_threshold`** (often 0.3). Deploy / `image_demo` keep **`resolve_inference_score_threshold`**.
 
-- **Final detection NMS split** — Recipes ship **`model.final_nms_iou_threshold: 0.1`** (train val / MMRotate-style), **`production.final_nms_iou_threshold: 0.3`** (deploy / `image_demo`), and **`evaluation.final_nms_iou_threshold: 0.1`** for **`odet preds` / `make eval-val`** published protocol. Resolver: **`resolve_preds_final_nms_iou_threshold`** (CLI → `evaluation` → production-patched model).
+- **Final detection NMS** — Recipes ship **`model.final_nms_iou_threshold: 0.1`** (train val / MMRotate-style), **`production.final_nms_iou_threshold: 0.1`** (deploy / `image_demo`), and **`evaluation.final_nms_iou_threshold: 0.1`** for **`odet preds` / `make eval-val`**. Resolver: **`resolve_preds_final_nms_iou_threshold`** (CLI → `evaluation` → production-patched model).
 
 - **Decode / NMS on the loaded checkpoint model** — Non-null **`production.inference_pre_nms_score_threshold`**, **`final_nms_iou_threshold`**, **`final_nms_use_cpu`**, **`max_detections_per_image`**, **`nms_class_agnostic`**, **`roi_inference_top_class_only`**, **`rpn_pre_nms_top_n`**, **`rpn_post_nms_top_n`**, **`rpn_nms_threshold`** are applied by **`apply_inference_config_to_model`** in **`tools/save_predictions.load_model_from_checkpoint`** (deploy, **`image_demo`**, **`test_single_image`**, and as a base before eval-val may override NMS). **`tools/train.py` does not call this**.
 
-- **Deploy / `image_demo`** — Global score uses **`resolve_inference_score_threshold`** (**`production.score_threshold`** else **`evaluation.score_threshold`**). Per-class floors use the same merge as validation (**`evaluation`** then **`production`**). Sliding-window overlap defaults to **200 px** per axis unless **`production.overlap_pixels`** is set (**`resolve_inference_sliding_window_overlap_pixels`**). Edge margin from **`production.ignore_margin_pixels`** when set, else **`dataset.overlap`/2**. Canvas: **`production.stick_to_model_canvas`** (default **true** when null), **`production.use_first_image_canvas`** (default **false** when null).
+- **Deploy / `image_demo`** — Global score uses **`resolve_inference_score_threshold`** (**`production.score_threshold`** else **`evaluation.score_threshold`**). Per-class floors use the same merge as validation (**`evaluation`** then **`production`**). Sliding-window overlap defaults to **200 px** per axis unless **`production.overlap_pixels`** is set (**`resolve_inference_sliding_window_overlap_pixels`**). Per-window stitch margin default **0** (keep overlap copies, then NMS); `--ignore-margin-pixels` / `production.ignore_margin_pixels` are opt-in. Deploy’s **full-image** edge filter still uses **`production.ignore_margin_pixels`** when set, else **`dataset.overlap`/2**. Canvas: **`production.stick_to_model_canvas`** (default **true** when null), **`production.use_first_image_canvas`** (default **false** when null).
 
 Any field **`null`** or omitted keeps the usual **`evaluation`** / **`model`** / env source.
 

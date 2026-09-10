@@ -14,7 +14,7 @@ Large checkpoint files live here (typically **gitignored**). Registered assets a
 
 | Metric | Source | Typical use |
 |--------|--------|-------------|
-| **`eval_map50` in manifest / zoo tables** | `odet preds` on val tiles (`make eval-val` / `make metrics`) — all val tiles, `filter_empty_gt=false`, decode with `evaluation.final_nms_iou_threshold` when set (recipes: **0.1**); deploy still uses `production` NMS **0.3** | Published Hub metadata |
+| **`eval_map50` in manifest / zoo tables** | `odet preds` on val tiles (`make eval-val` / `make metrics`) — all val tiles, `filter_empty_gt=false`, decode with `evaluation.final_nms_iou_threshold` when set (recipes and Hub sidecars: production NMS **0.1**) | Published Hub metadata |
 | **Periodic mAP during training** | `evaluation.compute_map_every_n_epochs` on non-empty val tiles; often GPU-sampled IoU (`use_exact_rotated_iou: false`) | Monitor convergence |
 | **Final mAP after training** | `evaluation.compute_map_final` on best checkpoint; often exact CPU polygon IoU (`use_exact_rotated_iou_for_final_map: true`) | Training log headline number |
 
@@ -47,6 +47,8 @@ Overrides: `HF_REPO_ID=`, `HF_REVISION=`, `HF_COMMIT_MESSAGE=`, `PRETRAINED_DIR=
 ```bash
 odet pretrained list
 odet pretrained download oriented_rcnn_dota_le90_3x
+odet dota-submit --checkpoint hf://oriented_rcnn_dota_le90_3x \
+  --test-dir /path/to/DOTA-v1.0/test --output-dir work_dirs/Task1_orcnn
 ```
 
 ```json
@@ -61,19 +63,23 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 
 **mAP** below is **`make eval-val`** mAP50 (all 7,669 val tiles, `filter_empty_gt=false`, rotated IoU ≥ 0.50). Training-time periodic mAP uses non-empty tiles only and may be higher.
 
-**Deploy `production.score_threshold`** on these four DOTA 3× slugs is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.7**, Faster R-CNN **0.6**, RetinaNet **0.45**, FCOS **0.2**). `make eval-val` still uses score ≥ **0.05**.
+**Deploy `production.score_threshold`** on DOTA recipes is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN 1× **0.55**, Faster R-CNN **0.6**, RetinaNet **0.45**, FCOS **0.2**). 3× inherits the 1× floor except Oriented R-CNN 3× Hub, which stays **0.7**. `make eval-val` still uses score ≥ **0.05**. Faster R-CNN, FCOS, and Oriented R-CNN 1× DOTA advertised mAP is **official Task 1**, not eval-val (Oriented R-CNN 3× Hub is eval-val **79.40%**; FCOS 3× Hub is eval-val **82.32%**).
 
 ### Oriented R-CNN R50-FPN
 
-| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
-|------|--------|----------------|--------|--------------|-----------|
-| `oriented_rcnn_dota_le90_3x` | 3× (36 ep) | 79.40% | [`dota_le90_3x.json`](../configs/oriented_rcnn/dota_le90_3x.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json`](./oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log`](./oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log) |
+| Slug | Recipe | mAP50 | Config | Final config | Final log |
+|------|--------|-------|--------|--------------|-----------|
+| `oriented_rcnn_dota_le90_1x` | 1× (12 ep) | **76.73%** official Task 1 | [`dota_le90_1x.json`](../configs/oriented_rcnn/dota_le90_1x.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-725c244f.json`](./oriented_rcnn_r50_fpn_dota_le90_1x-725c244f.json) | [`oriented_rcnn_r50_fpn_dota_le90_1x-725c244f.log`](./oriented_rcnn_r50_fpn_dota_le90_1x-725c244f.log) |
+| `oriented_rcnn_dota_le90_3x` | 3× (36 ep) | 79.40% eval-val | [`dota_le90_3x.json`](../configs/oriented_rcnn/dota_le90_3x.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json`](./oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.json) | [`oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log`](./oriented_rcnn_r50_fpn_dota_le90_3x-68957f98.log) |
 
 ### Rotated Faster R-CNN R50-FPN
 
-| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
-|------|--------|----------------|--------|--------------|-----------|
-| `rotated_faster_rcnn_dota_le90_3x` | 3× ProbIoU main | 83.46% | [`dota_le90_3x.json`](../configs/rotated_faster_rcnn/dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log) |
+| Slug | Recipe | Official Task 1 | Config | Final config | Final log |
+|------|--------|-----------------|--------|--------------|-----------|
+| `rotated_faster_rcnn_dota_le90_1x` | 1× ProbIoU main | **74.42%** | [`dota_le90_1x.json`](../configs/rotated_faster_rcnn/dota_le90_1x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_1x-1e3dabeb.log) |
+| `rotated_faster_rcnn_dota_le90_3x` | 3× ProbIoU main | **74.48%** | [`dota_le90_3x.json`](../configs/rotated_faster_rcnn/dota_le90_3x.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.json) | [`rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log`](./rotated_faster_rcnn_r50_fpn_dota_le90_3x-9951acc6.log) |
+
+**Finetune from 1×, not 3×.** Official Task 1 AP50 is a wash (74.42 vs 74.48); 3× leaky eval-val (83.46%) is train+val tile memorization (eval-val − Task 1 is 9.0 vs 3.1 on 1×). AP75 is the 3× gain (45.39 vs 41.90) if the target needs tight boxes. See [rotated_faster_rcnn/README.md](../configs/rotated_faster_rcnn/README.md#1x-vs-3x-for-finetune).
 
 ### Rotated RetinaNet R50-FPN
 
@@ -83,17 +89,18 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 
 ### Rotated FCOS R50-FPN
 
-| Slug | Recipe | eval-val mAP50 | Config | Final config | Final log |
-|------|--------|----------------|--------|--------------|-----------|
-| `rotated_fcos_dota_le90_3x` | 3× decoded rIoU primary | 82.32% | [`dota_le90_3x.json`](../configs/rotated_fcos/dota_le90_3x.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log) |
+| Slug | Recipe | Official Task 1 | Config | Final config | Final log |
+|------|--------|-----------------|--------|--------------|-----------|
+| `rotated_fcos_dota_le90_1x` | 1× decoded rIoU primary | **73.07%** | [`dota_le90_1x.json`](../configs/rotated_fcos/dota_le90_1x.json) | [`rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.json`](./rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.json) | [`rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.log`](./rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.log) |
+| `rotated_fcos_dota_le90_3x` | 3× decoded rIoU | 82.32% eval-val | [`dota_le90_3x.json`](../configs/rotated_fcos/dota_le90_3x.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log) |
 
 ## HRSC2016 le90 zoo
 
 **Training split: ImageSets trainval.** **Eval split: ImageSets test** (453 images; 15 empty). Whole-image `keep_ratio` + pad-32 (no native sliding windows).
 
-**mAP** below is **`make eval-val`** mAP50 (rotated IoU ≥ 0.50, `evaluation.final_nms_iou_threshold` **0.1**; deploy production NMS **0.3**).
+**mAP** below is **`make eval-val`** mAP50 (rotated IoU ≥ 0.50, `evaluation.final_nms_iou_threshold` **0.1**; recipes and Hub sidecars also set production NMS **0.1**).
 
-**Deploy `production.score_threshold`** on these three HRSC 3× slugs is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). `make eval-val` still uses score ≥ **0.05**.
+**Deploy `production.score_threshold`** on these three HRSC recipes is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). 3× inherits the 1× floor. `make eval-val` still uses score ≥ **0.05**.
 
 ### Oriented R-CNN R50-FPN
 

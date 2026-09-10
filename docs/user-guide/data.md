@@ -257,6 +257,27 @@ sample = sample.filter_by_class(allowed_classes=["plane", "ship"])
 sample = sample.filter_by_class(drop_difficult=True)
 ```
 
+### DOTA v1.0 official test (Task 1)
+
+Test **images** are public; test **labels are not**. Hub `eval-val` mAP is on val tiles that were also used in training. To score on the hidden test set, run sliding-window inference on full-size test rasters and upload a Task 1 zip to the [DOTA evaluation server](https://captain-whu.github.io/DOTA/evaluation.html) (v1.0 Task 1, oriented boxes).
+
+```bash
+# Official download layout: test/images/*.png (no labelTxt)
+# Hub zoo (sidecar config; no local runs/ needed)
+odet dota-submit --checkpoint hf://oriented_rcnn_dota_le90_3x \
+  --test-dir /path/to/DOTA-v1.0/test --output-dir work_dirs/Task1_orcnn
+# Upload work_dirs/Task1_orcnn.zip (15 Task1_*.txt at the zip root)
+
+# Or a local training run / existing predictions.json
+odet preds --experiment-dir runs/oriented_rcnn/<id> \
+  --data-split test --test-dir /path/to/DOTA-v1.0/test --no-diagnostics
+odet dota-submit --from-json predictions/<ts>/predictions.json --output-dir work_dirs/Task1_orcnn
+```
+
+`odet preds --data-split test` globs unlabeled png/jpg (`test/images/` or a flat folder). Missing labels are empty GT. Score floor **0.05** and NMS **0.1** follow the eval-val resolvers (not deploy `production.score_threshold`). Classes with no detections get a dummy line so the server does not reject empty files.
+
+This stitch is **sliding window** on the original image (1024 canvas, overlap 200): last tiles **flush to the image edge** (same as `tile_dota.py`), overlap copies are **kept** (per-window margin default **0**), then NMS. That is live ResultMerge-style, not MMRotate’s on-disk pre-tile merge. Pass `--window-margin-pixels` to drop interior overlap-band centroids (opt-in). Use Task 1 scores to compare oriented-det checkpoints on unseen test images; do not quote a delta vs MMRotate zoo 71.28 / 73.40 / 75.69 without that distinction.
+
 ## Airbus Playground
 
 CSV + split-file datasets (`dataset.format: airbus_playground` in [Configuration](configuration.md)):
@@ -355,7 +376,7 @@ HRSC2016/
 - XML `mbox_cx/cy/w/h/ang` uses **radians**; boxes are converted through the same polygon → RBox path as DOTA (**le90**).
 - Default ImageSets mapping (MMRotate): train → **`trainval`**, val → **`test`**. Override with `dataset.train_split` / `dataset.val_split`.
 - Oriented R-CNN, Faster R-CNN, and FCOS 1×/3× use **`keep_ratio`** (long edge 800) + `pad_size_divisor` 32. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN 3× enable random rotate at p=0.5 **±20°**. Two-stage 1× recipes leave rotate off. Oriented R-CNN uses Smooth L1 + ProbIoU aux; Faster R-CNN keeps ProbIoU main + Smooth L1 aux. `make eval-val` / `odet preds` use the same whole-image path for `pad` / `keep_ratio` (no native sliding windows). DOTA eval-val stays on `fixed` pre-tiled rasters.
-- HRSC / DOTA NMS split: train `model` and eval-val `evaluation.final_nms_iou_threshold` **0.1** (MMRotate test parity); deploy `production.final_nms_iou_threshold` **0.3**. Two-stage HRSC keeps max **2000** dets/image and score **0.05**.
+- HRSC / DOTA final NMS: train `model`, eval-val `evaluation.final_nms_iou_threshold`, and deploy `production.final_nms_iou_threshold` are all **0.1** (MMRotate test parity). Two-stage HRSC keeps max **2000** dets/image and score **0.05**.
 - Optional DOTA export (for `odet tile-dota`): `odet hrsc-to-dota --data-root /path/to/HRSC2016 --output-dir /path/to/HRSC2016-dota`.
 
 ```json
@@ -370,6 +391,50 @@ HRSC2016/
 ```
 
 Recipes: [`configs/oriented_rcnn/hrsc2016_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/hrsc2016_le90_1x.json), [`configs/oriented_rcnn/hrsc2016_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/hrsc2016_le90_3x.json) (36 epochs, milestones 24/33, ±20° rotate), [`configs/rotated_faster_rcnn/hrsc2016_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_faster_rcnn/hrsc2016_le90_1x.json), [`configs/rotated_faster_rcnn/hrsc2016_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_faster_rcnn/hrsc2016_le90_3x.json), [`configs/rotated_fcos/hrsc2016_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_fcos/hrsc2016_le90_1x.json), [`configs/rotated_fcos/hrsc2016_le90_3x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_fcos/hrsc2016_le90_3x.json).
+
+## FAIR1M
+
+Fine-grained oriented detection (**37** classes under 5 coarse groups). Supported as a **train locally** dataset — **no FAIR1M Hub zoo** (Kaggle dump is CC BY-NC-SA; Gaofen test labels are hidden; the 37-class head does not replace DOTA pretrain). 1× recipes **finetune the matching DOTA 1× Hub checkpoint**; the 37-way classifier is randomly initialized (class-count tensors are skipped on load).
+
+### Download
+
+| Source | Notes |
+|--------|--------|
+| [Kaggle `ollypowell/fair1m-satellite-imagery-for-object-detection`](https://www.kaggle.com/datasets/ollypowell/fair1m-satellite-imagery-for-object-detection) | JPG + labels (~9 GB). Layout: `Dataset/Images/{Train,Val}/*.jpg` with labels in `Notebook_Working/{train,val}_labels/N.xml` (JPG stems `t_N` / `v_N` map to XML stem `N`). Same-stem `Dataset/Labels/Train/*.xml` also works. Optional `Dataset/labels*.parquet`. **License: CC BY-NC-SA 3.0 IGO.** |
+| Official Gaofen / ModelScope mirrors | TIFF + `labelXml` under `train/part1`, `train/part2`, `validation/` (TorchGeo layout) |
+
+**Kaggle notebook:** [`notebooks/kaggle_fair1m_tutorial.ipynb`](https://github.com/DL4EO/oriented-det/blob/main/notebooks/kaggle_fair1m_tutorial.ipynb) — attach the dataset, convert + tile, short train smoke (subset by default).
+
+Paper: Sun et al., *FAIR1M: A Benchmark Dataset for Fine-grained Object Recognition in High-Resolution Remote Sensing Imagery*, ISPRS 2022. [arXiv:2103.05569](https://arxiv.org/abs/2103.05569).
+
+Native loader (`dataset.format: fair1m`) reads XML `points` polygons → le90 via the same path as DOTA. Class list: `oriented_det.data.FAIR1M_CLASSES` (ai4rs order). Optional coarse curriculum: `FAIR1M_GROUPS` / `FAIR1M_FINE_TO_COARSE` with `dataset.map_labels` or `loss.roi_grouped_ce_*`.
+
+### Recommended pipeline (tiling required)
+
+Images are typically 1k–10k px — do **not** train whole-image like HRSC.
+
+Official FAIR1M-1.0 under `/path/to/data/FAIR1M` already has **train (16,488) + val (8,287)**. Use those splits — do **not** pass `--val-fraction` (that would ignore official val and hold out from train). Gaofen **test** labels are not public. If a dump really has no val folder, add `--val-fraction 0.1 --split-seed 0` so the image-level split happens **before** tiling.
+
+```bash
+# 1) Native XML → DOTA folders (official train / val; JPEG/PNG copied as-is)
+odet fair1m-to-dota \
+  --data-root /path/to/data/FAIR1M \
+  --output-dir /path/to/data/FAIR1M-dota \
+  --splits train,val
+
+# 2) Tile each split (MMRotate-style; JPEG in → JPEG tiles)
+odet tile-dota /path/to/data/FAIR1M-dota/train --tile-size 1024 --overlap 200 --min-overlap 0.7
+odet tile-dota /path/to/data/FAIR1M-dota/val   --tile-size 1024 --overlap 200 --min-overlap 0.7
+
+# 3) Recipes already point at .../tiles_1024 and load the matching DOTA 1× Hub weights
+odet train --config configs/oriented_rcnn/fair1m_le90_1x.json
+# Smoke / tutorial subset:
+#   set dataset.max_train_samples / max_val_samples in a local override JSON
+```
+
+Optional holdout protocol (only when there is no labeled val): sorted image stems, `md5(f"{seed}:{stem}")` bucket vs `val_fraction` (default seed **0**, fraction **0.1**). Stem lists are written to `FAIR1M-dota/ImageSets/{train,val}.txt`. Local eval uses the val tiles (official val, or that holdout). There is no FAIR1M test-submit tool.
+
+Recipes (1×, fixed 1024 canvas): [`configs/oriented_rcnn/fair1m_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/oriented_rcnn/fair1m_le90_1x.json), [`configs/rotated_faster_rcnn/fair1m_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_faster_rcnn/fair1m_le90_1x.json), [`configs/rotated_fcos/fair1m_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_fcos/fair1m_le90_1x.json). Zoo roles: DOTA = pretrain Hub; HRSC = published small-data Hub; FAIR1M = fine-grained support only.
 
 ## Image Tiling
 
@@ -420,7 +485,7 @@ visualize_tiles(
 
 ## Data Augmentation
 
-Training collate applies geometric augs after spatial resize: random flips (`preprocessing.enable_flip_*`, MMRotate `RRandomFlip`) then optional random rotate (`enable_random_rotate`, `random_rotate_prob`, `random_rotate_angle_range` in degrees — MMRotate `PolyRandomRotate`, `auto_bound=False`). Val and inference do not flip or rotate. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°; two-stage 1× and DOTA leave rotate off.
+Training collate applies geometric augs after spatial resize: random flips (`preprocessing.enable_flip_*`, MMRotate `RRandomFlip`) then optional random rotate (`enable_random_rotate`, `random_rotate_prob`, `random_rotate_angle_range` in degrees — MMRotate `PolyRandomRotate`, `auto_bound=False`). Val and inference do not flip or rotate. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°; two-stage 1× and DOTA Hub leave rotate off. RetinaNet 1× RR ablation (`configs/rotated_retinanet/dota_le90_1x_rr.json`) uses p=0.5 ±180°.
 
 ### 1. Geometric Transforms (Oriented Bounding Box Aware)
 

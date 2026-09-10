@@ -16,16 +16,22 @@ The tiler handles:
   Use ``--pad-edge-tiles`` for the legacy behavior (stride-only grid; last tiles may extend past the image).
 
 Output Format:
-- Tiled images: {original_name}_{x_start}_{y_start}.png
+- Tiled images: {original_name}_{x_start}_{y_start}.{png|jpg}
+  Default ``auto``: JPEG sources → JPEG tiles, PNG (and TIFF/BMP) → PNG tiles.
+  Override with ``--output-format png|jpg``.
 - Tiled annotations: {original_name}_{x_start}_{y_start}.txt (official DOTA: comma-separated)
 """
 
+from __future__ import annotations
+
 import argparse
-import os
 import sys
 import itertools
 from pathlib import Path
 from typing import List, Tuple, Optional
+
+_SOURCE_SUFFIXES = (".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp")
+_JPEG_SUFFIXES = frozenset({".jpg", ".jpeg"})
 
 import numpy as np
 
@@ -37,6 +43,54 @@ from oriented_det.data import format_dota_line
 import PIL.Image
 from tqdm import tqdm
 from shapely import geometry, affinity
+
+
+def resolve_tile_output_suffix(source_suffix: str, output_format: str = "auto") -> str:
+    """Return ``.png`` or ``.jpg`` for tile files.
+
+    ``auto`` keeps JPEG as JPEG and everything else as PNG (TIFF/BMP included).
+    """
+    fmt = (output_format or "auto").strip().lower()
+    if fmt in {"jpg", "jpeg"}:
+        return ".jpg"
+    if fmt == "png":
+        return ".png"
+    if fmt != "auto":
+        raise ValueError(
+            f"Unsupported output_format={output_format!r}; expected auto, png, or jpg"
+        )
+    if str(source_suffix).lower() in _JPEG_SUFFIXES:
+        return ".jpg"
+    return ".png"
+
+
+def collect_tile_source_images(image_dir: Path) -> List[Path]:
+    """Sorted unique images under ``images/`` (png/jpg/jpeg/tif/tiff/bmp)."""
+    image_dir = Path(image_dir)
+    files: List[Path] = []
+    for suffix in _SOURCE_SUFFIXES:
+        files.extend(sorted(image_dir.glob(f"*{suffix}")))
+        files.extend(sorted(image_dir.glob(f"*{suffix.upper()}")))
+    seen: set[Path] = set()
+    ordered: List[Path] = []
+    for path in files:
+        resolved = path.resolve()
+        if path.is_file() and resolved not in seen:
+            seen.add(resolved)
+            ordered.append(path)
+    return ordered
+
+
+def _save_tile_image(
+    image: PIL.Image.Image,
+    path: Path,
+    *,
+    jpeg_quality: int = 95,
+) -> None:
+    if path.suffix.lower() in _JPEG_SUFFIXES:
+        image.save(path, format="JPEG", quality=int(jpeg_quality), subsampling=0)
+        return
+    image.save(path)
 
 
 def read_annotations(path: Path) -> List[Tuple[List[List[float]], str, str]]:
@@ -144,6 +198,8 @@ def tile_dota_images(
     truncated_percent: float = 0.7,
     overwrite_files: bool = False,
     no_no_data: bool = True,
+    output_format: str = "auto",
+    jpeg_quality: int = 95,
 ):
     """
     Tile DOTA images and annotations.
@@ -159,14 +215,17 @@ def tile_dota_images(
             right/bottom edges align with the image (no zero-padding on those edges).
             If False, only the stride grid is used; last tiles may extend past the image
             and are zero-padded (legacy).
+        output_format: ``auto`` (JPEG→jpg, else png), or force ``png`` / ``jpg``.
+        jpeg_quality: JPEG quality 1–100 when writing JPEG tiles (default 95).
     """
     # To avoid DecompressionBombError for large images
     PIL.Image.MAX_IMAGE_PIXELS = None
 
-    # Get image list
-    img_list = list((data_dir / 'images').glob('*.png'))
+    image_dir = data_dir / "images"
+    label_dir = data_dir / "labels"
+    img_list = collect_tile_source_images(image_dir)
     if not img_list:
-        print(f"Warning: No PNG images found in {data_dir / 'images'}")
+        print(f"Warning: No images found in {image_dir} (png/jpg/jpeg/tif/tiff/bmp)")
         return
     
     print(f"Found {len(img_list)} images to process")
@@ -181,10 +240,12 @@ def tile_dota_images(
     print(f"Tile overlap: {tile_overlap} pixels")
     print(f"Minimum overlap ratio: {truncated_percent:.1%}")
     print(f"Flush last row/column to image edge (no right/bottom pad on edge tiles): {no_no_data}")
+    print(f"Output format: {output_format} (JPEG quality {jpeg_quality})")
     print()
 
     # Process each image
     for img_path in tqdm(img_list, desc="Tiling images"):
+        out_suffix = resolve_tile_output_suffix(img_path.suffix, output_format)
         # Open image
         pil_img = PIL.Image.open(str(img_path), mode='r')
         pil_img = pil_img.convert('RGB')
@@ -200,8 +261,8 @@ def tile_dota_images(
             np_img, image_width, image_height = new_img, new_width, new_height
 
         # Get annotations for image
-        label_path = str(img_path).replace('images', 'labels').replace('.png', '.txt')
-        if not os.path.exists(label_path):
+        label_path = label_dir / f"{img_path.stem}.txt"
+        if not label_path.is_file():
             print(f"Warning: No label file found for {img_path.name}")
             img_labels = []
         else:
@@ -267,8 +328,8 @@ def tile_dota_images(
             for y_start, y_end in y_positions:
                 
                 # Generate tile filename
-                tile_id = img_path.stem + "_" + str(x_start) + "_" + str(y_start) + img_path.suffix
-                save_tile_path = tiles_path / 'images' / tile_id
+                tile_id = f"{img_path.stem}_{x_start}_{y_start}{out_suffix}"
+                save_tile_path = tiles_path / "images" / tile_id
                 
                 # Save tile image if needed
                 if overwrite_files or not save_tile_path.exists():
@@ -294,7 +355,9 @@ def tile_dota_images(
                             np_img[img_y_start:img_y_end, img_x_start:img_x_end, :]
                     
                     cut_tile_img = PIL.Image.fromarray(cut_tile, "RGB")
-                    cut_tile_img.save(save_tile_path)
+                    _save_tile_image(
+                        cut_tile_img, save_tile_path, jpeg_quality=jpeg_quality
+                    )
 
                 # Process annotations for this tile
                 rows = []
@@ -315,8 +378,8 @@ def tile_dota_images(
     print(f"\nTiling complete! Output saved to: {tiles_path}")
     
     # Print statistics
-    num_tile_images = len(list((tiles_path / 'images').glob('*.png')))
-    num_tile_labels = len(list((tiles_path / 'labels').glob('*.txt')))
+    num_tile_images = len(collect_tile_source_images(tiles_path / "images"))
+    num_tile_labels = len(list((tiles_path / "labels").glob("*.txt")))
     print(f"Generated {num_tile_images} tile images and {num_tile_labels} label files")
 
 
@@ -338,6 +401,9 @@ Examples:
   # Overwrite existing tiles
   python tile_dota.py /path/to/dota/train --overwrite
 
+  # Force JPEG tiles even from PNG sources (or png from JPEG)
+  python tile_dota.py /path/to/dota/train --output-format jpg --jpeg-quality 95
+
   # Legacy: allow zero-padding on right/bottom of last row/column of tiles
   python tile_dota.py /path/to/dota/train --pad-edge-tiles
 
@@ -345,7 +411,7 @@ Input Structure:
   data_dir/
     images/
       image001.png
-      image002.png
+      image002.jpg
       ...
     labels/
       image001.txt
@@ -356,7 +422,7 @@ Output Structure:
   data_dir/tiles_{size}/
     images/
       image001_0_0.png
-      image001_960_0.png
+      image002_0_0.jpg
       ...
     labels/
       image001_0_0.txt
@@ -394,6 +460,19 @@ Output Structure:
         help='Overwrite existing tile files'
     )
     parser.add_argument(
+        '--output-format',
+        type=str,
+        default='auto',
+        choices=('auto', 'png', 'jpg', 'jpeg'),
+        help='Tile image format: auto (JPEG→jpg, else png), or force png/jpg (default: auto)',
+    )
+    parser.add_argument(
+        '--jpeg-quality',
+        type=int,
+        default=95,
+        help='JPEG quality 1-100 when writing JPEG tiles (default: 95)',
+    )
+    parser.add_argument(
         '--pad-edge-tiles',
         action='store_true',
         help='Allow zero-padding on the right/bottom of the last row/column of tiles '
@@ -426,6 +505,9 @@ Output Structure:
     
     if args.min_overlap < 0.0 or args.min_overlap > 1.0:
         parser.error("Min overlap ratio must be between 0.0 and 1.0")
+
+    if args.jpeg_quality < 1 or args.jpeg_quality > 100:
+        parser.error("JPEG quality must be between 1 and 100")
     
     # Flush edge tiles by default; --pad-edge-tiles restores legacy padding.
     no_no_data = not args.pad_edge_tiles
@@ -439,6 +521,8 @@ Output Structure:
         truncated_percent=args.min_overlap,
         overwrite_files=args.overwrite,
         no_no_data=no_no_data,
+        output_format=args.output_format,
+        jpeg_quality=args.jpeg_quality,
     )
 
 

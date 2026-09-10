@@ -9,14 +9,19 @@ from .airbus_playground import AirbusPlaygroundCSVDataset
 from .dota import (
     build_dota_split_dataset,
     collect_dota_split_image_paths,
+    collect_dota_unlabeled_image_paths,
     dota_dataset_class_names,
+)
+from .fair1m import (
+    FAIR1MDataset,
+    resolve_fair1m_imageset_split,
 )
 from .hrsc2016 import (
     HRSC2016Dataset,
     resolve_hrsc2016_imageset_split,
 )
 
-SUPPORTED_DATASET_FORMATS = ("dota", "airbus_playground", "hrsc2016")
+SUPPORTED_DATASET_FORMATS = ("dota", "airbus_playground", "hrsc2016", "fair1m")
 
 
 def dataset_format_name(dataset_cfg) -> str:
@@ -79,6 +84,19 @@ def build_split_dataset(
             filter_empty_gt=filter_empty_gt,
         )
 
+    if fmt == "fair1m":
+        imageset = resolve_fair1m_imageset_split(dataset_cfg, split)
+        return FAIR1MDataset(
+            data_root=dataset_cfg.data_root,
+            split=imageset,
+            difficult_strategy=dataset_cfg.difficult_strategy,
+            allowed_classes=dataset_cfg.allowed_classes,
+            ignore_labels=dataset_cfg.ignore_labels,
+            lookalike_labels=getattr(dataset_cfg, "lookalike_labels", None),
+            map_labels=getattr(dataset_cfg, "map_labels", None),
+            filter_empty_gt=filter_empty_gt,
+        )
+
     if fmt != "dota":
         raise ValueError(
             f"Unsupported dataset.format {fmt!r}. "
@@ -113,7 +131,13 @@ def build_split_dataset(
 def split_class_names(dataset, dataset_cfg) -> List[str]:
     """Class names for a dataset built by :func:`build_split_dataset`."""
     if dataset_format_name(dataset_cfg) == "dota":
-        return dota_dataset_class_names(dataset)
+        names = dota_dataset_class_names(dataset)
+        # FAIR1M tiled as DOTA: pin the canonical 37-way order (not alphabetical discovery).
+        from .fair1m_classes import FAIR1M_CLASSES, FAIR1M_CLASS_SET
+
+        if names and set(names).issubset(FAIR1M_CLASS_SET):
+            return list(FAIR1M_CLASSES)
+        return names
     return dataset.get_class_names()
 
 
@@ -122,6 +146,7 @@ def collect_split_images(
     data_root: Path,
     data_split: str = "val",
     val_dir: Optional[Path] = None,
+    test_dir: Optional[Path] = None,
     *,
     filter_empty_gt: Optional[bool] = None,
 ) -> Tuple[List[Path], Optional[Path], str]:
@@ -130,13 +155,17 @@ def collect_split_images(
     ``filter_empty_gt``: when ``None``, use ``config.dataset.filter_empty_gt``
     (training). ``tools/save_predictions.py`` always passes ``False`` so
     inference includes all tiles.
+
+    ``data_split='test'`` (DOTA) lists unlabeled rasters via
+    :func:`collect_dota_unlabeled_image_paths` (no annotation files). ``test_dir``
+    overrides ``data_root / test``, same idea as ``val_dir`` for val.
     """
     from dataclasses import replace
 
     dataset_format = dataset_format_name(getattr(config, "dataset", None))
     data_root = Path(data_root)
 
-    if dataset_format in ("airbus_playground", "hrsc2016"):
+    if dataset_format in ("airbus_playground", "hrsc2016", "fair1m"):
         ds_config = config.dataset
         if dataset_format == "airbus_playground":
             if not getattr(ds_config, "annotations_file", None) or not getattr(ds_config, "split_file", None):
@@ -156,6 +185,15 @@ def collect_split_images(
         return split_images, None, dataset_format
 
     if getattr(config, "dataset", None):
+        same_folder = getattr(config.dataset, "same_folder", False)
+        if data_split == "test":
+            tile_roots = [Path(test_dir)] if test_dir is not None else [data_root / "test"]
+            split_images = collect_dota_unlabeled_image_paths(
+                tile_roots, same_folder=same_folder
+            )
+            if not split_images:
+                raise ValueError(f"No unlabeled DOTA test images under: {tile_roots}")
+            return split_images, None, dataset_format
         if data_split == "val" and val_dir is not None:
             tile_roots = [Path(val_dir)]
         elif data_split == "val":
@@ -164,7 +202,6 @@ def collect_split_images(
             tile_roots = config.dataset.get_train_tile_roots()
         else:
             tile_roots = [data_root / data_split]
-        same_folder = getattr(config.dataset, "same_folder", False)
         difficult_strategy = getattr(config.dataset, "difficult_strategy", "drop")
         allowed_classes = getattr(config.dataset, "allowed_classes", None)
         ignore_labels = getattr(config.dataset, "ignore_labels", None)

@@ -83,8 +83,8 @@
         "format": {
           "type": "string",
           "default": "dota",
-          "enum": ["dota", "airbus_playground", "hrsc2016"],
-          "description": "Dataset format. 'dota' expects train_tiles_dir/val_tiles_dir or train_tiles_dirs/val_tiles_dirs. 'airbus_playground' expects annotations_file/split_file. 'hrsc2016' expects official FullDataSet + ImageSets under data_root."
+          "enum": ["dota", "airbus_playground", "hrsc2016", "fair1m"],
+          "description": "Dataset format. 'dota' expects train_tiles_dir/val_tiles_dir or train_tiles_dirs/val_tiles_dirs. 'airbus_playground' expects annotations_file/split_file. 'hrsc2016' expects official FullDataSet + ImageSets under data_root. 'fair1m' expects official train/validation (+ labelXml) or Kaggle Dataset/Images under data_root; tiled DOTA recipes use format dota after odet fair1m-to-dota."
         },
         "data_root": { "type": "string", "description": "Root directory of the dataset." },
         "train_tiles_dir": { "type": "string", "description": "Directory containing training tiles (DOTA format)." },
@@ -142,7 +142,7 @@
           "description": "Exact Playground tags (e.g. \"Partially Hidden\") that set DOTA difficult=1 and are stripped from the semantic class_name at Airbus CSV load/generation. Not ignore_labels (drop) and not lookalike (hard negative). Use with difficult_strategy \"ignore\" for don't-care."
         },
         "difficult_strategy": { "type": "string", "enum": ["drop", "ignore", "keep"], "default": "drop", "description": "How to handle DOTA 'difficult' annotations: drop at read-time, ignore (MMRotate-style don't-care), or keep as normal GT." },
-        "filter_empty_gt": { "type": "boolean", "default": false, "description": "Drop samples with no ground truth after difficult_strategy, allowed_classes, and ignore_labels (MMRotate filter_empty_gt parity). Used for DOTA tiles and HRSC2016 images. Default false keeps empty samples." },
+        "filter_empty_gt": { "type": "boolean", "default": false, "description": "Drop samples with no ground truth after difficult_strategy, allowed_classes, and ignore_labels (MMRotate filter_empty_gt parity). Used for DOTA tiles, HRSC2016 images, and FAIR1M images. Default false keeps empty samples." },
         "max_train_samples": { "type": ["integer", "null"], "description": "Cap training samples (for overfitting sanity checks)." },
         "max_val_samples": { "type": ["integer", "null"], "description": "Cap validation samples." },
         "max_samples_shuffle_seed": {
@@ -156,11 +156,11 @@
         },
         "train_split": {
           "type": ["string", "null"],
-          "description": "HRSC2016 ImageSets name for the training-loop train role. null → trainval (MMRotate). Ignored for DOTA / Airbus."
+          "description": "HRSC2016 / FAIR1M split name for the training-loop train role. HRSC null → trainval (MMRotate). FAIR1M null → train. Ignored for DOTA / Airbus."
         },
         "val_split": {
           "type": ["string", "null"],
-          "description": "HRSC2016 ImageSets name for the training-loop val role. null → test (MMRotate). Ignored for DOTA / Airbus."
+          "description": "HRSC2016 / FAIR1M split name for the training-loop val role. HRSC null → test (MMRotate). FAIR1M null → val. Ignored for DOTA / Airbus."
         },
         "tile_metrics_csv": {
           "type": ["string", "null"],
@@ -224,6 +224,7 @@
         "fpn_extra_level": { "type": "boolean", "default": false, "description": "RetinaNet: append stride-128 FPN level via 3x3 conv (MMRotate P7)." },
         "anchor_scales": { "type": "array", "items": { "type": "integer" }, "description": "Anchor scales. Single scale [8] recommended with FPN." },
         "anchor_ratios": { "type": "array", "items": { "type": "number" }, "description": "Anchor aspect ratios. e.g. [0.5, 1, 2]." },
+        "anchor_angles": { "type": ["array", "null"], "items": { "type": "number" }, "default": null, "description": "RetinaNet prior angles in degrees (converted to radians at model build). null/empty = [0] (MMRotate horizontal priors). Example: [-45, 0, 45]." },
         "anchor_octave_base_scale": { "type": ["number", "null"], "default": null, "description": "RetinaNet MMRotate octave_base_scale (with anchor_scales_per_octave)." },
         "anchor_scales_per_octave": { "type": ["integer", "null"], "default": null, "description": "RetinaNet MMRotate scales_per_octave (e.g. 3)." },
         "target_means": { "type": "array", "items": { "type": "number" }, "minItems": 5, "maxItems": 5, "description": "Box regression target means [dx, dy, dw, dh, dangle]." },

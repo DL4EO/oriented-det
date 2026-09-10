@@ -433,14 +433,8 @@ class DOTADataset:
         Returns:
             DOTASample if image exists, None if image is missing (with warning printed)
         """
-        image_name = ann_path.stem + ".png"
-        image_path = self.image_dir / image_name
-        
-        if not image_path.exists():
-            image_name = ann_path.stem + ".jpg"
-            image_path = self.image_dir / image_name
-        
-        if not image_path.exists():
+        image_path = _image_path_for_annotation(ann_path, self.image_dir)
+        if image_path is None:
             warnings.warn(f"Image not found for annotation: {ann_path}. Skipping this sample.", UserWarning)
             return None
         
@@ -593,6 +587,16 @@ def build_dota_split_dataset(
     return ConcatDataset(datasets)
 
 
+def _image_files_in_dir(directory: Path) -> List[Path]:
+    """Sorted ``*.jpg`` / ``*.jpeg`` / ``*.png`` files directly under ``directory``."""
+    directory = Path(directory)
+    return sorted(
+        list(directory.glob("*.jpg"))
+        + list(directory.glob("*.jpeg"))
+        + list(directory.glob("*.png"))
+    )
+
+
 def collect_dota_image_paths(
     tile_roots: Sequence[str | Path],
     *,
@@ -604,14 +608,44 @@ def collect_dota_image_paths(
         _, _, image_dir = _dota_dirs_for_root(Path(root), same_folder=same_folder)
         if not image_dir.exists():
             raise FileNotFoundError(f"DOTA image directory not found: {image_dir}")
-        paths.extend(sorted(image_dir.glob("*.jpg")))
-        paths.extend(sorted(image_dir.glob("*.png")))
+        paths.extend(_image_files_in_dir(image_dir))
     return paths
 
 
+def collect_dota_unlabeled_image_paths(
+    roots: Sequence[str | Path],
+    *,
+    same_folder: bool = False,
+) -> List[Path]:
+    """Collect png/jpg paths without requiring annotation files.
+
+    Official DOTA test is images only. Accepts either ``root/images/`` or a
+    flat folder of rasters (including passing ``…/test/images`` as ``root``).
+    """
+    found: List[Path] = []
+    for raw in roots:
+        root = Path(raw)
+        if not root.exists():
+            raise FileNotFoundError(f"DOTA test image root not found: {root}")
+        if same_folder:
+            images = _image_files_in_dir(root)
+        else:
+            nested = root / "images"
+            images = _image_files_in_dir(nested) if nested.is_dir() else []
+            if not images:
+                images = _image_files_in_dir(root)
+        if not images:
+            raise FileNotFoundError(
+                f"No png/jpg images under {root} (tried images/ and the folder itself)"
+            )
+        found.extend(images)
+    # Deduplicate while preserving sorted order.
+    return sorted(dict.fromkeys(found))
+
+
 def _image_path_for_annotation(ann_path: Path, image_dir: Path) -> Optional[Path]:
-    """Resolve the image file for a DOTA label path (png preferred, then jpg)."""
-    for ext in (".png", ".jpg"):
+    """Resolve the image file for a DOTA label path (png preferred, then jpg/jpeg)."""
+    for ext in (".png", ".jpg", ".jpeg"):
         candidate = image_dir / f"{ann_path.stem}{ext}"
         if candidate.exists():
             return candidate
@@ -802,6 +836,7 @@ __all__ = [
     "build_dota_loader",
     "build_dota_split_dataset",
     "collect_dota_image_paths",
+    "collect_dota_unlabeled_image_paths",
     "collect_dota_split_image_paths",
     "dota_dataset_class_names",
     "dota_label_path_for_image",

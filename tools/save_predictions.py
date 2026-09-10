@@ -65,6 +65,8 @@ from oriented_det.utils import tqdm_progress_stream
 # For diagnostics: raw inference + threshold + NMS; pad/tile path when image size ≠ model input
 from oriented_det.runtime.inference import (
     count_sliding_window_positions,
+    get_model_size,
+    resolve_sliding_window_margin_pixels,
     resolve_window_batch_size,
     run_inference_auto,
 )
@@ -687,6 +689,47 @@ def resolve_experiment_paths(experiment_dir: str) -> tuple[str, str, str]:
 
     return str(exp_dir), str(checkpoint), str(config_path)
 
+
+def resolve_preds_model_paths(
+    *,
+    experiment_dir: Optional[str],
+    checkpoint: Optional[str],
+    config_path: Optional[str],
+    model_type: str = "rotated_faster_rcnn",
+    auto_detect: bool = True,
+) -> tuple[str, str, str]:
+    """Resolve ``(experiment_dir, checkpoint, config)`` for ``odet preds`` / ``dota-submit``.
+
+    Hub zoo weights (``hf://<slug>`` or a file under ``pretrained/``) use the
+    checkpoint sidecar JSON when ``config_path`` is omitted. That path does **not**
+    fall back to the latest ``runs/`` experiment (mixing a zoo ``.pth`` with another
+    run's config).
+    """
+    if experiment_dir is not None:
+        exp, ckpt, cfg = resolve_experiment_paths(experiment_dir)
+        return (
+            exp,
+            checkpoint if checkpoint is not None else ckpt,
+            config_path if config_path is not None else cfg,
+        )
+
+    if checkpoint is not None:
+        if config_path is None:
+            from oriented_det.pretrained import resolve_checkpoint_sidecar_config
+
+            sidecar = resolve_checkpoint_sidecar_config(checkpoint)
+            if sidecar is None:
+                raise ValueError(
+                    "No pretrained sidecar config for this checkpoint. "
+                    "Pass --config, or use a Hub slug (hf://<slug>) whose .json sidecar is present."
+                )
+            config_path = str(sidecar)
+        return "", checkpoint, config_path
+
+    if not auto_detect:
+        raise ValueError("Provide --experiment-dir or --checkpoint")
+
+    return find_latest_experiment(model_type)
 
 
 def rbox_to_array(rbox: RBox) -> np.ndarray:
@@ -1336,8 +1379,10 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
                            save_visualizations: bool = False,
                            data_split: str = 'val',
                            val_dir: Optional[str] = None,
+                           test_dir: Optional[str] = None,
                            overlap_ratio: Optional[float] = None,
                            overlap_pixels: Optional[int] = None,
+                           window_margin_pixels: Optional[float] = None,
                            vis_score_threshold: float = 0.5,
                            score_threshold: Optional[float] = None,
                            per_class_score_threshold: Optional[Dict[str, float]] = None,
@@ -1370,12 +1415,17 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         output_dir: output directory (auto-generated if None)
         save_visualizations: whether to save visualization images (default: False)
         data_split: which data split to use ('train', 'val', or 'test') (default: 'val')
+        val_dir: override validation folder
+        test_dir: unlabeled official DOTA test images (``test/`` or ``test/images/``)
         vis_score_threshold: score threshold for visualization (default: 0.5).
         score_threshold: score threshold for diagnostics and mAP. If None, uses
             ``effective_eval_metric_thresholds`` (``production.*`` overrides ``evaluation.*`` when set).
         overlap_pixels: sliding-window overlap per axis. If None (and ``overlap_ratio`` is None),
             uses ``resolve_inference_sliding_window_overlap_pixels(config)`` (production.overlap_pixels
             or default 200).
+        window_margin_pixels: per-window centroid margin before merge. None or ``0``
+            keeps overlap copies, then NMS. Pass a positive value to drop the interior
+            overlap band (opt-in).
         nms_threshold: IoU threshold for NMS in diagnostics. If None, uses
                        config.model.final_nms_iou_threshold.
         nms_class_agnostic: if set, override model.nms_class_agnostic at inference time.
@@ -1555,6 +1605,20 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         if overlap_pixels is not None
         else resolve_inference_sliding_window_overlap_pixels(config)
     )
+    slice_h, slice_w = get_model_size(preprocessing)
+    resolved_window_margin_x, resolved_window_margin_y = resolve_sliding_window_margin_pixels(
+        window_margin_pixels=window_margin_pixels,
+        overlap_ratio=overlap_ratio,
+        overlap_pixels=resolved_overlap_px,
+        slice_h=slice_h,
+        slice_w=slice_w,
+    )
+    print(
+        f"Sliding-window stitch: last tiles flush to image edge; "
+        f"per-window centroid margin={resolved_window_margin_x:g}×{resolved_window_margin_y:g} px "
+        f"({'keep overlap copies, then NMS' if resolved_window_margin_x == 0 and resolved_window_margin_y == 0 else 'drop interior overlap-band centroids, then NMS'})",
+        flush=True,
+    )
     resolved_metrics_margin_px = _resolve_metrics_margin_pixels(
         margin_pixels=margin_for_metrics,
         overlap_ratio=overlap_ratio,
@@ -1579,7 +1643,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
     label_dir = None
     same_folder = False
 
-    if dataset_format in ("airbus_playground", "hrsc2016"):
+    if dataset_format in ("airbus_playground", "hrsc2016", "fair1m"):
         from dataclasses import replace
 
         ds_config = config.dataset
@@ -1607,6 +1671,11 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
                 f"Using Airbus Playground CSV dataset: {ds_config.annotations_file}, "
                 f"{ds_config.split_file} (val_split_id={val_split_id})"
             )
+        elif dataset_format == "fair1m":
+            print(
+                f"Using FAIR1M dataset: {data_root} "
+                f"(split={getattr(native_dataset, 'split', data_split)})"
+            )
         else:
             print(
                 f"Using HRSC2016 dataset: {data_root} "
@@ -1616,11 +1685,14 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
     else:
         if data_split == "val" and val_dir:
             print(f"Using override val dir: {val_dir}")
+        if data_split == "test" and test_dir:
+            print(f"Using override test dir: {test_dir}")
         split_images, label_dir, _ = collect_split_images(
             config,
             data_root,
             data_split=data_split,
             val_dir=Path(val_dir) if val_dir else None,
+            test_dir=Path(test_dir) if test_dir else None,
             filter_empty_gt=False,
         )
         same_folder = getattr(getattr(config, "dataset", None), "same_folder", False)
@@ -1745,6 +1817,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
                 nms_threshold=nms_threshold,
                 overlap_ratio=overlap_ratio,
                 overlap_pixels=overlap_pixels,
+                window_margin_pixels=window_margin_pixels,
                 window_batch_size=window_batch_effective,
                 return_raw_output=True,
                 per_class_score_threshold=per_cls_thr,
@@ -1969,6 +2042,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         # tools/app.py: prediction bboxes are in original image pixels (pad/tile path), not model-input space
         'bbox_coordinate_space': 'image_pixels',
         'metrics_margin_pixels': int(resolved_metrics_margin_px),
+        'output_dir': os.path.abspath(output_dir),
     }
     if sliding_window_positions_total is not None:
         metadata['estimated_sliding_window_positions'] = sliding_window_positions_total
@@ -1978,6 +2052,11 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         metadata['sliding_window_overlap_ratio'] = float(overlap_ratio)
     else:
         metadata['sliding_window_overlap_pixels'] = int(resolved_overlap_px)
+    metadata['sliding_window_margin_pixels'] = [
+        float(resolved_window_margin_x),
+        float(resolved_window_margin_y),
+    ]
+    metadata['sliding_window_flush_edge_tiles'] = True
     if diagnostics is not None:
         metadata['diagnostics'] = diagnostics
     if analysis is not None:
@@ -1992,6 +2071,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
     }
     
     json_path = os.path.join(output_dir, 'predictions.json')
+    metadata['predictions_json'] = os.path.abspath(json_path)
     print(f"Writing predictions.json ({len(results)} images)...", flush=True)
     with open(json_path, 'w') as f:
         json.dump(output_data, f, indent=2)
@@ -2101,15 +2181,19 @@ def main():
     parser.add_argument('--experiment-dir', type=str, default=None,
                        help='Path to experiment directory (auto-detected if not provided)')
     parser.add_argument('--checkpoint', type=str, default=None,
-                       help='Path to checkpoint file (auto-detected if not provided)')
+                       help='Checkpoint path or Hub slug (hf://<slug>). '
+                            'If --config is omitted, the pretrained sidecar JSON is used.')
     parser.add_argument('--config', type=str, default=None,
-                       help='Path to config.json file')
+                       help='Path to config.json (optional with hf:// checkpoints; sidecar is used)')
     parser.add_argument('--data-root', type=str, default=None,
                        help='Path to data root directory (optional if config has dataset.data_root)')
     parser.add_argument('--data-split', type=str, default='val', choices=['train', 'val', 'test'],
                        help='Which data split to use (train, val, or test). Default: val')
     parser.add_argument('--val-dir', type=str, default=None,
                        help='Override validation folder (for non-tiled DOTA val); when set, used instead of config dataset.val_tiles_dir')
+    parser.add_argument('--test-dir', type=str, default=None,
+                       help='Unlabeled official DOTA test images (test/ or test/images/). '
+                            'Used with --data-split test instead of data_root/test.')
     parser.add_argument(
         '--overlap-pixels',
         type=int,
@@ -2123,6 +2207,14 @@ def main():
         type=float,
         default=None,
         help='If set, window overlap as fraction of tile size [0,1); overrides --overlap-pixels.',
+    )
+    parser.add_argument(
+        '--window-margin-pixels',
+        type=float,
+        default=None,
+        help='Per-window centroid margin (px) before merging sliding windows. '
+             'Default 0 keeps overlap copies, then NMS. Pass a positive value '
+             '(e.g. overlap/2) to drop interior overlap-band copies.',
     )
     parser.add_argument('--output-dir', type=str, default=None,
                        help='Output directory (auto-generated if not provided)')
@@ -2360,31 +2452,19 @@ def main():
 
     # Resolve any missing paths.
     #
-    # Important: if --experiment-dir is provided, users expect checkpoint/config resolution to be
-    # constrained to that directory (NOT the latest run). Previously we filled missing checkpoint
-    # or config by calling find_latest_experiment(), which could silently mix an explicit experiment
-    # with a different run's config/ckpt.
-    if experiment_dir is not None and (checkpoint is None or config_path is None):
-        exp_dir_resolved, ckpt_resolved, cfg_resolved = resolve_experiment_paths(experiment_dir)
-        if checkpoint is None:
-            checkpoint = ckpt_resolved
-            print(f"Resolved checkpoint from experiment dir: {checkpoint}")
-        if config_path is None:
-            config_path = cfg_resolved
-            print(f"Resolved config from experiment dir: {config_path}")
-        experiment_dir = exp_dir_resolved
-    elif experiment_dir is None or checkpoint is None or config_path is None:
+    # --experiment-dir constrains checkpoint/config to that run (not the latest other run).
+    # --checkpoint hf://<slug> (no --config) uses the pretrained sidecar, not latest runs/.
+    if experiment_dir is None and checkpoint is None:
         print(f"Auto-detecting latest experiment for model type: {args.model_type}")
-        detected_experiment_dir, detected_checkpoint, detected_config = find_latest_experiment(args.model_type)
-        if experiment_dir is None:
-            experiment_dir = detected_experiment_dir
-            print(f"  Experiment directory: {experiment_dir}")
-        if checkpoint is None:
-            checkpoint = detected_checkpoint
-            print(f"  Checkpoint: {checkpoint}")
-        if config_path is None:
-            config_path = detected_config
-            print(f"  Config: {config_path}")
+    experiment_dir, checkpoint, config_path = resolve_preds_model_paths(
+        experiment_dir=experiment_dir,
+        checkpoint=checkpoint,
+        config_path=config_path,
+        model_type=args.model_type,
+    )
+    print(f"  Experiment directory: {experiment_dir or '(pretrained / no run dir)'}")
+    print(f"  Checkpoint: {checkpoint}")
+    print(f"  Config: {config_path}")
 
     run_inference_and_save(
         experiment_dir=experiment_dir,
@@ -2395,8 +2475,10 @@ def main():
         save_visualizations=args.save_visualizations,
         data_split=args.data_split,
         val_dir=args.val_dir,
+        test_dir=args.test_dir,
         overlap_ratio=args.overlap_ratio,
         overlap_pixels=args.overlap_pixels,
+        window_margin_pixels=args.window_margin_pixels,
         vis_score_threshold=args.vis_score_threshold,
         score_threshold=args.score_threshold,
         ignore_config_per_class_score_threshold=args.no_per_class_score_thresholds,

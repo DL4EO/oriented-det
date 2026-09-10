@@ -22,6 +22,8 @@ After `uv pip install -e .`, use the **`odet`** CLI (`odet --help`). Script impl
 | `playground-csv` | Build Airbus Playground split CSV |
 | `playground-to-dota` | Export Playground annotations to DOTA layout |
 | `hrsc-to-dota` | Export HRSC2016 XML/BMP to DOTA PNG + labels |
+| `fair1m-to-dota` | Export FAIR1M XML to DOTA images + labels |
+| `dota-submit` | DOTA v1.0 Task 1 zip (`hf://` zoo, a run, or `predictions.json`) |
 | `pretrained` | `list` / `download` Hub checkpoints (`hf://` slugs) |
 | `labels-to-comma` | Convert DOTA label files to comma-separated format |
 | `free-gpu` | Kill GPU processes (dev utility) |
@@ -213,7 +215,7 @@ odet preds --metrics-from-json predictions/<timestamp>
 
 **Common flags** (`odet preds --help`):
 
-- `--experiment-dir`, `--checkpoint`, `--config` — resolve model from a training run
+- `--experiment-dir`, `--checkpoint`, `--config` — training run, or Hub slug `hf://<slug>` (sidecar JSON when `--config` is omitted)
 - `--model-type` — `rotated_faster_rcnn`, `oriented_rcnn`, `rotated_retinanet`, or `rotated_fcos`
 - `--data-root`, `--data-split` — dataset layout
 - `--output-dir` — default: `predictions/<YYYYMMDD_HHMMSS>/`
@@ -249,6 +251,9 @@ python tools/tile_dota.py /path/to/dota/train --min-overlap 0.5
 # Overwrite existing tiles
 python tools/tile_dota.py /path/to/dota/train --overwrite
 
+# Tile format: auto (JPEG→jpg, PNG/TIFF→png), or force png/jpg
+python tools/tile_dota.py /path/to/dota/train --output-format jpg --jpeg-quality 95
+
 # Legacy: stride-only grid (last tiles may extend past the image with zero padding)
 python tools/tile_dota.py /path/to/dota/train --pad-edge-tiles
 ```
@@ -258,8 +263,8 @@ python tools/tile_dota.py /path/to/dota/train --pad-edge-tiles
 ```
 data_dir/
   images/
-    image001.png
-    image002.png
+      image001.png
+      image002.jpg
     ...
   labels/
     image001.txt
@@ -273,6 +278,8 @@ data_dir/
 - `--overlap`: Overlap between adjacent tiles in **pixels** (default: 200)
 - `--min-overlap`: Minimum overlap ratio (0.0–1.0) to keep objects that cross tile boundaries (default: **0.7**, MMRotate `iof_thr`)
 - `--overwrite`: Overwrite existing tile files
+- `--output-format`: `auto` (default: JPEG→jpg, else png), or force `png` / `jpg`
+- `--jpeg-quality`: JPEG quality 1–100 (default 95) when writing JPEG tiles
 
 **Output format:** Tiles are written to `data_dir/tiles_{size}/`:
 
@@ -281,6 +288,7 @@ data_dir/tiles_1024/
   images/
     image001_0_0.png
     image001_960_0.png
+    image002_0_0.jpg
     ...
   labels/
     image001_0_0.txt
@@ -289,7 +297,7 @@ data_dir/tiles_1024/
 ```
 
 **Tile naming convention:**
-- Format: `{original_name}_{x_start}_{y_start}.png`
+- Format: `{original_name}_{x_start}_{y_start}.png` or `.jpg` (`--output-format auto` matches the source JPEG/PNG)
 - Example: `P0001_0_0.png` (tile starting at x=0, y=0)
 
 **Use cases:**

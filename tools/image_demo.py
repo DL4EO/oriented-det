@@ -68,11 +68,7 @@ def _resolve_window_margin_pixels(config, cli_value):
     production = getattr(config, "production", None)
     if production is not None and getattr(production, "ignore_margin_pixels", None) is not None:
         return float(production.ignore_margin_pixels)
-    dataset = getattr(config, "dataset", None)
-    overlap = getattr(dataset, "overlap", None) if dataset is not None else None
-    if overlap is not None:
-        return float(overlap) / 2.0
-    return None
+    return 0.0
 
 
 def _zoomed_image(image: Image.Image, zoom: float) -> Image.Image:
@@ -190,7 +186,7 @@ def parse_args():
         default=None,
         help=(
             "Drop sliding-window detections whose centroid falls in this interior margin "
-            "(default: production.ignore_margin_pixels, else dataset overlap/2)."
+            "(default: 0, keep overlap copies then NMS; else production.ignore_margin_pixels)."
         ),
     )
     parser.add_argument(
@@ -214,8 +210,8 @@ def parse_args():
         type=int,
         default=None,
         help=(
-            "Sliding-window micro-batch (windows per forward). Skips auto GPU probing when set "
-            "(e.g. 8). Default: ORIENTED_DET_WINDOW_BATCH_SIZE env or auto on CUDA/MPS."
+            "Sliding-window micro-batch (windows per forward). Default: 8 on GPU / 4 on CPU "
+            "(ORIENTED_DET_WINDOW_BATCH_SIZE; set auto to probe)."
         ),
     )
     args = parser.parse_args()
