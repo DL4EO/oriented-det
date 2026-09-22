@@ -9,6 +9,10 @@
   },
   "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference"
+    },
     "_base_": {
       "description": "Path(s) to base config(s) to inherit from. Loaded and merged before this config. Paths are relative to the current config file.",
       "oneOf": [
