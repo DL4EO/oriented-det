@@ -1,0 +1,18 @@
+{
+  "_base_": [
+    "./dota_le90_6x_s.json"
+  ],
+  "checkpoint": {
+    "load_from_checkpoint": "/path/to/oriented-det/runs/yolo_obb/coco/checkpoints/best_mAP.pth"
+  },
+  "training": {
+    "lr_warmup_steps": 1000
+  },
+  "model": {
+    "yolo_obb_angle_weight": 0.2,
+    "yolo_obb_force_horizontal": false
+  },
+  "preprocessing": {
+    "mosaic_disable_last_n_epochs": 0
+  }
+}

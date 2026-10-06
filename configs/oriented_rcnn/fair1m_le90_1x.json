@@ -51,10 +51,10 @@
   "evaluation": {
     "iou_threshold": 0.5,
     "final_nms_iou_threshold": 0.1,
-    "compute_map_final": false,
-    "compute_map_every_n_epochs": 4,
-    "extended_gt_metrics": true,
-    "train_val_score_threshold": 0.3
+    "val_map_at_end": false,
+    "val_map_every_n_epochs": 4,
+    "val_extended_gt_metrics": true,
+    "val_score_threshold": 0.3
   },
   "tensorboard": {
     "log_debug_anchors_proposals": true,

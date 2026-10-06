@@ -32,8 +32,10 @@ from typing import Any, Dict, List, Optional, Sequence
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PIL import Image
+from tqdm import tqdm
 
 from oriented_det import RBox
+from oriented_det.utils.progress import tqdm_progress_stream
 from oriented_det.train.config import (
     get_preprocessing_params,
     resolve_inference_score_threshold,
@@ -478,18 +480,18 @@ def main():
         else:
             combined_json_path = args.img.parent / "detections.json"
 
-    for img_path in images:
-        print(f"Inference: {img_path}")
+    for img_path in tqdm(images, desc="Inference", file=tqdm_progress_stream()):
+        tqdm.write(f"Inference: {img_path}")
         original_image = Image.open(img_path).convert("RGB")
         ow, oh = original_image.size  # width, height
         inference_image = _zoomed_image(original_image, args.zoom)
         iw, ih = inference_image.size
 
         if args.zoom != 1.0:
-            print(f"  -> zoom {args.zoom:g}×: original {ow}×{oh}, inference {iw}×{ih}")
+            tqdm.write(f"  -> zoom {args.zoom:g}×: original {ow}×{oh}, inference {iw}×{ih}")
 
         if iw == slice_w and ih == slice_h:
-            print(f"  -> single forward (image {iw}×{ih} matches model canvas)")
+            tqdm.write(f"  -> single forward (image {iw}×{ih} matches model canvas)")
             tensor = preprocess_crop(inference_image, preprocessing, slice_h, slice_w)
             detections = run_inference(
                 model, tensor, args.device, score_threshold=score_thr
@@ -508,7 +510,7 @@ def main():
                 n_windows = count_sliding_window_positions(
                     ih, iw, preprocessing, overlap_pixels=overlap_pixels
                 )
-            print(
+            tqdm.write(
                 f"  -> pad/tile (image {iw}×{ih} vs canvas {slice_w}×{slice_h}, "
                 f"{omsg}, {n_windows} windows)"
             )
@@ -526,14 +528,14 @@ def main():
                 window_margin_pixels=window_margin_pixels,
                 window_batch_size=args.window_batch_size,
             )
-        print(f"  -> {len(detections)} detections (score >= {score_thr}, NMS <= {nms_thr})")
+        tqdm.write(f"  -> {len(detections)} detections (score >= {score_thr}, NMS <= {nms_thr})")
         if args.classes:
             before = len(detections)
             detections = _filter_detections_by_classes(detections, class_names, args.classes)
-            print(f"  -> {len(detections)} after class filter {args.classes!r} (removed {before - len(detections)})")
+            tqdm.write(f"  -> {len(detections)} after class filter {args.classes!r} (removed {before - len(detections)})")
         if args.zoom != 1.0:
             detections = _scale_detections(detections, 1.0 / args.zoom)
-            print(f"  -> mapped detections back to original {ow}×{oh} image")
+            tqdm.write(f"  -> mapped detections back to original {ow}×{oh} image")
 
         if out_dir is not None:
             out_path = out_dir / f"{img_path.stem}_detections.png"
@@ -547,9 +549,9 @@ def main():
         else:
             if out_path:
                 original_image.save(out_path)
-                print(f"  Saved image (no detections) to {out_path}")
+                tqdm.write(f"  Saved image (no detections) to {out_path}")
             else:
-                print("  No detections to visualize.")
+                tqdm.write("  No detections to visualize.")
         if args.json_per_image and out_path:
             save_detections_json(
                 out_path.with_suffix(".json"),
@@ -591,7 +593,7 @@ def main():
             if batch_json_path is not None:
                 batch_json_path.parent.mkdir(parents=True, exist_ok=True)
                 batch_json_path.write_text(json.dumps(batch_result, indent=2) + "\n", encoding="utf-8")
-                print(f"  Saved batch JSON to {batch_json_path}")
+                tqdm.write(f"  Saved batch JSON to {batch_json_path}")
 
     if combined_json_path is not None and all_batch_results:
         combined_json_path.parent.mkdir(parents=True, exist_ok=True)

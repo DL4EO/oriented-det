@@ -24,6 +24,7 @@ make help             # Show all available commands
 make train            # Train with CONFIG (checkpoint.* in JSON only)
 make train-multi-gpu  # Multi-GPU training (same CONFIG)
 make eval-val           # `make preds` then `make metrics` on newest `predictions/<ts>/` (DOTA val is leaky; real test is Task 1)
+make eval-test          # same pipeline on the configured labeled test split (refuses recipes with none)
 make preds              # Val inference → `predictions/<ts>/` (experiment `production.*`; no GPU mAP)
 make metrics            # Offline mAP/PR from latest `predictions/*/` or `METRICS_PRED_DIR=...` (defaults from JSON metadata)
 make dota-submit        # Task 1 zip: FROM_JSON=, CHECKPOINT=hf://<slug>, or EXPERIMENT= + TEST_DIR= (OUT= required)
@@ -153,7 +154,7 @@ This usually comes from **cuDNN** during convolution forward/backward (not from 
 
 **Troubleshooting: NCCL `ALLREDUCE` / watchdog timeout after “Computing final mAP…”**
 
-Rank 0 runs **full mAP** inside `evaluate()` (can take many minutes with large val sets). Other ranks skip mAP and used to exit `train()` first and call `destroy_process_group()` while rank 0 was still computing → broken process group and a long NCCL timeout. **Fixed** in `oriented_det/train/engine.py` with a `dist.barrier()` after final mAP when using DDP. If you still see timeouts, increase `NCCL_TIMEOUT` or set `evaluation.compute_map_final` to `false` and run a separate single-GPU eval on the best checkpoint.
+Rank 0 runs **full mAP** inside `evaluate()` (can take many minutes with large val sets). Other ranks skip mAP and used to exit `train()` first and call `destroy_process_group()` while rank 0 was still computing → broken process group and a long NCCL timeout. **Fixed** in `oriented_det/train/engine.py` with a `dist.barrier()` after final mAP when using DDP. If you still see timeouts, increase `NCCL_TIMEOUT` or set `evaluation.val_map_at_end` to `false` and run a separate single-GPU eval on the best checkpoint.
 
 **Configuration:**
 Configuration is loaded from JSON files in the `configs/` directory. Each config file includes:
@@ -329,7 +330,7 @@ python tools/save_predictions.py --config runs/.../config.json --val-dir /path/t
 python tools/save_predictions.py --config runs/.../config.json --val-dir /path/to/non-tiled/val --overlap-ratio 0.25
 ```
 
-**Options:** `--val-dir` overrides `config.dataset.val_tiles_dir` so you can point to a non-tiled validation folder (e.g. DOTA full-size images in `images/` and `labels/` or `labelTxt/`) while the config still references the tiled val. **`--data-split test`** lists **unlabeled** official test rasters (`data_root/test` or **`--test-dir`**: `test/` with `images/` or a flat png/jpg folder). Missing labels yield empty GT (use `--no-diagnostics`). **`--no-diagnostics`** skips mAP/PR/analysis (inference-only JSON). **`--metrics-from-json PATH`** loads an existing `predictions.json` (PATH may be the file or its directory), recomputes metrics from stored boxes/scores/GTs, writes `analysis_*.json` / plots beside it, and refreshes `metadata.diagnostics`. Sliding-window overlap: **`--overlap-pixels`** (omit to use `production.overlap_pixels` from the experiment config when set, else **200**) or **`--overlap-ratio`** in `[0,1)` (if set, overrides pixels). Last tiles flush to the image edge. Per-window centroid margin: **`--window-margin-pixels`** (default **0**, keep overlap copies then NMS). Metrics edge margin: `--metrics-margin-pixels` discards GT/detections whose centroids fall in the outer overlap band (`[0, margin)` or `(W-margin, W]` per axis); keeps the tile interior `[margin, W-margin]` for **metrics only** (mAP/PR/per-image metrics), same rule as deploy `MARGIN`; when omitted, uses **`production.ignore_margin_pixels`** from the experiment config when set, else **overlap/2** (or the value stored in metadata when re-running metrics unless overridden on the CLI). If `--nms-threshold` is omitted, the tool uses `config.model.final_nms_iou_threshold` (fallback: 0.5; legacy `nms_threshold` is migrated on load). If `--iou-threshold` is omitted, mAP / PR matching uses **`effective_eval_metric_thresholds`** so **`production.iou_threshold`** overrides **`evaluation.iou_threshold`** when set, same merge order as validation during training—this is **rotated GT–det IoU**, not NMS IoU. If `--score-threshold` is omitted, the post-NMS filter for `run_inference_auto` and diagnostics uses **`resolve_preds_score_threshold`** (CLI → **`evaluation.preds_score_threshold`** → **0.05**), not `production.score_threshold` or train-val `evaluation.train_val_score_threshold`. Logs print **`mAP50`-style** names (e.g. `Final mAP50: …`) and spell out NMS IoU separately so it is not confused with DOTA’s 0.1 NMS.
+**Options:** `--val-dir` overrides `config.dataset.val_tiles_dir` so you can point to a non-tiled validation folder (e.g. DOTA full-size images in `images/` and `labels/` or `labelTxt/`) while the config still references the tiled val. **`--data-split test`** uses labeled `dataset.test_tiles_dir(s)` or `dataset.test_split` when the config has a test split (`make eval-test`, `--require-test-split`). Without that split, or with **`--test-dir`**, it lists **unlabeled** official test rasters (`data_root/test` or `test/images/` or a flat png/jpg folder) for Task 1. Missing labels yield empty GT (use `--no-diagnostics`). **`--no-diagnostics`** skips mAP/PR/analysis (inference-only JSON). **`--metrics-from-json PATH`** loads an existing `predictions.json` (PATH may be the file or its directory), recomputes metrics from stored boxes/scores/GTs, writes `analysis_*.json` / plots beside it, and refreshes `metadata.diagnostics`. Sliding-window overlap: **`--overlap-pixels`** (omit to use `production.overlap_pixels` from the experiment config when set, else **200**) or **`--overlap-ratio`** in `[0,1)` (if set, overrides pixels). Last tiles flush to the image edge. Per-window centroid margin: **`--window-margin-pixels`** (default **0**, keep overlap copies then NMS). Metrics edge margin: eval-val defaults to **0** (every GT and detection is scored), including `make metrics` / `--metrics-from-json`. `--metrics-margin-pixels` sets a positive band that drops centroids in `[0, margin)` or `(W-margin, W]` and keeps the tile interior for **metrics only**. Eval-val does not read `production.ignore_margin_pixels`, tile overlap, or a margin stored in `predictions.json`. Deploy / `image_demo` still use `production.ignore_margin_pixels` (null means `dataset.overlap / 2`). If `--nms-threshold` is omitted, the tool uses `config.model.final_nms_iou_threshold` (fallback: 0.5; legacy `nms_threshold` is migrated on load). If `--iou-threshold` is omitted, mAP / PR matching uses **`effective_eval_metric_thresholds`** so **`production.iou_threshold`** overrides **`evaluation.iou_threshold`** when set, same merge order as validation during training—this is **rotated GT–det IoU**, not NMS IoU. If `--score-threshold` is omitted, the post-NMS filter for `run_inference_auto` and diagnostics uses **`resolve_preds_score_threshold`** (CLI → **`evaluation.preds_score_threshold`** → **0.05**), not `production.score_threshold` or train-val `evaluation.train_val_score_threshold`. Logs print **`mAP50`-style** names (e.g. `Final mAP50: …`) and spell out NMS IoU separately so it is not confused with DOTA’s 0.1 NMS.
 
 **Inference-time knob overrides (without editing config.json):** You can override the model’s proposal / prefilter behavior for evaluation-only runs:
 - `--inference-pre-nms-score-threshold`: overrides `model.inference_pre_nms_score_threshold` (prefilter before final/merge NMS)
@@ -354,7 +355,7 @@ Sweep controls:
 - `--pr-threshold-step` (default `0.05`)
 - `--pr-iou-threshold` (default: uses `--iou-threshold`; lets PR/F1 matching IoU differ from mAP IoU)
 
-**Per-class score thresholds:** For `save_predictions.py`, merged **`evaluation.*`** + **`production.*`** per-class floors come from **`merge_per_class_score_thresholds`**. Global score for preds uses **`resolve_preds_score_threshold`** (not train-val / production). `predictions.json` metadata records the applied `score_threshold` and `per_class_score_threshold`.
+**Per-class score thresholds:** For `save_predictions.py`, merged **`evaluation.*`** + **`production.*`** per-class floors come from **`merge_per_class_score_thresholds`**. Global score for preds uses **`resolve_preds_score_threshold`**: val reads `evaluation.val_score_threshold`, test reads `evaluation.test_score_threshold` (null → 0.05). Production is deploy only. `predictions.json` metadata records the applied `score_threshold` and `per_class_score_threshold`.
 
 **Per-class best threshold analysis:** With `--per-class-threshold-analysis`, the analysis JSON also includes `best_threshold_per_class` (best F1 per class over the same threshold grid). This is expensive on large datasets.
 
@@ -372,7 +373,7 @@ Sweep controls:
 }
 ```
 
-**`make preds` / `make metrics` (Makefile):** The root `Makefile` does **not** pass score, IoU, overlap, or NMS overrides. **`make preds`** runs `tools/save_predictions.py` with **`--no-diagnostics`** only; the global score floor is **`evaluation.preds_score_threshold`** or **0.05**, NMS IoU prefers **`evaluation.final_nms_iou_threshold`**, and tiling uses **`production.overlap_pixels`**. For tiled DOTA, **all tiles** under the split roots are included (**`dataset.filter_empty_gt` is not applied** at inference; training may still drop empty tiles). **`make metrics`** runs **`--metrics-from-json`** with no extra flags: mAP/PR reuse **`predictions.json`** metadata (the values written at inference time). To re-run metrics with different thresholds, call `python tools/save_predictions.py --metrics-from-json <dir> --score-threshold …` yourself.
+**`make preds` / `make metrics` (Makefile):** The root `Makefile` does **not** pass score, IoU, overlap, or NMS overrides. **`make preds`** runs `tools/save_predictions.py` with **`--no-diagnostics`** only; the val score floor is **`evaluation.val_score_threshold`**; **`make eval-test`** uses **`evaluation.test_score_threshold`** or **0.05**, NMS IoU prefers **`evaluation.final_nms_iou_threshold`**, and tiling uses **`production.overlap_pixels`**. For tiled DOTA, **all tiles** under the split roots are included (**`dataset.filter_empty_gt` is not applied** at inference; training may still drop empty tiles). **`make metrics`** runs **`--metrics-from-json`** with no extra flags: mAP/PR reuse **`predictions.json`** metadata (the values written at inference time). To re-run metrics with different thresholds, call `python tools/save_predictions.py --metrics-from-json <dir> --score-threshold …` yourself.
 
 
 ### `app.py`
@@ -515,6 +516,27 @@ python tools/playground_to_dota.py --data-root /path/to/export --output-dir /pat
 # Dry run (report stats only)
 python tools/playground_to_dota.py --data-root /path/to/export --output-dir /path/to/dota_out --dry-run
 ```
+
+### `ossdd_fix_tiff.py`
+
+Rewrite photometric interpretation **34892** (DNG LinearRaw) to **1** (MinIsBlack) on the OSSDD **700×700** train chips. Pixel bytes stay put. Pillow refuses 34892, so `ossdd_to_dota.py` cannot read those chips until this has run. Val and test chips are already MinIsBlack and are skipped.
+
+**Usage:**
+```bash
+python tools/ossdd_fix_tiff.py --data-root /path/to/data/OSSDD --dry-run
+python tools/ossdd_fix_tiff.py --data-root /path/to/data/OSSDD
+```
+
+### `ossdd_to_dota.py`
+
+Export **OSSDD** (Sentinel-1 GRD, Hammer et al. 2026) float chips and rotated-box text to DOTA PNG + `labels/`. Clips non-positive amplitudes and values above 20000, applies `log10`, then per-chip min-max. Repeats the gray chip to RGB. Default polarization is **VH**.
+
+**Usage:**
+```bash
+python tools/ossdd_to_dota.py --data-root /path/to/data/OSSDD --output-dir /path/to/data/OSSDD-dota --polarization VH
+```
+
+Recipes: [`configs/rotated_rtmdet/ossdd_le90_vh_1x_s.json`](../configs/rotated_rtmdet/ossdd_le90_vh_1x_s.json), [`configs/rotated_fcos/ossdd_le90_vh_3x.json`](../configs/rotated_fcos/ossdd_le90_vh_3x.json), [`configs/rotated_faster_rcnn/ossdd_le90_vh_3x.json`](../configs/rotated_faster_rcnn/ossdd_le90_vh_3x.json). The FCOS and Faster R-CNN 3× recipes inherit a 1× finetune in the same folder.
 
 ### `hrsc_to_dota.py`
 

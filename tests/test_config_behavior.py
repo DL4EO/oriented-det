@@ -200,7 +200,7 @@ def test_dota_3x_recipes_are_1x_plus_36_epochs():
         assert list(three.training.lr_scheduler_milestones) == [24, 33], name
         assert three.training.lr_warmup_steps == one.training.lr_warmup_steps, name
         assert three.model.max_detections_per_image == one.model.max_detections_per_image, name
-        assert three.evaluation.train_val_score_threshold == one.evaluation.train_val_score_threshold, name
+        assert three.evaluation.val_score_threshold == one.evaluation.val_score_threshold, name
     fcos_3x = TrainingExperimentConfig.load(root / "configs/rotated_fcos/dota_le90_3x.json")
     ret_3x = TrainingExperimentConfig.load(root / "configs/rotated_retinanet/dota_le90_3x.json")
     assert fcos_3x.training.lr_warmup_steps == 500
@@ -340,3 +340,40 @@ def test_legacy_cosine_t_max_null_is_dropped(tmp_path):
         warnings.simplefilter("error", DeprecationWarning)
         cfg = TrainingExperimentConfig.load(cfg_path)
     assert cfg.training.lr_scheduler_cosine_epochs is None
+
+
+def test_legacy_compute_test_map_remaps_to_compute_map_test(tmp_path):
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "model_type": "oriented_rcnn",
+                "dataset": {
+                    "data_root": str(tmp_path),
+                    "format": "dota",
+                    "test_split": "test",
+                },
+                "evaluation": {"compute_test_map": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.warns(DeprecationWarning, match="compute_test_map"):
+        cfg = TrainingExperimentConfig.load(cfg_path)
+    assert cfg.evaluation.test_map is True
+
+
+def test_legacy_compute_test_map_conflicts_with_compute_map_test(tmp_path):
+    cfg_path = tmp_path / "cfg.json"
+    cfg_path.write_text(
+        json.dumps(
+            {
+                "model_type": "oriented_rcnn",
+                "dataset": {"data_root": str(tmp_path), "format": "dota"},
+                "evaluation": {"compute_test_map": True, "compute_map_test": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="compute_map_test"):
+        TrainingExperimentConfig.load(cfg_path)

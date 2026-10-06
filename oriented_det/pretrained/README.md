@@ -25,9 +25,10 @@ Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 - `rotated_fcos_dota_le90_1x`
 - `rotated_fcos_dota_le90_3x`
 - `rotated_fcos_hrsc2016_le90_3x`
+- `rotated_rtmdet_dota_le90_3x`
 
 On-disk / Hub filenames include a **SHA-256[:8]** suffix (see `tools/publish_checkpoint.py`).
-Each published weight can have sidecar artifacts beside it in `pretrained/`: `<weight-stem>.json` for the exact final run config and `<weight-stem>.log` for the training log. DOTA Hub sidecars set `production.score_threshold` to eval-val F1 − **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**). HRSC sidecars use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). Recipes and Hub sidecars use **`production.final_nms_iou_threshold: 0.1`**.
+Each published weight can have sidecar artifacts beside it in `pretrained/`: `<weight-stem>.json` for the exact final run config and `<weight-stem>.log` for the training log. DOTA Hub sidecars set `production.score_threshold` to eval-val F1 − **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**, RTMDet **0.45**). HRSC sidecars use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). Recipes and Hub sidecars use **`production.final_nms_iou_threshold: 0.1`**.
 
 ## Usage
 
@@ -51,7 +52,7 @@ Simple inference (`odet image-demo`, `odet preds`, deploy paths through `oriente
 
 1. `python tools/publish_checkpoint.py <run_ckpt> pretrained/<basename_without_hash>`
 2. Copy `<experiment>/config.json` and `train.log` to `pretrained/<weight-stem>.json` and `.log`
-3. Update `manifest.json` (`filename`, `sha256`, `source_recipe`, `eval_map50`, `eval_task1_map50` when DOTA Task 1 exists, …). **`eval_map50`** is `make eval-val` mAP50 (`odet preds` on the recipe val split): **leaky val tiles for DOTA**, **held-out ImageSets test for HRSC**. It is not `compute_map_final` from training and not official Task 1 — see [pretrained/README.md](../../pretrained/README.md).
+3. Update `manifest.json` (`filename`, `sha256`, `source_recipe`, `eval_map50`, `eval_task1_map50` when DOTA Task 1 exists, …). **`eval_map50`** is `make eval-val` mAP50 (`odet preds` on the recipe val split): **leaky val tiles for DOTA**, **held-out ImageSets test for HRSC**. It is not `val_map_at_end` from training and not official Task 1 — see [pretrained/README.md](../../pretrained/README.md).
 4. Upload: `make upload-pretrained` (`.pth` plus sidecar `.json` / `.log` when present)
 
 See also [pretrained/README.md](../../pretrained/README.md) at the repository root.

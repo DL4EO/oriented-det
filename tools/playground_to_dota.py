@@ -36,6 +36,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from tqdm import tqdm
+
 from oriented_det.data import format_dota_line
 from oriented_det.data.airbus_playground import (
     TileRecord,
@@ -44,6 +46,7 @@ from oriented_det.data.airbus_playground import (
     _load_airbus_label_rows,
     _image_group_key,
 )
+from oriented_det.utils.progress import tqdm_progress_stream
 
 
 def _unique_tile_basename(tile: TileRecord) -> str:
@@ -173,7 +176,11 @@ def run(
         "objects_total": 0,
     }
 
-    for tile in sorted(tiles, key=lambda t: t.tile_relpath):
+    for tile in tqdm(
+        sorted(tiles, key=lambda t: t.tile_relpath),
+        desc="Exporting tiles",
+        file=tqdm_progress_stream(),
+    ):
         img_src = root / tile.tile_relpath
         if not img_src.exists():
             stats["tiles_skipped"] += 1

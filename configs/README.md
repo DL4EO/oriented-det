@@ -32,6 +32,7 @@ Do **not** call HRSC, FAIR1M, SSDD, or HRSID `make eval-val` leaky. That word is
 | Rotated Faster R-CNN 3× | [rotated_faster_rcnn/dota_le90_3x.json](rotated_faster_rcnn/dota_le90_3x.json) | `rotated_faster_rcnn_dota_le90_3x` | **74.48%** official Task 1 |
 | Rotated FCOS 1× rIoU | [rotated_fcos/dota_le90_1x.json](rotated_fcos/dota_le90_1x.json) | `rotated_fcos_dota_le90_1x` | **73.07%** official Task 1 |
 | Rotated FCOS 3× rIoU | [rotated_fcos/dota_le90_3x.json](rotated_fcos/dota_le90_3x.json) | `rotated_fcos_dota_le90_3x` | **72.91%** official Task 1 |
+| Rotated RTMDet-S 3× | [rotated_rtmdet/dota_le90_3x_s.json](rotated_rtmdet/dota_le90_3x_s.json) | `rotated_rtmdet_dota_le90_3x` | **77.60%** official Task 1 |
 
 ## HRSC2016 pretrained models
 
@@ -98,6 +99,7 @@ Example in an external project that keeps local dataset fragments:
 - **[rotated_faster_rcnn/](rotated_faster_rcnn/)** — Rotated Faster R-CNN. Standard recipe: ProbIoU main ROI loss, Smooth L1 aux 0.1, angle weight 1.0 (`dota_le90_1x.json`; 3× via `dota_le90_3x.json`). See [rotated_faster_rcnn/README.md](rotated_faster_rcnn/README.md).
 - **[rotated_retinanet/](rotated_retinanet/)** — Rotated RetinaNet (one-stage). See [rotated_retinanet/README.md](rotated_retinanet/README.md).
 - **[rotated_fcos/](rotated_fcos/)** — Rotated FCOS (anchor-free one-stage; L1, optional KFIoU aux, or decoded rIoU primary). See [rotated_fcos/README.md](rotated_fcos/README.md).
+- **[rotated_rtmdet/](rotated_rtmdet/)** — Rotated RTMDet (CSPNeXt-S + PAFPN speed tier; Hub 3×). See [rotated_rtmdet/README.md](rotated_rtmdet/README.md).
 
 ## Muted keys
 
@@ -126,7 +128,7 @@ All options, types, and defaults: **[config.schema.json](config.schema.json)** (
 | `data_loader` | batch_size, num_workers, shuffle, pin_memory |
 | `model` | backbone, fpn_*, anchor_*, target_means/stds, roi_* (loss, batch, iou, schedule, **roi_proj_xy**), rpn_*, use_hbb_for_matching, add_gt_as_proposals, **rpn_nms_threshold** (proposal NMS), **final_nms_iou_threshold** / **final_nms_iou_schedule_*** (post–ROI-head NMS), **final_nms_use_cpu** (exact polygon final NMS on CPU), nms_class_agnostic, max_detections_per_image, inference_pre_nms_score_threshold |
 | `training` | **lr_scheduler_type** first, then lr_scheduler_*, lr_warmup_steps, lr_scaling_*, use_lr_param_groups, lr_mult_*, then num_epochs, learning_rate, momentum, weight_decay, use_amp, gradient_accumulation_steps, max_grad_norm, loss_weights. See [Training — Learning rate scheduling](../docs/user-guide/training.md#learning-rate-scheduling) and [_base_/schedules/README.md](_base_/schedules/README.md). |
-| `evaluation` | **`train_val_score_threshold`** (in-train val / mAP / `best_mAP`; legacy alias `score_threshold`), **`preds_score_threshold`** for **`odet preds` / `make eval-val`** (null → **0.05**), iou_threshold, compute_map_*; **`final_nms_iou_threshold`** for eval-val NMS only (DOTA+HRSC: **0.1**, MMRotate test parity) |
+| `evaluation` | **`val_score_threshold`** (periodic val / `make eval-val` / `best_mAP`), **`test_score_threshold`** for **`test_map` / `make eval-test`** (null → **0.05**), iou_threshold, compute_map_*; **`final_nms_iou_threshold`** for eval-val NMS only (DOTA+HRSC: **0.1**, MMRotate test parity) |
 | `production` | Optional **deploy / `image_demo`** overrides: `score_threshold` via `resolve_inference_score_threshold` (does **not** override train-val mAP; `odet preds` ignores it). DOTA 1× recipes set this to eval-val global F1 − **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**); 3× inherits those floors. HRSC 1× recipes do the same (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). `per_class_score_threshold` merges on top of `evaluation` for preds/deploy only (`merge_per_class_score_thresholds`; mAP IoU is `evaluation.iou_threshold` only). **Decode (deploy / `image_demo`)** — RPN/NMS/threshold fields patch the loaded model via `apply_inference_config_to_model` (DOTA+HRSC+FAIR1M: final NMS **0.1**). **`odet preds`** prefers `evaluation.final_nms_iou_threshold` when set. Not applied during `tools/train.py` (training uses `model.*`, final NMS **0.1**). **Deploy / tiling** — `overlap_pixels`, `ignore_margin_pixels`, canvas flags (see **config.schema.json**). |
 | `checkpoint` | load_from_checkpoint, load_from_experiment, **discover_previous_run**, resume_from_checkpoint_epoch, load_optimizer_state, load_scheduler_state, load_include_prefixes, load_exclude_prefixes, start_epoch, best_metric, higher_is_better |
 | `loss` | loss_type (`focal_weighted` now also scales FCOS/RetinaNet sigmoid focal per class; `background_weight` is ROI-only), class_weight_method, background_weight, focal_alpha, focal_gamma, label_smoothing, **roi_grouped_ce_*** (coarse-to-fine ROI classifier curriculum in one run) |

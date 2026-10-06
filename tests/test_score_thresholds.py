@@ -114,7 +114,7 @@ def test_compute_val_stats_extended_gt_zero_iou_missed():
 
 def test_evaluation_use_exact_rotated_iou_default():
     cfg = EvaluationConfig()
-    assert cfg.use_exact_rotated_iou is True
+    assert cfg.val_exact_rotated_iou is True
 
 
 def test_config_use_exact_rotated_iou_for_map(tmp_path):
@@ -125,7 +125,7 @@ def test_config_use_exact_rotated_iou_for_map(tmp_path):
         encoding="utf-8",
     )
     cfg = TrainingExperimentConfig.load(p)
-    assert cfg.evaluation.use_exact_rotated_iou is False
+    assert cfg.evaluation.val_exact_rotated_iou is False
     assert config_use_exact_rotated_iou_for_map(cfg) is False
 
 
@@ -151,6 +151,67 @@ def test_config_use_exact_rotated_iou_for_final_map_fallback(tmp_path):
     )
     cfg = TrainingExperimentConfig.load(p)
     assert config_use_exact_rotated_iou_for_final_map(cfg) is False
+
+
+def test_compute_map_test_uses_preds_score_not_train_val(tmp_path, monkeypatch):
+    """Test mAP uses preds_score_threshold; final val mAP keeps the train-val floor."""
+    from oriented_det.train.engine import train
+
+    calls = []
+
+    def _fake_evaluate(*_args, **kwargs):
+        calls.append(float(kwargs["score_threshold"]))
+        return {"mAP": 0.0}
+
+    monkeypatch.setattr("oriented_det.train.engine.evaluate", _fake_evaluate)
+
+    model = torch.nn.Linear(1, 1)
+    ckpt = tmp_path / "best.pth"
+    torch.save({"model_state_dict": model.state_dict()}, ckpt)
+
+    class _Loader:
+        def __len__(self):
+            return 1
+
+    class _Ckpt:
+        best_checkpoint_path = ckpt
+
+    train(
+        model=model,
+        train_loader=_Loader(),
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        device=torch.device("cpu"),
+        num_epochs=0,
+        val_loader=_Loader(),
+        test_loader=_Loader(),
+        checkpoint_manager=_Ckpt(),
+        eval_score_threshold=0.3,
+        eval_test_score_threshold=0.05,
+        eval_compute_map_final=True,
+        eval_compute_map_test=True,
+    )
+    assert calls == [0.3, 0.05]
+
+
+def test_ossdd_recipe_test_map_floor_is_preds_default():
+    from pathlib import Path
+
+    from oriented_det.train.config import (
+        effective_eval_metric_thresholds,
+        resolve_preds_score_threshold,
+    )
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = TrainingExperimentConfig.load(
+        root / "configs" / "rotated_rtmdet" / "ossdd_le90_vh_1x_s.json"
+    )
+    train_sc, _, _ = effective_eval_metric_thresholds(cfg)
+    test_sc, src = resolve_preds_score_threshold(cfg, data_split="test")
+    assert cfg.evaluation.test_map is True
+    assert cfg.evaluation.test_score_threshold is None
+    assert train_sc == 0.3
+    assert test_sc == 0.05
+    assert "0.05" in src
 
 
 def test_compute_val_stats_sampled_iou_path():

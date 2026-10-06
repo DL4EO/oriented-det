@@ -144,6 +144,8 @@ def test_hrsid_recipes_load():
         assert cfg.dataset.format == "hrsid"
         assert cfg.dataset.overlap == 0
         assert cfg.dataset.val_split == "test"
+        assert cfg.dataset.test_split == "test"
+        assert cfg.dataset.has_test_split()
         assert list(cfg.preprocessing.target_size) == [800, 800]
         assert cfg.preprocessing.resize_mode == "keep_ratio"
         assert cfg.checkpoint.load_from_checkpoint == hub

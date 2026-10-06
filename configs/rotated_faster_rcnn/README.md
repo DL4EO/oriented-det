@@ -180,6 +180,8 @@ Typical published baselines use **SGD** \(momentum 0.9, weight decay 1e-4\), **b
 | [`fair1m_le90_1x.json`](./fair1m_le90_1x.json) | **1× FAIR1M** — tiled 1024/200, finetune `hf://rotated_faster_rcnn_dota_le90_1x` (37-way cls re-init). Local tiled-val mAP50 **36.70%** (`runs/rotated_faster_rcnn/20260910-072116`). No Hub. |
 | [`ssdd_le90_1x.json`](./ssdd_le90_1x.json) | **1× SSDD** — native SAR chips, keep-ratio 608, finetune `hf://rotated_faster_rcnn_dota_le90_1x` (1-way ship re-init). Held-out test **90.34%**. No Hub. |
 | [`hrsid_le90_1x.json`](./hrsid_le90_1x.json) | **1× HRSID** — native COCO, keep-ratio 800, finetune `hf://rotated_faster_rcnn_dota_le90_1x`. Held-out test **78.55%**. No Hub. |
+| [`ossdd_le90_vh_1x.json`](./ossdd_le90_vh_1x.json) | **1× OSSDD VH** — DOTA export, 512 crop, finetune `hf://rotated_faster_rcnn_dota_le90_1x` (1-way ship re-init). mAP is the mean of area-under-PR over rotated IoU 0.10–0.95 step 0.05. Val during training; `evaluation.test_map` scores held-out test. Logged 1× run is AP50 **60.10%** test (`runs/rotated_faster_rcnn/20261006-025419`). Comparison: [RTMDet OSSDD results](../rotated_rtmdet/README.md#ossdd-1x-vh-results). No Hub. |
+| [`ossdd_le90_vh_3x.json`](./ossdd_le90_vh_3x.json) | **3× OSSDD VH** — inherits 1×; 36 epochs, milestones [24, 33], batch **4** (1× stays at 2). Learning rate is unchanged. No Hub. |
 
 ### First run (1× / Hub)
 
@@ -261,5 +263,6 @@ SSDD (official last-digit **train** / **held-out test**, keep-ratio 608). 12-epo
 ```bash
 odet train --config configs/rotated_faster_rcnn/hrsid_le90_1x.json
 odet train --config configs/rotated_faster_rcnn/ssdd_le90_1x.json
+odet train --config configs/rotated_faster_rcnn/ossdd_le90_vh_3x.json
 make eval-val EXPERIMENT=runs/rotated_faster_rcnn/<timestamp>
 ```

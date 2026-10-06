@@ -10,6 +10,8 @@ Anchor-free single-stage oriented detector (v0.2). **DistanceAnglePointCoder** (
 | [`hrsc2016_le90_1x.json`](./hrsc2016_le90_1x.json) | **1× HRSC2016 rIoU** (native XML, single-class ship, `keep_ratio` + pad-32, H+V+diagonal flips + random rotate p=0.5 **±20°**, trainval/test). Same head/lr as DOTA 1× rIoU. Deploy `production.score_threshold` **0.2** (eval-val F1 0.25 − 0.05). |
 | [`hrsc2016_le90_3x.json`](./hrsc2016_le90_3x.json) | **3× HRSC2016 rIoU** — inherits 1×; 36 epochs, milestones `[24, 33]`, `lr_scheduler_gamma` `[0.1, 0.5]`, same lr **2.5e-3**. Hub: `rotated_fcos_hrsc2016_le90_3x`. |
 | [`hrsid_le90_1x.json`](./hrsid_le90_1x.json) | **1× HRSID rIoU** — native COCO, keep-ratio 800, finetune `hf://rotated_fcos_dota_le90_1x`. 12 epochs. No Hub. |
+| [`ossdd_le90_vh_1x.json`](./ossdd_le90_vh_1x.json) | **1× OSSDD VH rIoU** — DOTA export, 512 crop, finetune `hf://rotated_fcos_dota_le90_1x`. mAP is the mean of area-under-PR over rotated IoU 0.10–0.95 step 0.05. Val during training; `evaluation.test_map` scores held-out test. Logged 1× run is AP50 **58.21%** test (`runs/rotated_fcos/20261006-012500`). Comparison: [RTMDet OSSDD results](../rotated_rtmdet/README.md#ossdd-1x-vh-results). No Hub. |
+| [`ossdd_le90_vh_3x.json`](./ossdd_le90_vh_3x.json) | **3× OSSDD VH rIoU** — inherits 1×; 36 epochs, milestones `[24, 33]`, batch **4** (1× stays at 2). Learning rate is unchanged. No Hub. |
 
 Former recipe filenames `dota_le90_1x_riou.json`, `dota_le90_*_kfiou_aux.json`, and `dota_le90_3x_l1.json` were renamed/folded into the table above (1× rIoU is now `dota_le90_1x.json`; KFIoU aux 1× is `dota_le90_1x_l1_kfiou_aux.json`).
 
@@ -63,7 +65,8 @@ odet train --config configs/rotated_fcos/dota_le90_3x.json
 odet train --config configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json
 odet train --config configs/rotated_fcos/hrsc2016_le90_1x.json
 odet train --config configs/rotated_fcos/hrsc2016_le90_3x.json
+odet train --config configs/rotated_fcos/ossdd_le90_vh_3x.json
 make wizard CONFIG=configs/rotated_fcos/dota_le90_1x.json
 ```
 
-`make eval-val` / `odet preds` use **`evaluation.preds_score_threshold`** or **0.05** (published protocol), not `production.score_threshold` or train-val `evaluation.train_val_score_threshold: 0.3`. Deploy / `image_demo` still use `production.score_threshold`.
+`make eval-val` uses **`evaluation.val_score_threshold`** (0.3). `make eval-test` / `test_map` use **`evaluation.test_score_threshold`** or **0.05**. Deploy / `image_demo` still use `production.score_threshold`.

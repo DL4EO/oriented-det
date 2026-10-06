@@ -238,6 +238,9 @@ def test_ssdd_recipe_loads():
     root = Path(__file__).resolve().parents[1]
     cfg = TrainingExperimentConfig.load(root / "configs/rotated_faster_rcnn/ssdd_le90_1x.json")
     assert cfg.dataset.format == "ssdd"
+    assert cfg.dataset.val_split == "test"
+    assert cfg.dataset.test_split == "test"
+    assert cfg.dataset.has_test_split()
     assert cfg.dataset.overlap == 0
     assert list(cfg.preprocessing.target_size) == [608, 608]
     assert cfg.preprocessing.resize_mode == "keep_ratio"

@@ -62,8 +62,10 @@ Must be one of the values accepted by `tools/train.py` (also sets `runs/<model_t
 | `rotated_faster_rcnn` | `RotatedFasterRCNN` | Oriented RPN + oriented ROI (MMRotate-style) |
 | `rotated_retinanet` | `RotatedRetinaNet` | One-stage; focal head; no RPN/ROI |
 | `rotated_fcos` | `RotatedFCOS` | Anchor-free one-stage; centerness; no anchors/RPN/ROI |
+| `rotated_rtmdet` | `RotatedRTMDet` | CSPNeXt + PAFPN one-stage; SepBN head, dynamic soft-label assigner; `rtmdet_*` head knobs |
+| `yolo_obb` | `YoloOBB` | C2f CSP + PAFPN one-stage; DFL box head, task-aligned assigner; `yolo_obb_*` knobs (in progress, no Hub weights) |
 
-Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`, `rotated_fcos_r50.json`.
+Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`, `rotated_fcos_r50.json`, `rotated_rtmdet_cspnext_s.json` (`rotated_rtmdet_cspnext_tiny.json` has no Hub weights).
 
 ## Top-level sections
 
@@ -94,8 +96,8 @@ Full key lists, types, and defaults: **`configs/config.schema.json`**. Below: be
 
 | Key | Default | Notes |
 |-----|---------|--------|
-| `format` | `dota` | `dota` → `train_tiles_dir` / `val_tiles_dir`; `airbus_playground` → `annotations_file` + `split_file`; `hrsc2016` → official `FullDataSet` + `ImageSets` under `data_root`; `fair1m` → official / Kaggle FAIR1M under `data_root` (tiled recipes use `dota` after convert); `ssdd` → official last-digit train/test; `hrsid` → COCO train2017/test2017 |
-| `train_split` / `val_split` | null | Native split names for the train/val roles. HRSC null → `trainval` / `test`; FAIR1M null → `train` / `val`; SSDD/HRSID null → `train` / `test` |
+| `format` | `dota` | `dota` → `train_tiles_dir` / `val_tiles_dir`; `airbus_playground` → `annotations_file` + `split_file`; `hrsc2016` → official `FullDataSet` + `ImageSets` under `data_root`; `fair1m` → official / Kaggle FAIR1M under `data_root` (tiled recipes use `dota` after convert); `ssdd` → official last-digit train/test; `hrsid` → COCO train2017/test2017; `yolo_obb` → `images/<split>` + `labels/<split>` + `classes.txt`; `coco` → official COCO 2017 `train2017`/`val2017` plus `annotations/instances_*2017.json` (bbox as horizontal le90) |
+| `train_split` / `val_split` | null | Native split names for the train/val roles. HRSC null → `trainval` / `test`; FAIR1M / YOLO-OBB null → `train` / `val`; SSDD/HRSID null → `train` / `test`; COCO null → `train2017` / `val2017` |
 | `same_folder` | `false` | If true, images and `.txt` labels live directly under tile dirs |
 | `overlap` | `16` | Tile overlap (px, even); `0` = none. Deploy margin defaults to `overlap/2` when `production.ignore_margin_pixels` is null |
 | `difficult_strategy` | `drop` | `drop` \| `ignore` \| `keep` for DOTA difficult flag |
@@ -168,18 +170,18 @@ For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set
 
 | Context | Score threshold | IoU for mAP | Final detection NMS |
 |---------|-----------------|-------------|---------------------|
-| Training loop | `evaluation.train_val_score_threshold` only (`production` does **not** override) | `evaluation.iou_threshold` | **`model.final_nms_iou_threshold`** (recipes: **0.1**) — `production` is **not** applied in `train.py` |
-| `odet preds` / `make eval-val` | **`evaluation.preds_score_threshold`** when set, else **0.05** (ignores production/train floors); per-class maps merge evaluation then production | Always `evaluation.iou_threshold` | **`evaluation.final_nms_iou_threshold`** when set (recipes: **0.1**), else production/model |
-| Deploy / `image_demo` | `production.score_threshold` else `evaluation.train_val_score_threshold` | n/a | **`production.final_nms_iou_threshold`** (recipes: **0.1**) via `apply_inference_config_to_model` |
+| Periodic val, `val_map_at_end`, `make eval-val` | `evaluation.val_score_threshold` (`production` does **not** override) | `evaluation.iou_threshold`, or the mean over `evaluation.map_iou_thresholds` when that list is set | **`model.final_nms_iou_threshold`** during training (recipes: **0.1**). `make eval-val` uses **`evaluation.final_nms_iou_threshold`** when set |
+| `test_map`, `make eval-test`, `dota-submit` | **`evaluation.test_score_threshold`** when set, else **0.05** | Same IoU list. `test_exact_rotated_iou` when set, else the val backend | Training `test_map` uses **`model.final_nms_iou_threshold`**. Offline preds use **`evaluation.final_nms_iou_threshold`** when set |
+| Deploy / `image_demo` | `production.score_threshold` else `evaluation.val_score_threshold` | n/a | **`production.final_nms_iou_threshold`** (recipes: **0.1**) via `apply_inference_config_to_model` |
 
-**`evaluation.train_val_score_threshold` vs `evaluation.preds_score_threshold`:**
+**`evaluation.val_score_threshold` vs `evaluation.test_score_threshold`:**
 
 | Field | Who uses it | Typical value | Purpose |
 |-------|-------------|---------------|---------|
-| `evaluation.train_val_score_threshold` | Training loop val / mAP / `best_mAP` | Often **0.3** (RetinaNet DOTA 1× / 3× / RR) | Confidence floor for **in-train** metrics and checkpoint picking. Raise it to make periodic val faster. Legacy alias: `evaluation.score_threshold` (remapped on load). |
-| `evaluation.preds_score_threshold` | `odet preds` / `make eval-val` only | Usually **null → 0.05** | Optional override for the published offline eval floor. Kept separate so a “fast train-val” floor cannot quietly raise Hub / eval-val mAP. |
+| `evaluation.val_score_threshold` | Periodic val, `best_mAP`, `val_map_at_end`, `make eval-val` | Often **0.3** | Fast monitor and checkpoint picking. Raise it to make periodic val faster. Legacy aliases: `score_threshold`, `train_val_score_threshold`. |
+| `evaluation.test_score_threshold` | `test_map`, `make eval-test`, `dota-submit` | Usually **null → 0.05** | Published floor. The val floor cannot raise this number. Legacy alias: `preds_score_threshold`. |
 
-Preds resolver: CLI → `preds_score_threshold` if set → **0.05**. It ignores both `evaluation.train_val_score_threshold` and `production.score_threshold`. Deploy still uses `production.score_threshold`.
+CLI `--score-threshold` overrides the split being scored. Deploy still uses `production.score_threshold`. `dota-submit` scores unlabeled official test images (`--test-dir`), not `dataset.test_tiles_dir` (DOTA points that at the leaky val tiles).
 
 DOTA 1× recipes set `production.score_threshold` to the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**). 3× inherits those floors. HRSC 1× recipes use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). On DOTA, that F1 sweep is leaky eval-val; the real test is Task 1. On HRSC, eval-val is held-out ImageSets test.
 
@@ -216,6 +218,12 @@ Top-level configs (inherit bases under `configs/_base_/`):
 | `configs/rotated_fcos/dota_le90_1x_l1_kfiou_aux.json` | Rotated FCOS | 1× L1 + KFIoU aux |
 | `configs/rotated_fcos/hrsc2016_le90_1x.json` | Rotated FCOS | 1× HRSC2016 rIoU |
 | `configs/rotated_fcos/hrsc2016_le90_3x.json` | Rotated FCOS | 3× HRSC2016 rIoU |
+| `configs/rotated_rtmdet/dota_le90_3x_s.json` | Rotated RTMDet | **Hub** 3× DOTA CSPNeXt-S (AdamW, EMA, rotate ±180°; Task 1 **77.60%**) |
+| `configs/rotated_rtmdet/ossdd_le90_vh_1x_s.json` | Rotated RTMDet | 1× OSSDD VH finetune of the DOTA Hub checkpoint (12 epochs) |
+| `configs/rotated_fcos/ossdd_le90_vh_1x.json` | Rotated FCOS | 1× OSSDD VH finetune of `hf://rotated_fcos_dota_le90_1x` (512 crop) |
+| `configs/rotated_fcos/ossdd_le90_vh_3x.json` | Rotated FCOS | 3× OSSDD VH finetune (inherits 1×; 36 epochs, milestones 24/33, batch 4) |
+| `configs/rotated_faster_rcnn/ossdd_le90_vh_1x.json` | Rotated Faster R-CNN | 1× OSSDD VH finetune of `hf://rotated_faster_rcnn_dota_le90_1x` (512 crop) |
+| `configs/rotated_faster_rcnn/ossdd_le90_vh_3x.json` | Rotated Faster R-CNN | 3× OSSDD VH finetune (inherits 1×; 36 epochs, milestones 24/33, batch 4) |
 | `configs/oriented_rcnn/fair1m_le90_1x.json` | Oriented R-CNN | 1× FAIR1M tiled (init `hf://oriented_rcnn_dota_le90_1x`) |
 | `configs/rotated_faster_rcnn/fair1m_le90_1x.json` | Rotated Faster R-CNN | 1× FAIR1M tiled (init `hf://rotated_faster_rcnn_dota_le90_1x`; local tiled-val **36.70%**) |
 | `configs/rotated_fcos/fair1m_le90_1x.json` | Rotated FCOS | 1× FAIR1M tiled rIoU (init `hf://rotated_fcos_dota_le90_1x`) |

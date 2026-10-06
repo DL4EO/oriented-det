@@ -17,6 +17,10 @@ try:
 except ImportError:
     Image = None  # type: ignore
 
+from tqdm import tqdm
+
+from oriented_det.utils.progress import tqdm_progress_stream
+
 from .dota import DOTAAnnotation, DOTASample
 
 
@@ -372,7 +376,11 @@ def generate_airbus_playground_csvs(
 
     split_rows: List[Dict[str, str]] = []
     annotation_rows: List[Dict[str, str]] = []
-    for tile in sorted(tiles, key=lambda x: x.tile_relpath):
+    for tile in tqdm(
+        sorted(tiles, key=lambda x: x.tile_relpath),
+        desc="Writing Playground CSV",
+        file=tqdm_progress_stream(),
+    ):
         split_value = group_to_fold[_image_group_key(tile)]
         split_rows.append(
             {

@@ -35,6 +35,7 @@ From a run directory:
 make export-onnx EXPERIMENT=runs/rotated_fcos/<timestamp>
 make export-onnx EXPERIMENT=runs/oriented_rcnn/<timestamp> EXPORT_MODE=oriented_rcnn_pre_nms
 make export-onnx EXPERIMENT=runs/rotated_faster_rcnn/<timestamp> EXPORT_MODE=faster_rcnn_pre_nms
+make export-onnx EXPERIMENT=runs/rotated_rtmdet/<timestamp> EXPORT_MODE=rotated_rtmdet_pre_nms
 ```
 
 Equivalent CLI (placeholder paths):
@@ -103,6 +104,7 @@ Sliding-window tiling is out of scope for the ONNX path — use pre-tiled images
 | `--mode` / `EXPORT_MODE` | Detector |
 |--------------------------|----------|
 | `rotated_fcos_pre_nms` (default) | Rotated FCOS |
+| `rotated_rtmdet_pre_nms` | Rotated RTMDet |
 | `oriented_rcnn_pre_nms` | Oriented R-CNN |
 | `faster_rcnn_pre_nms` | Rotated Faster R-CNN |
 

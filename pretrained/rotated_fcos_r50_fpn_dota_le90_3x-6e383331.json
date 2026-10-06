@@ -219,14 +219,14 @@
     "early_stop_higher_is_better": null
   },
   "evaluation": {
-    "score_threshold": 0.3,
-    "per_class_score_threshold": null,
+    "val_score_threshold": 0.3,
+    "val_per_class_score_threshold": null,
     "iou_threshold": 0.5,
-    "compute_map_final": true,
-    "compute_map_every_n_epochs": 4,
-    "extended_gt_metrics": true,
-    "use_exact_rotated_iou": false,
-    "use_exact_rotated_iou_for_final_map": true
+    "val_map_at_end": true,
+    "val_map_every_n_epochs": 4,
+    "val_extended_gt_metrics": true,
+    "val_exact_rotated_iou": false,
+    "test_exact_rotated_iou": true
   },
   "production": {
     "score_threshold": 0.2,

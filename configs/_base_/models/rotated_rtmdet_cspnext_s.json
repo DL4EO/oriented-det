@@ -1,0 +1,32 @@
+{
+  "model_type": "rotated_rtmdet",
+  "model": {
+    "backbone": "cspnext_s",
+    "pretrained_backbone": true,
+    "frozen_stages": -1,
+    "fpn_strides": [8, 16, 32],
+    "rtmdet_stacked_convs": 2,
+    "rtmdet_norm_on_bbox": true,
+    "rtmdet_scale_angle": true,
+    "rtmdet_exp_on_reg": true,
+    "rtmdet_qfl_beta": 2.0,
+    "rtmdet_angle_weight": 0.2,
+    "rtmdet_assign_topk": 13,
+    "rtmdet_soft_center_radius": 3.0,
+    "rtmdet_assign_iou_weight": 3.0,
+    "rtmdet_nms_pre": 2000,
+    "box_reg_weight": 2.0,
+    "box_reg_loss_type": "riou",
+    "roi_loss_type": "focal",
+    "max_detections_per_image": 2000,
+    "final_nms_iou_threshold": 0.1
+  },
+  "tensorboard": {
+    "log_debug_anchors_proposals": false
+  },
+  "loss": {
+    "loss_type": "focal",
+    "focal_alpha": 0.25,
+    "focal_gamma": 2.0
+  }
+}

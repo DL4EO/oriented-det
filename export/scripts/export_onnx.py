@@ -24,6 +24,7 @@ from export.runtime import copy_runtime_sidecars  # noqa: E402
 from oriented_det.models.oriented_rcnn import OrientedRCNN, RotatedFasterRCNN  # noqa: E402
 from oriented_det.models.rotated_fcos import RotatedFCOS  # noqa: E402
 from oriented_det.models.rotated_retinanet import RotatedRetinaNet  # noqa: E402
+from oriented_det.models.rotated_rtmdet import RotatedRTMDet  # noqa: E402
 from oriented_det.runtime.checkpoint import load_model_from_checkpoint  # noqa: E402
 
 BackboneExportWrapper = _wrappers.BackboneExportWrapper
@@ -32,6 +33,7 @@ RotatedFasterRCNNPreNmsExportWrapper = _wrappers.RotatedFasterRCNNPreNmsExportWr
 OrientedRCNNPreNmsExportWrapper = _wrappers.OrientedRCNNPreNmsExportWrapper
 RotatedFCOSHeadsExportWrapper = _wrappers.RotatedFCOSHeadsExportWrapper
 RotatedFCOSPreNmsExportWrapper = _wrappers.RotatedFCOSPreNmsExportWrapper
+RotatedRTMDetPreNmsExportWrapper = _wrappers.RotatedRTMDetPreNmsExportWrapper
 
 PRE_NMS_OUTPUTS = (
     "pre_nms_boxes",
@@ -41,7 +43,12 @@ PRE_NMS_OUTPUTS = (
 )
 FASTER_RCNN_PRE_NMS_OUTPUTS = PRE_NMS_OUTPUTS  # backwards-compatible alias
 _PRE_NMS_MODES = frozenset(
-    {"faster_rcnn_pre_nms", "oriented_rcnn_pre_nms", "rotated_fcos_pre_nms"}
+    {
+        "faster_rcnn_pre_nms",
+        "oriented_rcnn_pre_nms",
+        "rotated_fcos_pre_nms",
+        "rotated_rtmdet_pre_nms",
+    }
 )
 
 
@@ -87,6 +94,12 @@ def _build_wrapper(
                 f"rotated_fcos_pre_nms requires RotatedFCOS, got {mt}."
             )
         return RotatedFCOSPreNmsExportWrapper(model, height=height, width=width)
+    if mode == "rotated_rtmdet_pre_nms":
+        if not isinstance(model, RotatedRTMDet):
+            raise ValueError(
+                f"rotated_rtmdet_pre_nms requires RotatedRTMDet, got {mt}."
+            )
+        return RotatedRTMDetPreNmsExportWrapper(model, height=height, width=width)
     raise ValueError(f"Unknown mode: {mode}")
 
 
@@ -235,6 +248,10 @@ def build_export_meta(
         meta["fpn_strides"] = [int(s) for s in model.fpn_strides]
         meta["nms_pre"] = int(model.nms_pre)
         meta["min_bbox_size"] = float(model.min_bbox_size)
+    if mode == "rotated_rtmdet_pre_nms" and isinstance(model, RotatedRTMDet):
+        meta["fpn_strides"] = [int(s) for s in model.fpn_strides]
+        meta["nms_pre"] = int(model.nms_pre)
+        meta["min_bbox_size"] = float(model.min_bbox_size)
     return meta
 
 
@@ -271,12 +288,13 @@ def main() -> None:
             "oriented_rcnn_pre_nms",
             "rotated_fcos_heads",
             "rotated_fcos_pre_nms",
+            "rotated_rtmdet_pre_nms",
         ),
         default="rotated_fcos_pre_nms",
         help=(
             "Default rotated_fcos_pre_nms (decode in ONNX, NMS in Python). "
             "Also: backbone | retinanet_heads | faster_rcnn_pre_nms | "
-            "oriented_rcnn_pre_nms | rotated_fcos_heads."
+            "oriented_rcnn_pre_nms | rotated_fcos_heads | rotated_rtmdet_pre_nms."
         ),
     )
     p.add_argument("--opset", type=int, default=17)

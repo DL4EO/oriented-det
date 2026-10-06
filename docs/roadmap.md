@@ -12,7 +12,7 @@ High-level plan for Oriented-Det after **v0.3** (four ResNet-FPN detectors, DOTA
 | **v0.1.1** | Shipped — ProbIoU Faster R-CNN on Hub (DOTA zoo is now 1×: **74.42%** official Task 1) |
 | **v0.2** | Shipped — **Rotated FCOS** (anchor-free single-stage); DOTA le90 Hub `rotated_fcos_dota_le90_1x` (73.07% official Task 1) |
 | **v0.3** | Shipped — **HRSC2016** loader + Hub 3× zoo; **FAIR1M** loader + 1× recipes + tutorial; **SSDD** + **HRSID** native loaders + 1× recipes (**finetune DOTA 1× Hub; no SAR zoo**); **ONNX** pre-NMS restore (`python -m export`; DOTA 1024 tiles) |
-| **v0.4** | Production speed tier: **RTMDet-R**, then **native YOLO-OBB** |
+| **v0.4** | Production speed tier: **RTMDet-R** (done on main; Hub `rotated_rtmdet_dota_le90_3x`, **77.60%** official Task 1), then **native YOLO-OBB** (in progress) |
 | **v0.5–v0.8** | **Swin-FPN** backbone; Oriented R-CNN + Swin-T on Hub; extend to FCOS / speed models |
 | **v1.0** | Stable API, hosted docs, complete model zoo (accuracy / balanced / speed tiers) |
 

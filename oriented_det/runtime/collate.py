@@ -10,6 +10,12 @@ from torch.nn import functional as F
 from oriented_det.data import create_albumentations_augmentation
 from oriented_det.data.flips import apply_random_train_flips
 from oriented_det.data.lookalike import resolve_lookalike_label_set
+from oriented_det.data.mosaic import (
+    MosaicCache,
+    MosaicSample,
+    apply_cached_mosaic,
+    apply_mosaic_resize_crop,
+)
 from oriented_det.data.rotates import apply_random_train_rotate
 from oriented_det.data.preprocessing import apply_spatial_preprocess
 from oriented_det.geometry.rbox import normalize_le90
@@ -54,6 +60,22 @@ MMDET_MEAN = [123.675 / 255.0, 116.28 / 255.0, 103.53 / 255.0]  # RGB
 MMDET_STD = [58.395 / 255.0, 57.12 / 255.0, 57.375 / 255.0]  # RGB
 
 
+def _rect_label_ids(class_map: dict, names: Optional[list[str]]) -> list[int]:
+    """Map rect-class names to class ids. Unknown names are ignored."""
+    if not names:
+        return []
+    lowered = {str(key).lower(): int(value) for key, value in class_map.items()}
+    ids: list[int] = []
+    for name in names:
+        key = str(name).lower()
+        if key in lowered and lowered[key] > 0:
+            ids.append(lowered[key])
+            continue
+        if name in class_map and int(class_map[name]) > 0:
+            ids.append(int(class_map[name]))
+    return ids
+
+
 class _CollateFn:
     """Picklable collate callable for DataLoader (supports num_workers > 0 on macOS)."""
 
@@ -77,6 +99,16 @@ class _CollateFn:
         difficult_strategy: str = "drop",
         lookalike_labels: Optional[list[str]] = None,
         random_crop: bool = True,
+        random_rotate_rect_labels: Optional[list[str]] = None,
+        enable_mosaic: bool = False,
+        mosaic_prob: float = 1.0,
+        mosaic_img_scale: Optional[tuple[int, int]] = None,
+        mosaic_center_ratio_range: tuple[float, float] = (0.5, 1.5),
+        mosaic_pad_val: int = 114,
+        mosaic_max_cached_images: int = 40,
+        mosaic_ratio_range: tuple[float, float] = (0.5, 1.5),
+        mosaic_disable_last_n_epochs: int = 0,
+        mosaic_total_epochs: int = 0,
     ):
         self.class_map = class_map
         self.augmentation = augmentation
@@ -91,6 +123,24 @@ class _CollateFn:
         self.enable_random_rotate = enable_random_rotate
         self.random_rotate_prob = random_rotate_prob
         self.random_rotate_angle_range = random_rotate_angle_range
+        self._rect_label_ids = _rect_label_ids(class_map, random_rotate_rect_labels)
+        self.enable_mosaic = bool(enable_mosaic)
+        self.mosaic_prob = float(mosaic_prob)
+        self.mosaic_img_scale = mosaic_img_scale
+        self.mosaic_center_ratio_range = (
+            float(mosaic_center_ratio_range[0]),
+            float(mosaic_center_ratio_range[1]),
+        )
+        self.mosaic_pad_val = int(mosaic_pad_val)
+        self.mosaic_ratio_range = (float(mosaic_ratio_range[0]), float(mosaic_ratio_range[1]))
+        self.mosaic_disable_last_n_epochs = int(mosaic_disable_last_n_epochs)
+        self.mosaic_total_epochs = int(mosaic_total_epochs)
+        self._mosaic_runtime_enabled = self.enable_mosaic
+        self._mosaic_cache = (
+            MosaicCache(max_cached_images=int(mosaic_max_cached_images))
+            if self.enable_mosaic
+            else None
+        )
         mean = normalize_mean if normalize_mean is not None else MMDET_MEAN
         std = normalize_std if normalize_std is not None else MMDET_STD
         self.normalize_transform = T.Normalize(mean=mean, std=std) if normalize else None
@@ -101,6 +151,25 @@ class _CollateFn:
         self.difficult_strategy = ds
         self.lookalike_labels = resolve_lookalike_label_set(lookalike_labels)
         self.random_crop = random_crop
+
+    def mosaic_is_enabled(self) -> bool:
+        return bool(self.enable_mosaic and self._mosaic_runtime_enabled)
+
+    def set_mosaic_enabled(self, enabled: bool) -> None:
+        self._mosaic_runtime_enabled = bool(enabled)
+
+    def update_mosaic_for_epoch(self, epoch: int) -> bool:
+        """Turn mosaic off for the last ``mosaic_disable_last_n_epochs`` of the run."""
+        if not self.enable_mosaic:
+            self._mosaic_runtime_enabled = False
+            return False
+        last_n = self.mosaic_disable_last_n_epochs
+        total = self.mosaic_total_epochs
+        if last_n > 0 and total > 0 and int(epoch) >= total - last_n:
+            self._mosaic_runtime_enabled = False
+        else:
+            self._mosaic_runtime_enabled = True
+        return self._mosaic_runtime_enabled
 
     def __call__(self, batch):
         """Collate batch: converts DOTASample to model input (images, targets)."""
@@ -167,7 +236,46 @@ class _CollateFn:
                         enable_diagonal=bool(flip_d),
                     )
 
-                if self.enable_random_rotate:
+                mosaic_applied = False
+                if self.mosaic_is_enabled() and self._mosaic_cache is not None:
+                    cell = self.mosaic_img_scale or (int(target_h), int(target_w))
+                    current = MosaicSample(
+                        image=pil_image,
+                        rboxes=list(rboxes),
+                        labels=list(labels),
+                        rboxes_ignore=list(rboxes_ignore),
+                        labels_ignore=list(labels_ignore),
+                        rboxes_lookalike=list(rboxes_lookalike),
+                    )
+                    mixed = apply_cached_mosaic(
+                        current,
+                        self._mosaic_cache,
+                        img_scale=(int(cell[0]), int(cell[1])),
+                        prob=self.mosaic_prob,
+                        center_ratio_range=self.mosaic_center_ratio_range,
+                        pad_val=self.mosaic_pad_val,
+                        rotate_prob=float(self.random_rotate_prob) if self.enable_random_rotate else 0.0,
+                        rotate_angle_range=float(self.random_rotate_angle_range),
+                        rotate_rect_label_ids=self._rect_label_ids or None,
+                    )
+                    mosaic_applied = mixed is not current
+                    if mosaic_applied:
+                        mixed = apply_mosaic_resize_crop(
+                            mixed,
+                            (int(target_h), int(target_w)),
+                            ratio_range=self.mosaic_ratio_range,
+                        )
+                        pil_image = mixed.image
+                        rboxes = list(mixed.rboxes)
+                        labels = list(mixed.labels)
+                        rboxes_ignore = list(mixed.rboxes_ignore)
+                        labels_ignore = list(mixed.labels_ignore)
+                        rboxes_lookalike = list(mixed.rboxes_lookalike)
+                        n_real = len(rboxes)
+                        n_ign = len(rboxes_ignore)
+                        all_rboxes = rboxes + rboxes_ignore + rboxes_lookalike
+
+                if self.enable_random_rotate and not mosaic_applied:
                     rot_w, rot_h_px = pil_image.size
                     pil_image, all_rboxes = apply_random_train_rotate(
                         pil_image,
@@ -176,6 +284,8 @@ class _CollateFn:
                         image_height=float(rot_h_px),
                         prob=float(self.random_rotate_prob),
                         angle_range_deg=float(self.random_rotate_angle_range),
+                        labels=list(labels) + list(labels_ignore),
+                        rect_label_ids=self._rect_label_ids or None,
                     )
 
                 rboxes = all_rboxes[:n_real]
@@ -183,7 +293,10 @@ class _CollateFn:
                 rboxes_lookalike = all_rboxes[n_real + n_ign :]
 
                 image_tensor = self._to_tensor(pil_image)
-                content_size = spatial.meta.content_size
+                if mosaic_applied:
+                    content_size = (int(pil_image.size[1]), int(pil_image.size[0]))
+                else:
+                    content_size = spatial.meta.content_size
                 if self.pad_size_divisor > 1:
                     _, img_h, img_w = image_tensor.shape
                     pad_h = (self.pad_size_divisor - (img_h % self.pad_size_divisor)) % self.pad_size_divisor
@@ -257,6 +370,16 @@ def create_collate_fn(
     difficult_strategy: str = "drop",
     lookalike_labels: Optional[list[str]] = None,
     random_crop: bool = True,
+    random_rotate_rect_labels: Optional[list[str]] = None,
+    enable_mosaic: bool = False,
+    mosaic_prob: float = 1.0,
+    mosaic_img_scale: Optional[tuple[int, int]] = None,
+    mosaic_center_ratio_range: tuple[float, float] = (0.5, 1.5),
+    mosaic_pad_val: int = 114,
+    mosaic_max_cached_images: int = 40,
+    mosaic_ratio_range: tuple[float, float] = (0.5, 1.5),
+    mosaic_disable_last_n_epochs: int = 0,
+    mosaic_total_epochs: int = 0,
 ) -> Callable:
     """Create a collate function with consistent class mapping and optional augmentation.
     
@@ -307,6 +430,16 @@ def create_collate_fn(
         difficult_strategy=difficult_strategy,
         lookalike_labels=lookalike_labels,
         random_crop=random_crop,
+        random_rotate_rect_labels=random_rotate_rect_labels,
+        enable_mosaic=enable_mosaic,
+        mosaic_prob=mosaic_prob,
+        mosaic_img_scale=mosaic_img_scale,
+        mosaic_center_ratio_range=mosaic_center_ratio_range,
+        mosaic_pad_val=mosaic_pad_val,
+        mosaic_max_cached_images=mosaic_max_cached_images,
+        mosaic_ratio_range=mosaic_ratio_range,
+        mosaic_disable_last_n_epochs=mosaic_disable_last_n_epochs,
+        mosaic_total_epochs=mosaic_total_epochs,
     )
 
 

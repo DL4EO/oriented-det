@@ -206,8 +206,8 @@ def test_retinanet_dota_recipes_obb_default_hbb_extension():
         assert cfg.model.anchor_angles is None, name
 
 
-def test_retinanet_dota_recipes_split_train_val_and_preds_score_floors():
-    """In-train mAP is 0.3; eval-val / Task 1 stay 0.05 (preds resolver)."""
+def test_retinanet_dota_recipes_split_val_and_test_score_floors():
+    """Val monitor and eval-val are 0.3; test_map / eval-test stay 0.05."""
     from pathlib import Path
 
     from oriented_det.train.config import (
@@ -228,10 +228,13 @@ def test_retinanet_dota_recipes_split_train_val_and_preds_score_floors():
             root / "configs" / "rotated_retinanet" / name
         )
         train_sc, _, _ = effective_eval_metric_thresholds(cfg)
-        preds_sc, preds_src = resolve_preds_score_threshold(cfg)
+        val_sc, val_src = resolve_preds_score_threshold(cfg, data_split="val")
+        test_sc, test_src = resolve_preds_score_threshold(cfg, data_split="test")
         assert train_sc == pytest.approx(0.3), name
-        assert preds_sc == pytest.approx(0.05), name
-        assert "0.05" in preds_src or "preds_score_threshold" in preds_src
+        assert val_sc == pytest.approx(0.3), name
+        assert "val_score_threshold" in val_src
+        assert test_sc == pytest.approx(0.05), name
+        assert "0.05" in test_src or "test_score_threshold" in test_src
 
 
 def test_create_model_fcos_passes_config_fields():

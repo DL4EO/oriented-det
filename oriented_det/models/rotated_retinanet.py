@@ -1122,7 +1122,7 @@ class RotatedRetinaNet(SigmoidFocalClassWeightsMixin, nn.Module):
                     class_indices_1idx = fg_indices + 1  # [N], values 1..num_classes
                     
                     # Pre-NMS score filter (MMRotate nms_pre). Keeps ~10³ candidates instead of
-                    # ~2×10⁵ decoded anchors per image; eval still applies evaluation.train_val_score_threshold.
+                    # ~2×10⁵ decoded anchors per image; eval still applies evaluation.val_score_threshold.
                     if self.training:
                         score_thresh = 0.0
                     else:

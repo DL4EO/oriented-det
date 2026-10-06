@@ -42,11 +42,11 @@ When training with `--debug` (or `make train DEBUG=1`), extra logs are printed a
 - **First batch**: GT counts per image (min/max/mean) and per-class counts to spot data/annotation issues.
 - **Each epoch**: Full loss breakdown (all `loss_*` components) and current learning rate.
 - **TensorBoard**: RPN/ROI metrics (e.g. `roi_num_pos`, `roi_match_rate`; for Rotated Faster R-CNN these reflect **RPN-only** proposals, not the training pool after GT append) and RetinaNet assignment counts (`retinanet_num_pos` / `retinanet_num_neg` / `retinanet_num_ignore`, Python floats, not part of `total_loss`). Anchor/proposal visualizations when `log_debug_anchors_proposals` is enabled. Validation prediction images (`val/predictions`) overlay the source **filename** (basename with extension) at the top-left when the dataloader provides `image_filename` (DOTA train script collate does).
-- **After mAP**: Per-class AP, detections per class, ground truths per class, GT cover rates (pre/post score threshold), detection score stats, and optionally **GT–IoU diagnostics** when `evaluation.extended_gt_metrics` is true (mean/median of each GT’s best IoU against all raw detections vs same-class dets only, **per-class mean best IoU table**, counts of GTs with **0% best IoU** (no overlap with any raw det), high IoU but wrong class vs no box above the eval IoU threshold, histograms of best IoU into `[0,0.25)`, `[0.25,0.5)`, `[0.5,0.75)`, `[0.75,1]`, and **class-agnostic duplicate rate** on score-thresholded boxes: sort by score, greedy “keep”; a box is duplicate if its IoU with any kept higher-score box is ≥ the eval IoU threshold—reports micro and macro duplicate rates). Leave `extended_gt_metrics` false (default) for faster validation.
+- **After mAP**: Per-class AP, detections per class, ground truths per class, GT cover rates (pre/post score threshold), detection score stats, and optionally **GT–IoU diagnostics** when `evaluation.val_extended_gt_metrics` is true (mean/median of each GT’s best IoU against all raw detections vs same-class dets only, **per-class mean best IoU table**, counts of GTs with **0% best IoU** (no overlap with any raw det), high IoU but wrong class vs no box above the eval IoU threshold, histograms of best IoU into `[0,0.25)`, `[0.25,0.5)`, `[0.5,0.75)`, `[0.75,1]`, and **class-agnostic duplicate rate** on score-thresholded boxes: sort by score, greedy “keep”; a box is duplicate if its IoU with any kept higher-score box is ≥ the eval IoU threshold—reports micro and macro duplicate rates). Leave `extended_gt_metrics` false (default) for faster validation.
 
-**Score thresholds:** `evaluation.train_val_score_threshold` is the global minimum for **training** val / mAP / `best_mAP` (legacy JSON alias: `evaluation.score_threshold`). Optional `evaluation.per_class_score_threshold` maps class names to per-class floors (post-NMS); classes not listed use the global value. `evaluation.preds_score_threshold` is **not** used in training — it only overrides the floor for `odet preds` / `make eval-val` (null → **0.05**). See [Configuration — evaluation vs production](../../docs/user-guide/configuration.md#evaluation-vs-production).
+**Score thresholds:** `evaluation.val_score_threshold` is the floor for periodic val mAP, `best_mAP`, `val_map_at_end`, and `make eval-val` (legacy aliases: `score_threshold`, `train_val_score_threshold`). Optional `evaluation.val_per_class_score_threshold` maps class names to per-class floors on that pass. `evaluation.test_score_threshold` (null → **0.05**) is the floor for `test_map`, `make eval-test`, and `dota-submit`. See [Configuration — evaluation vs production](../../docs/user-guide/configuration.md#evaluation-vs-production).
 
-**Rotated IoU for mAP / GT cover:** `evaluation.use_exact_rotated_iou` (default `true`) selects exact CPU polygon IoU vs GPU sampling IoU for periodic mAP and GT-cover / accuracy matching. It does **not** change final detection NMS or `production.*` decode settings. For a fast in-training mAP with an exact publishable number at the end, set `use_exact_rotated_iou: false` and `use_exact_rotated_iou_for_final_map: true` with `compute_map_final: true`.
+**Rotated IoU for mAP / GT cover:** `evaluation.val_exact_rotated_iou` (default `true`) selects exact CPU polygon IoU vs GPU sampling IoU for periodic val mAP and GT-cover. It does **not** change detection NMS or `production.*` decode. For a fast val monitor and an exact test number, set `val_exact_rotated_iou: false` and `test_exact_rotated_iou: true` with `test_map: true`.
 
 ## Production section (`production`)
 
@@ -54,15 +54,15 @@ When training with `--debug` (or `make train DEBUG=1`), extra logs are printed a
 
 Optional root section **`production`** holds overrides for:
 
-- **Training validation / mAP** — **`effective_eval_metric_thresholds`** uses **`evaluation` only** (`train_val_score_threshold`, `per_class_score_threshold`, `iou_threshold`). **`production.score_threshold`** does **not** override train-val or `best_mAP` selection. **`tools/train.py`** passes that triple into `train()` / `evaluate()`. Training forward NMS uses **`model.final_nms_iou_threshold`** (not `production`). **`evaluation.use_exact_rotated_iou`** controls mAP matching IoU only.
+- **Val mAP / `make eval-val`** — **`evaluation.val_score_threshold`** (often 0.3), **`val_per_class_score_threshold`**, **`iou_threshold`**. **`production.score_threshold`** does **not** override this or `best_mAP`. Training forward NMS uses **`model.final_nms_iou_threshold`**. **`evaluation.val_exact_rotated_iou`** controls val matching IoU only.
 
-- **Eval-val / `odet preds` score** — **`resolve_preds_score_threshold`**: CLI → **`evaluation.preds_score_threshold`** → **0.05**. Ignores **`production.score_threshold`** and train-val **`evaluation.train_val_score_threshold`** (often 0.3). Deploy / `image_demo` keep **`resolve_inference_score_threshold`**.
+- **Test mAP / `make eval-test`** — **`evaluation.test_score_threshold`** when set, else **0.05**. **`test_exact_rotated_iou`** when set, else the val IoU backend. Ignores **`production.score_threshold`**. **`dota-submit`** uses this score floor on the unlabeled official test (`--test-dir`), not `dataset.test_tiles_dir`.
 
 - **Final detection NMS** — Recipes ship **`model.final_nms_iou_threshold: 0.1`** (train val / MMRotate-style), **`production.final_nms_iou_threshold: 0.1`** (deploy / `image_demo`), and **`evaluation.final_nms_iou_threshold: 0.1`** for **`odet preds` / `make eval-val`**. Resolver: **`resolve_preds_final_nms_iou_threshold`** (CLI → `evaluation` → production-patched model).
 
 - **Decode / NMS on the loaded checkpoint model** — Non-null **`production.inference_pre_nms_score_threshold`**, **`final_nms_iou_threshold`**, **`final_nms_use_cpu`**, **`max_detections_per_image`**, **`nms_class_agnostic`**, **`roi_inference_top_class_only`**, **`rpn_pre_nms_top_n`**, **`rpn_post_nms_top_n`**, **`rpn_nms_threshold`** are applied by **`apply_inference_config_to_model`** in **`tools/save_predictions.load_model_from_checkpoint`** (deploy, **`image_demo`**, **`test_single_image`**, and as a base before eval-val may override NMS). **`tools/train.py` does not call this**.
 
-- **Deploy / `image_demo`** — Global score uses **`resolve_inference_score_threshold`** (**`production.score_threshold`** else **`evaluation.train_val_score_threshold`**). Per-class floors use **`merge_per_class_score_thresholds`** (**`evaluation`** then **`production`**). Sliding-window overlap defaults to **200 px** per axis unless **`production.overlap_pixels`** is set (**`resolve_inference_sliding_window_overlap_pixels`**). Per-window stitch margin default **0** (keep overlap copies, then NMS); `--ignore-margin-pixels` / `production.ignore_margin_pixels` are opt-in. Deploy’s **full-image** edge filter still uses **`production.ignore_margin_pixels`** when set, else **`dataset.overlap`/2**. Canvas: **`production.stick_to_model_canvas`** (default **true** when null), **`production.use_first_image_canvas`** (default **false** when null).
+- **Deploy / `image_demo`** — Global score uses **`resolve_inference_score_threshold`** (**`production.score_threshold`** else **`evaluation.val_score_threshold`**). Per-class floors use **`merge_per_class_score_thresholds`** (**`evaluation`** then **`production`**). Sliding-window overlap defaults to **200 px** per axis unless **`production.overlap_pixels`** is set (**`resolve_inference_sliding_window_overlap_pixels`**). Per-window stitch margin default **0** (keep overlap copies, then NMS); `--ignore-margin-pixels` / `production.ignore_margin_pixels` are opt-in. Deploy’s **full-image** edge filter still uses **`production.ignore_margin_pixels`** when set, else **`dataset.overlap`/2**. Canvas: **`production.stick_to_model_canvas`** (default **true** when null), **`production.use_first_image_canvas`** (default **false** when null).
 
 - **`odet preds` per-class floors** — same **`merge_per_class_score_thresholds`** as deploy (not train-val).
 
@@ -72,7 +72,7 @@ Use these logs to compare schedule (epochs, LR), loss balance, and proposal/ROI 
 
 ## Epoch timing, ETA, and mAP duration
 
-After each epoch (rank 0), the engine prints **wall-clock** time for that epoch, a **rolling average** over completed epochs, and an **ETA** until the scheduled end of training. Durations of **24 hours or more** are shown as ``Xd Yh Zm`` (days, hours, minutes) instead of only hours. The ETA uses the rolling average and includes an extra one-epoch allowance when **`evaluation.compute_map_final`** is enabled (approximate cost of the post-training mAP pass on the best checkpoint). The same line summarizes **config-derived context**: training/validation batch counts, **`gradient_accumulation_steps`**, current epoch index, and **`mAP every N epochs`** when `compute_map_every_n_epochs > 0`.
+After each epoch (rank 0), the engine prints **wall-clock** time for that epoch, a **rolling average** over completed epochs, and an **ETA** until the scheduled end of training. Durations of **24 hours or more** are shown as ``Xd Yh Zm`` (days, hours, minutes) instead of only hours. The ETA uses the rolling average and includes an extra one-epoch allowance when **`evaluation.val_map_at_end`** or **`evaluation.test_map`** is enabled. The same line summarizes **config-derived context**: training/validation batch counts, **`gradient_accumulation_steps`**, current epoch index, and **`mAP every N epochs`** when `val_map_every_n_epochs > 0`.
 
 When mAP is computed inside `evaluate()`, the log line **`mAP computation completed in …`** reports only the **oriented mAP / AP** phase (`compute_oriented_map`), not the full validation forward pass.
 
@@ -87,6 +87,12 @@ When optimizer **per-module param groups** are enabled (`training.use_lr_param_g
 **Per-milestone drops:** `training.lr_scheduler_gamma` is a number (same factor every drop) or a list of the same length as `lr_scheduler_milestones`. Oriented R-CNN HRSC 3× uses `[0.1, 0.5]`.
 
 **Cosine phase:** `training.lr_scheduler_cosine_epochs` is PyTorch `T_max` (else `num_epochs`). Legacy `lr_scheduler_cosine_t_max` still loads with a deprecation warning.
+
+**Late cosine** (`lr_scheduler_type: cosine_annealing_late`): after the usual linear warmup, the base LR stays flat until `lr_scheduler_cosine_start_epoch` (null means `num_epochs // 2`), then cosine to `lr_scheduler_cosine_eta_min` by the last epoch. The cosine is stepped once per epoch, same as `cosine_annealing`.
+
+**EMA** (`use_ema`, default off): after every optimizer step, floating parameters and floating buffers are mixed with `(1 - ema_momentum) * exp(-(1 + t) / ema_gamma) + ema_momentum` (defaults `0.0002` and `2000`). Validation swaps in those weights and restores the training weights afterward. `best_mAP_*.pth` stores the EMA model. `checkpoint_epoch_*.pth` stores the raw weights, optimizer, scheduler, and `ema_state_dict` for resume.
+
+**Weight decay groups:** `weight_decay_norm_mult` and `weight_decay_bias_mult` default to 1 (every parameter uses `weight_decay`). Set either below 1 to give BatchNorm/GroupNorm parameters and other biases `weight_decay * mult`. Conv weights keep `weight_decay`. `optimizer: adamw` builds AdamW (`adamw_betas`, default 0.9 / 0.999); the default optimizer is SGD.
 
 **LR multipliers:** `lr_mult_backbone` applies to `backbone.*`. **`lr_mult_head`** (optional): when set, it applies to RetinaNet `head.*` and, for two-stage models, to both `rpn_head.*` and `roi_head.*` (same value for RPN and ROI, overriding `lr_mult_rpn` / `lr_mult_roi` for those tensors). When `lr_mult_head` is unset (`null`), `head.*` uses `lr_mult_other`, and RPN/ROI use `lr_mult_rpn` / `lr_mult_roi`. Any other trainable parameter uses `lr_mult_other`.
 
@@ -177,12 +183,14 @@ When **`dataset.tile_metrics_csv`** is set, **`dataset.drop_easy_empty_tiles: tr
 - **`checkpoint.discover_previous_run`** (default **false**): when **true**, if neither an existing checkpoint file nor `load_from_experiment` is set, training sets `load_from_experiment` to the **newest other** run directory (same ordering as before). When **false**, `null` paths mean **no weights loaded** from runs (backbone still follows `model.pretrained_backbone`).
 - **`checkpoint.resume_from_checkpoint_epoch`**: when loading from an experiment directory, **true** prefers **latest** `checkpoint_epoch_*.pth` and continues epochs with optimizer/scheduler per **`load_optimizer_state`** / **`load_scheduler_state`**; **false** prefers **best** `best_*` checkpoint and typically fine-tunes from epoch 0 unless your config says otherwise.
 - **`checkpoint.load_scheduler_state`** (default **true** when resuming): set **`false`** with **`lr_warmup_steps: 0`** to **rebuild** the LR schedule after load (see `tools/train.py`). Use **`lr_scheduler_type: cosine_annealing`** for PyTorch `CosineAnnealingLR` (restarts if `num_epochs` > `T_max`), or **`cosine_annealing_with_tail`** for cosine + fixed `tail_lr` (`cosine_epochs` + `tail_epochs` = `num_epochs`).
-- **Class-count mismatch on load:** Tensors with shape mismatch (e.g. `fc_cls` when changing class count) are skipped; use `checkpoint.load_include_prefixes` / `load_exclude_prefixes` to control partial loads.
+- **Class-count mismatch on load:** Tensors with shape mismatch (e.g. `fc_cls` or `head.rtm_cls` when changing class count) are skipped. The load log lists those under shape mismatch, separate from keys the checkpoint does not contain. Use `checkpoint.load_include_prefixes` / `load_exclude_prefixes` to control partial loads.
 - Gradient accumulation flushes any final partial window at epoch end, so tail microbatches are no longer dropped when the number of batches is not divisible by `gradient_accumulation_steps`.
 
-## Final mAP on the best checkpoint (`evaluation.compute_map_final`)
+## Test mAP on the best checkpoint (`evaluation.test_map`)
 
-When `compute_map_final` is true (default), after the training loop finishes the engine loads **`checkpoint_manager`’s best checkpoint** (same metric as training, e.g. mAP) and runs one full validation with mAP on rank 0. Under DDP, the resolved best path is broadcast so all ranks still run `evaluate()` and join validation collectives.
+`evaluation.test_map` (set on the 1× schedule) loads **`checkpoint_manager`’s best checkpoint** and runs mAP on the configured test split (`dataset.test_tiles_dir(s)` or `dataset.test_split`). The test score does not choose the checkpoint. The floor is `evaluation.test_score_threshold` (null → **0.05**). The flag is an error when no test split is set. Test chips are not dropped for empty ground truth. DOTA and FAIR1M point `test_tiles_dir` at the val tiles, so this number is the leaky val sweep. OSSDD, SSDD, and HRSID use their real test split. HRSC sets `test_split` to the same ImageSets test used as val. `make dota-submit` does not read that field: it requires `--test-dir` or `--data-root` and runs the unlabeled official test. Older run configs that still say `compute_map_final`, `compute_map_test`, or `preds_score_threshold` are remapped on load.
+
+`evaluation.val_map_at_end` (default **false**) rescores val at `val_score_threshold` instead. COCO pretrain is the recipe that still sets it.
 
 ## Multi-GPU validation (`evaluate` + DDP)
 
@@ -215,19 +223,19 @@ Use this quick checklist while a long multi-GPU run is active in `tmux`.
 ### 3) Validation recall does not collapse
 
 - Track `GT cover rate pre-eval-threshold` and `GT cover rate post-eval-threshold`.
-- These matching metrics (and `Accuracy` / `Correct Predictions`) follow the **mAP schedule** (`compute_map_every_n_epochs`): on other epochs the log prints `Accuracy / GT cover: (skipped — computed on mAP epochs)` instead of misleading zeros.
+- These matching metrics (and `Accuracy` / `Correct Predictions`) follow the **mAP schedule** (`val_map_every_n_epochs`): on other epochs the log prints `Accuracy / GT cover: (skipped — computed on mAP epochs)` instead of misleading zeros.
 - Healthy early behavior is usually upward or stable after warmup; a sustained drop across several epochs is a warning.
 - `GT lost by eval-threshold filtering` should not continuously grow; that often means thresholds are too strict or confidence is collapsing.
 
 ### 4) mAP checkpoints (periodic)
 
-- Compare only epochs where mAP is computed (`compute_map_every_n_epochs`). Logged mAP deltas use the **last computed** mAP (skipped epochs do not reset the baseline to `-1`).
+- Compare only epochs where mAP is computed (`val_map_every_n_epochs`). Logged mAP deltas use the **last computed** mAP (skipped epochs do not reset the baseline to `-1`).
 - Expect some noise, but the medium-term trend should improve or stabilize.
 - If mAP plateaus early while loss still falls, inspect class imbalance, score thresholds, and duplicate suppression.
 
 ### 5) Precision/duplication sanity
 
-- Watch `Avg Detections per Image` and duplicate metrics when `extended_gt_metrics` is enabled.
+- Watch `Avg Detections per Image` and duplicate metrics when `val_extended_gt_metrics` is enabled.
 - Very high detections/image with low matched accuracy often indicates too many low-quality boxes (proposal/NMS/score-threshold issue).
 - Rising "wrong-class overlap" with good IoU suggests classification confusion rather than localization failure.
 

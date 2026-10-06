@@ -56,6 +56,14 @@ from .hrsid import (
     export_hrsid_to_dota,
     format_hrsid_empty_gt_filter_log,
 )
+from .coco import (
+    CocoDetectionDataset,
+    format_coco_empty_gt_filter_log,
+)
+from .yolo_obb import (
+    YoloOBBDataset,
+    format_yolo_obb_empty_gt_filter_log,
+)
 from .dota_task1 import (
     dummy_task1_line,
     format_task1_line,
@@ -144,6 +152,10 @@ __all__ = [
     "HRSIDDataset",
     "export_hrsid_to_dota",
     "format_hrsid_empty_gt_filter_log",
+    "CocoDetectionDataset",
+    "format_coco_empty_gt_filter_log",
+    "YoloOBBDataset",
+    "format_yolo_obb_empty_gt_filter_log",
     "SUPPORTED_DATASET_FORMATS",
     "build_split_dataset",
     "collect_split_images",

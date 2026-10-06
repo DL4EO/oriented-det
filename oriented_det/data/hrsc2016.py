@@ -21,6 +21,10 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from tqdm import tqdm
+
+from oriented_det.utils.progress import tqdm_progress_stream
+
 try:
     from PIL import Image
 except ImportError:
@@ -404,7 +408,11 @@ def export_hrsc2016_to_dota(
         image_dir.mkdir(parents=True, exist_ok=True)
         label_dir.mkdir(parents=True, exist_ok=True)
         n = 0
-        for sample in dataset:
+        for sample in tqdm(
+            dataset,
+            desc=f"Exporting {split}",
+            file=tqdm_progress_stream(),
+        ):
             stem = sample.image_path.stem
             dest_image = image_dir / f"{stem}.png"
             with Image.open(sample.image_path) as img:

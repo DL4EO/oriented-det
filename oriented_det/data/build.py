@@ -28,12 +28,33 @@ from .ssdd import (
     SSDDDataset,
     resolve_ssdd_imageset_split,
 )
+from .coco import CocoDetectionDataset, resolve_coco_split
+from .yolo_obb import YoloOBBDataset
 
-SUPPORTED_DATASET_FORMATS = ("dota", "airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid")
+SUPPORTED_DATASET_FORMATS = (
+    "dota",
+    "airbus_playground",
+    "hrsc2016",
+    "fair1m",
+    "ssdd",
+    "hrsid",
+    "yolo_obb",
+    "coco",
+)
 
 
 def dataset_format_name(dataset_cfg) -> str:
     return (getattr(dataset_cfg, "format", None) or "dota").strip().lower()
+
+
+def _configured_test_split_name(dataset_cfg) -> str:
+    """Native ``dataset.test_split``. Empty means this format has no test split."""
+    name = getattr(dataset_cfg, "test_split", None)
+    if name is None or not str(name).strip():
+        raise ValueError(
+            f"{dataset_format_name(dataset_cfg)} test split requires dataset.test_split."
+        )
+    return str(name).strip()
 
 
 def build_split_dataset(
@@ -44,10 +65,12 @@ def build_split_dataset(
 ):
     """Build one split from ``TrainingExperimentConfig.dataset``.
 
-    ``split`` is the training-loop role (``train`` / ``val``). For HRSC2016 this
+    ``split`` is the training-loop role (``train`` / ``val`` / ``test``). For HRSC2016 this
     is mapped through ``dataset.train_split`` / ``dataset.val_split`` (defaults
     ``trainval`` / ``test``). SSDD / HRSID default to ``train`` / ``test``.
     ImageSets names (``trainval``, ``test``, …) are also accepted directly.
+    Role ``test`` uses ``dataset.test_tiles_dir(s)`` (DOTA layout) or ``dataset.test_split``
+    (native formats). Test evaluation keeps empty images (``filter_empty_gt=False``).
     """
     fmt = dataset_format_name(dataset_cfg)
     if filter_empty_gt is None:
@@ -81,7 +104,10 @@ def build_split_dataset(
         )
 
     if fmt == "hrsc2016":
-        imageset = resolve_hrsc2016_imageset_split(dataset_cfg, split)
+        imageset = resolve_hrsc2016_imageset_split(
+            dataset_cfg,
+            _configured_test_split_name(dataset_cfg) if split.strip().lower() == "test" else split,
+        )
         return HRSC2016Dataset(
             data_root=dataset_cfg.data_root,
             split=imageset,
@@ -93,7 +119,10 @@ def build_split_dataset(
         )
 
     if fmt == "fair1m":
-        imageset = resolve_fair1m_imageset_split(dataset_cfg, split)
+        imageset = resolve_fair1m_imageset_split(
+            dataset_cfg,
+            _configured_test_split_name(dataset_cfg) if split.strip().lower() == "test" else split,
+        )
         return FAIR1MDataset(
             data_root=dataset_cfg.data_root,
             split=imageset,
@@ -106,7 +135,10 @@ def build_split_dataset(
         )
 
     if fmt == "ssdd":
-        imageset = resolve_ssdd_imageset_split(dataset_cfg, split)
+        imageset = resolve_ssdd_imageset_split(
+            dataset_cfg,
+            _configured_test_split_name(dataset_cfg) if split.strip().lower() == "test" else split,
+        )
         return SSDDDataset(
             data_root=dataset_cfg.data_root,
             split=imageset,
@@ -118,10 +150,48 @@ def build_split_dataset(
         )
 
     if fmt == "hrsid":
-        imageset = resolve_hrsid_imageset_split(dataset_cfg, split)
+        imageset = resolve_hrsid_imageset_split(
+            dataset_cfg,
+            _configured_test_split_name(dataset_cfg) if split.strip().lower() == "test" else split,
+        )
         return HRSIDDataset(
             data_root=dataset_cfg.data_root,
             split=imageset,
+            difficult_strategy=dataset_cfg.difficult_strategy,
+            allowed_classes=dataset_cfg.allowed_classes,
+            ignore_labels=dataset_cfg.ignore_labels,
+            lookalike_labels=getattr(dataset_cfg, "lookalike_labels", None),
+            filter_empty_gt=filter_empty_gt,
+        )
+
+    if fmt == "coco":
+        folder = resolve_coco_split(
+            dataset_cfg,
+            _configured_test_split_name(dataset_cfg) if split.strip().lower() == "test" else split,
+        )
+        return CocoDetectionDataset(
+            data_root=dataset_cfg.data_root,
+            split=folder,
+            difficult_strategy=dataset_cfg.difficult_strategy,
+            allowed_classes=dataset_cfg.allowed_classes,
+            ignore_labels=dataset_cfg.ignore_labels,
+            lookalike_labels=getattr(dataset_cfg, "lookalike_labels", None),
+            filter_empty_gt=filter_empty_gt,
+        )
+
+    if fmt == "yolo_obb":
+        role = split.strip().lower()
+        if role == "train":
+            folder = getattr(dataset_cfg, "train_split", None) or "train"
+        elif role == "val":
+            folder = getattr(dataset_cfg, "val_split", None) or "val"
+        elif role == "test":
+            folder = _configured_test_split_name(dataset_cfg)
+        else:
+            folder = split.strip()
+        return YoloOBBDataset(
+            data_root=dataset_cfg.data_root,
+            split=folder,
             difficult_strategy=dataset_cfg.difficult_strategy,
             allowed_classes=dataset_cfg.allowed_classes,
             ignore_labels=dataset_cfg.ignore_labels,
@@ -145,8 +215,14 @@ def build_split_dataset(
         tile_roots = dataset_cfg.get_train_tile_roots()
     elif role == "val":
         tile_roots = dataset_cfg.get_val_tile_roots()
+    elif role == "test":
+        if not dataset_cfg.has_test_tiles():
+            raise ValueError(
+                "DOTA test split requires dataset.test_tiles_dir or dataset.test_tiles_dirs."
+            )
+        tile_roots = dataset_cfg.get_test_tile_roots()
     else:
-        raise ValueError(f"DOTA split must be 'train' or 'val', got {split!r}.")
+        raise ValueError(f"DOTA split must be 'train', 'val', or 'test', got {split!r}.")
     same_folder = getattr(dataset_cfg, "same_folder", False)
     return build_dota_split_dataset(
         tile_roots,
@@ -188,16 +264,17 @@ def collect_split_images(
     (training). ``tools/save_predictions.py`` always passes ``False`` so
     inference includes all tiles.
 
-    ``data_split='test'`` (DOTA) lists unlabeled rasters via
-    :func:`collect_dota_unlabeled_image_paths` (no annotation files). ``test_dir``
-    overrides ``data_root / test``, same idea as ``val_dir`` for val.
+    ``data_split='test'`` with ``dataset.test_tiles_dir(s)`` lists labeled tiles
+    (empty chips kept). Without those fields, or when ``test_dir`` is set, it
+    lists unlabeled rasters via :func:`collect_dota_unlabeled_image_paths`
+    (official DOTA Task 1). ``test_dir`` overrides ``data_root / test``.
     """
     from dataclasses import replace
 
     dataset_format = dataset_format_name(getattr(config, "dataset", None))
     data_root = Path(data_root)
 
-    if dataset_format in ("airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid"):
+    if dataset_format in ("airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid", "yolo_obb", "coco"):
         ds_config = config.dataset
         if dataset_format == "airbus_playground":
             if not getattr(ds_config, "annotations_file", None) or not getattr(ds_config, "split_file", None):
@@ -208,7 +285,7 @@ def collect_split_images(
                 raise ValueError(f"Airbus dataset supports only train or val split, got {data_split!r}.")
         ds_cfg = replace(ds_config, data_root=data_root)
         if filter_empty_gt is None:
-            if dataset_format == "airbus_playground":
+            if dataset_format == "airbus_playground" or data_split == "test":
                 filter_empty_gt = False
             else:
                 filter_empty_gt = bool(getattr(ds_config, "filter_empty_gt", False))
@@ -218,7 +295,10 @@ def collect_split_images(
 
     if getattr(config, "dataset", None):
         same_folder = getattr(config.dataset, "same_folder", False)
-        if data_split == "test":
+        has_test_tiles = callable(getattr(config.dataset, "has_test_tiles", None)) and (
+            config.dataset.has_test_tiles()
+        )
+        if data_split == "test" and (test_dir is not None or not has_test_tiles):
             tile_roots = [Path(test_dir)] if test_dir is not None else [data_root / "test"]
             split_images = collect_dota_unlabeled_image_paths(
                 tile_roots, same_folder=same_folder
@@ -226,7 +306,9 @@ def collect_split_images(
             if not split_images:
                 raise ValueError(f"No unlabeled DOTA test images under: {tile_roots}")
             return split_images, None, dataset_format
-        if data_split == "val" and val_dir is not None:
+        if data_split == "test":
+            tile_roots = config.dataset.get_test_tile_roots()
+        elif data_split == "val" and val_dir is not None:
             tile_roots = [Path(val_dir)]
         elif data_split == "val":
             tile_roots = config.dataset.get_val_tile_roots()
@@ -238,7 +320,11 @@ def collect_split_images(
         allowed_classes = getattr(config.dataset, "allowed_classes", None)
         ignore_labels = getattr(config.dataset, "ignore_labels", None)
         if filter_empty_gt is None:
-            filter_empty_gt = bool(getattr(config.dataset, "filter_empty_gt", False))
+            # Test scoring keeps empty chips. Train/val follow the recipe flag.
+            if data_split == "test":
+                filter_empty_gt = False
+            else:
+                filter_empty_gt = bool(getattr(config.dataset, "filter_empty_gt", False))
         split_images = collect_dota_split_image_paths(
             tile_roots,
             split=data_split,

@@ -25,12 +25,15 @@ import argparse
 import sys
 from pathlib import Path
 
+from tqdm import tqdm
+
 # Ensure oriented_det is importable when run as script
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from oriented_det.data import DOTAAnnotation
+from oriented_det.utils.progress import tqdm_progress_stream
 
 
 def _is_metadata_or_empty(line: str) -> bool:
@@ -118,11 +121,11 @@ def main() -> int:
     if args.dry_run:
         print("Dry run: no files will be modified.")
     total = 0
-    for path in txt_files:
+    for path in tqdm(txt_files, desc="Converting labels", file=tqdm_progress_stream()):
         n = convert_file(path, dry_run=args.dry_run, backup=args.backup)
         total += n
         if args.dry_run and n:
-            print(f"  Would convert: {path} ({n} annotation lines)")
+            tqdm.write(f"  Would convert: {path} ({n} annotation lines)")
     if not args.dry_run:
         print(f"Converted {len(txt_files)} file(s), {total} annotation lines -> comma-separated.")
     return 0
