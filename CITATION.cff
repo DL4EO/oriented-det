@@ -4,6 +4,7 @@ type: software
 title: "oriented-det: oriented and rotated object detection in aerial and satellite images"
 version: 0.4.1
 date-released: "2026-10-10"
+doi: 10.5281/zenodo.23273307
 authors:
   - family-names: Faudi
     given-names: Jeff

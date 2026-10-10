@@ -295,7 +295,7 @@ Notes:
 
 ## Citation
 
-If you use OrientedDet in research or production, cite this repository via [CITATION.cff](CITATION.cff). Overview: [oriented detection in aerial and satellite images](https://deeplearning.earth/oriented-detection-in-satellite-images/).
+If you use OrientedDet in research or production, cite this repository via [CITATION.cff](CITATION.cff) ([DOI: 10.5281/zenodo.23273307](https://doi.org/10.5281/zenodo.23273307)). Overview: [oriented detection in aerial and satellite images](https://deeplearning.earth/oriented-detection-in-satellite-images/).
 
 ## License
 
