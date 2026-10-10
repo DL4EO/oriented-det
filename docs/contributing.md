@@ -101,7 +101,8 @@ Aligned with the [Roadmap](roadmap.md):
 
 - **v0.3:** FAIR1M loader + 1× recipes (finetune DOTA 1× Hub; no FAIR1M zoo)
 - **v0.3:** FAIR1M loader + 1× recipes (HRSC2016 Hub zoo already in; FAIR1M has no Hub weights)
-- **v0.4:** RTMDet-R and native YOLO-OBB (clean-room, no Ultralytics)
+- **v0.4.0:** Rotated RTMDet (shipped)
+- **v0.4.1:** native YOLO-OBB (clean-room, no Ultralytics; COCO pretrain and DOTA training next)
 - **v0.5+:** Swin-FPN backbone
 - **Docs:** Tutorials, hosted MkDocs, eval reports
 - **Export:** ONNX head wrappers + postprocess parity for new detectors

@@ -4,7 +4,11 @@ All notable changes to OrientedDet will be documented in this file.
 
 ## [Unreleased]
 
-Toward **v0.4** (Rotated RTMDet + native YOLO-OBB). Rotated RTMDet is done: `rotated_rtmdet_dota_le90_3x` (CSPNeXt-S + PAFPN) is on the Hub at official Task 1 **77.60%**, the top of the DOTA zoo. Native YOLO-OBB is in progress and not listed below yet.
+Toward **v0.4.1** (native YOLO-OBB). The detector is already in the tree (`model_type: yolo_obb`). Next is COCO pretrain and DOTA. Not part of the 0.4.0 notes.
+
+## [0.4.0] - 2026-10-10
+
+Rotated RTMDet. `rotated_rtmdet_dota_le90_3x` (CSPNeXt-S + PAFPN) is on the Hub at official Task 1 **77.60%**, the top of the DOTA zoo. Native YOLO-OBB is **0.4.1**.
 
 ### Added
 

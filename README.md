@@ -174,7 +174,8 @@ See **[docs/roadmap.md](docs/roadmap.md)** for the full public plan. Summary:
 - **v0.1.1** (shipped): ProbIoU Faster R-CNN 1×/3× on Hub
 - **v0.2** (shipped): Rotated FCOS (anchor-free single-stage); Hub `rotated_fcos_dota_le90_1x` (73.07% official Task 1)
 - **v0.3** (shipped): HRSC2016 loader + Hub 3× zoo (Oriented R-CNN 90.41%, Faster R-CNN 88.77%, FCOS 88.34% eval-val); FAIR1M loader + 1× recipes; SSDD + HRSID SAR loaders + 1× recipes (SSDD Faster R-CNN held-out **90.34%**, HRSID **78.55%**; train locally, no SAR Hub)
-- **v0.4**: RTMDet-R and native YOLO-OBB (AGPL-free production tier). RTMDet-S 3× is already on main and the Hub (`rotated_rtmdet_dota_le90_3x`, **77.60%** official Task 1); YOLO-OBB is in progress
+- **v0.4.0** (shipped): Rotated RTMDet; Hub `rotated_rtmdet_dota_le90_3x` (**77.60%** official Task 1)
+- **v0.4.1**: native YOLO-OBB (already in the tree; COCO pretrain and DOTA training next)
 - **v0.5+**: Swin-FPN backbone; optional fused CUDA kernels; hosted docs
 
 ## Contributing
@@ -187,7 +188,7 @@ OrientedDet is Apache-2.0 open source. For **consulting, training workshops, or 
 
 ## Publishing to PyPI
 
-Version **0.3.1** — tag releases as **`v0.3.1`** (git) matching `version` in `pyproject.toml`.
+Version **0.4.0** — tag releases as **`v0.4.0`** (git) matching `version` in `pyproject.toml`.
 
 Configs: edit **`configs/`** at the repo root, then **`make sync-configs`** so **`oriented_det/configs/`** stays in sync (see **`oriented_det/configs/vendored_manifest.txt`**). CI runs **`make check-configs`**.
 
@@ -218,7 +219,7 @@ make check-configs
 pytest tests/ -q
 ```
 
-Bump version in `pyproject.toml` and `docs/changelog.md` if needed (currently **0.3.1**).
+Bump version in `pyproject.toml` and `docs/changelog.md` if needed (currently **0.4.0**).
 
 #### 3. Build locally
 

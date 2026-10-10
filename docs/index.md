@@ -81,11 +81,11 @@ See [Installation](getting-started/installation.md) for CUDA, macOS, and CPU set
 - **[User Guide](user-guide/geometry.md)** - Detailed usage for each module
 - **[API Reference](api/geometry.md)** - Complete API documentation
 - **[Examples](examples/inference.md)** - Training, inference, [Docker deploy](examples/deploy.md), and [ONNX export](examples/export.md)
-- **[Roadmap](roadmap.md)** - Planned releases (v0.4–v1.0)
+- **[Roadmap](roadmap.md)** - Planned releases (v0.4.1–v1.0)
 
 ## Roadmap
 
-**v0.3** is shipped (HRSC2016 Hub 3× zoo; FAIR1M / SSDD / HRSID loaders and 1× recipes — train SAR locally, no SAR Hub; ONNX pre-NMS for three detectors). Next: RTMDet-R + native YOLO-OBB (v0.4; Rotated RTMDet is already on main with Hub `rotated_rtmdet_dota_le90_3x`, **77.60%** official Task 1), Swin-FPN backbones (v0.5+). Details: **[Roadmap](roadmap.md)**.
+**v0.4.0** is shipped (Rotated RTMDet; Hub `rotated_rtmdet_dota_le90_3x`, **77.60%** official Task 1). Next: native YOLO-OBB (v0.4.1; already in the tree, COCO pretrain and DOTA training next), Swin-FPN backbones (v0.5+). Details: **[Roadmap](roadmap.md)**.
 
 ## Important Notes
 

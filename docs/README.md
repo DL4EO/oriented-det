@@ -40,7 +40,7 @@ https://dl4eo.github.io/oriented-det/
 ## Structure
 
 - **docs/** — Source Markdown (this folder)
-- **roadmap.md** — Public release plan (v0.3 datasets + ONNX restore; next v0.4 RTMDet-R / YOLO-OBB)
+- **roadmap.md** — Public release plan (v0.4.0 Rotated RTMDet; next v0.4.1 native YOLO-OBB)
 - **user-guide/configuration.md** — Canonical JSON training config reference
 - **eval-reports/** — Published eval-val reports per Hub slug (markdown + analysis JSON); see [eval-reports/README.md](eval-reports/README.md). Raw `predictions.json` lives in gitignored `predictions/`.
 - **examples/deploy.md** — Docker Tile Geo Process example

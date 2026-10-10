@@ -16,7 +16,7 @@ cp pretrained/oriented_rcnn_*_dota_le90_1x*.pth  deploy/example/app/weights/mode
 python deploy/scripts/generate_description.py \
   --config deploy/example/app/config.json \
   --out deploy/example/app/description.json \
-  --deploy-version 0.3.1
+  --deploy-version 0.4.0
 ```
 
 ## Build and run
