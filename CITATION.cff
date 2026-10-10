@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: If you use OrientedDet, please cite it using these metadata.
+type: software
+title: "oriented-det: oriented and rotated object detection in aerial and satellite images"
+version: 0.4.1
+date-released: "2026-10-10"
+authors:
+  - family-names: Faudi
+    given-names: Jeff
+  - name: DL4EO
+license: Apache-2.0
+repository-code: "https://github.com/DL4EO/oriented-det"
+url: "https://dl4eo.github.io/oriented-det/"
+abstract: >-
+  oriented-det is an open-source PyTorch framework for oriented and rotated
+  object detection in aerial and satellite images.
+keywords:
+  - oriented detection
+  - rotated object detection
+  - aerial imagery
+  - satellite images
+  - remote sensing
+  - pytorch
+  - object detection

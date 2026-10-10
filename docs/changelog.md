@@ -4,11 +4,24 @@ All notable changes to OrientedDet will be documented in this file.
 
 ## [Unreleased]
 
-Toward **v0.4.1** (native YOLO-OBB). The detector is already in the tree (`model_type: yolo_obb`). Next is COCO pretrain and DOTA. Not part of the 0.4.0 notes.
+Toward **v0.4.2** (native YOLO-OBB). The detector is already in the tree (`model_type: yolo_obb`). Next is COCO pretrain and DOTA.
+
+## [0.4.1] - 2026-10-10
+
+Citation and discoverability. No model or API changes.
+
+### Added
+
+- **`CITATION.cff`** — Citation File Format for GitHub “Cite this repository” and Zenodo.
+- Shared project one-liner: oriented and rotated object detection in aerial and satellite images (README, docs, PyPI description, keywords). Overview: [oriented detection in aerial and satellite images](https://deeplearning.earth/oriented-detection-in-satellite-images/).
+
+### Changed
+
+- Roadmap: native YOLO-OBB moves to **v0.4.2**; Rotated RTMDet multi-scale DOTA to **v0.4.3**.
 
 ## [0.4.0] - 2026-10-10
 
-Rotated RTMDet. `rotated_rtmdet_dota_le90_3x` (CSPNeXt-S + PAFPN) is on the Hub at official Task 1 **77.60%**, the top of the DOTA zoo. Native YOLO-OBB is **0.4.1**.
+Rotated RTMDet. `rotated_rtmdet_dota_le90_3x` (CSPNeXt-S + PAFPN) is on the Hub at official Task 1 **77.60%**, the top of the DOTA zoo. Native YOLO-OBB is **0.4.2**.
 
 ### Added
 

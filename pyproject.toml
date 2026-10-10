@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oriented-det"
-version = "0.4.0"
-description = "A lightweight, modern PyTorch library for rotated object detection in aerial and satellite imagery"
+version = "0.4.1"
+description = "Open-source PyTorch framework for oriented and rotated object detection in aerial and satellite images"
 readme = "README.md"
 requires-python = ">=3.10"
 # SPDX expression (setuptools prefers this over a table; avoids upcoming deprecations)
@@ -25,7 +25,9 @@ keywords = [
     "oriented-detection",
     "pytorch",
     "aerial-imagery",
+    "aerial-images",
     "satellite-imagery",
+    "satellite-images",
     "remote-sensing",
     "dota",
     "geospatial",

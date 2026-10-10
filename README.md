@@ -1,6 +1,6 @@
 # OrientedDet
 
-**OrientedDet** is a lightweight, modern PyTorch library for **rotated object detection** in aerial and satellite imagery. It focuses on clean geometry, reliable operators, simple datasets, and practical baseline models—without the complexity of large detection frameworks. OrientedDet is designed for researchers, practitioners, and geospatial developers who need accurate rotation-aware detectors with a minimal API.
+**OrientedDet** (**oriented-det**) is an open-source PyTorch framework for **oriented and rotated object detection** in aerial and satellite images. It focuses on clean geometry, reliable operators, simple datasets, and practical baseline models—without the complexity of large detection frameworks. OrientedDet is designed for researchers, practitioners, and geospatial developers who need accurate rotation-aware detectors with a minimal API.
 
 <p align="center">
   <img src="demo/out/demo_detections.png" alt="Oriented R-CNN detections on diagonally parked buses in an aerial parking lot" width="720">
@@ -110,6 +110,7 @@ Full documentation is in the **docs/** folder and can be built and served with M
 
 | Topic | Post |
 |-------|------|
+| Oriented detection in aerial and satellite images | [https://deeplearning.earth/oriented-detection-in-satellite-images/](https://deeplearning.earth/oriented-detection-in-satellite-images/) |
 | Why OrientedDet / Apache 2.0 stack | [https://deeplearning.earth/posts/2026-06-22_oriented-det_v0_1_0_sovereign_oriented_object_detection_for_eo/](https://deeplearning.earth/posts/2026-06-22_oriented-det_v0_1_0_sovereign_oriented_object_detection_for_eo/) |
 | Visual detections (15 DOTA classes) | [https://deeplearning.earth/posts/2026-06-23_oriented_rcnn_detections_for_the_15_dota_classes/](https://deeplearning.earth/posts/2026-06-23_oriented_rcnn_detections_for_the_15_dota_classes/) |
 | `odet image-demo` on Apple Silicon | [https://deeplearning.earth/posts/2026-06-25_oriented_object_detection_on_macos_in_pure_python/](https://deeplearning.earth/posts/2026-06-25_oriented_object_detection_on_macos_in_pure_python/) |
@@ -175,7 +176,9 @@ See **[docs/roadmap.md](docs/roadmap.md)** for the full public plan. Summary:
 - **v0.2** (shipped): Rotated FCOS (anchor-free single-stage); Hub `rotated_fcos_dota_le90_1x` (73.07% official Task 1)
 - **v0.3** (shipped): HRSC2016 loader + Hub 3× zoo (Oriented R-CNN 90.41%, Faster R-CNN 88.77%, FCOS 88.34% eval-val); FAIR1M loader + 1× recipes; SSDD + HRSID SAR loaders + 1× recipes (SSDD Faster R-CNN held-out **90.34%**, HRSID **78.55%**; train locally, no SAR Hub)
 - **v0.4.0** (shipped): Rotated RTMDet; Hub `rotated_rtmdet_dota_le90_3x` (**77.60%** official Task 1)
-- **v0.4.1**: native YOLO-OBB (already in the tree; COCO pretrain and DOTA training next)
+- **v0.4.1** (shipped): Citation and discoverability (`CITATION.cff`, oriented/rotated + aerial/satellite copy)
+- **v0.4.2**: native YOLO-OBB (already in the tree; COCO pretrain and DOTA training next)
+- **v0.4.3**: Rotated RTMDet-S multi-scale DOTA
 - **v0.5+**: Swin-FPN backbone; optional fused CUDA kernels; hosted docs
 
 ## Contributing
@@ -289,6 +292,10 @@ Create a [GitHub Release](https://github.com/DL4EO/oriented-det/releases) from t
 Notes:
 
 - **Trusted Publishing** avoids long-lived tokens; keep `make publish-*` for manual releases. Details: [.github/workflows/README.md](.github/workflows/README.md).
+
+## Citation
+
+If you use OrientedDet in research or production, cite this repository via [CITATION.cff](CITATION.cff). Overview: [oriented detection in aerial and satellite images](https://deeplearning.earth/oriented-detection-in-satellite-images/).
 
 ## License
 

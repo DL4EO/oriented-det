@@ -13,9 +13,13 @@ High-level plan for Oriented-Det after **v0.3** (four ResNet-FPN detectors, DOTA
 | **v0.2** | Shipped — **Rotated FCOS** (anchor-free single-stage); DOTA le90 Hub `rotated_fcos_dota_le90_1x` (73.07% official Task 1) |
 | **v0.3** | Shipped — **HRSC2016** loader + Hub 3× zoo; **FAIR1M** loader + 1× recipes + tutorial; **SSDD** + **HRSID** native loaders + 1× recipes (**finetune DOTA 1× Hub; no SAR zoo**); **ONNX** pre-NMS restore (`python -m export`; DOTA 1024 tiles) |
 | **v0.4.0** | Shipped — **Rotated RTMDet** (CSPNeXt-S + PAFPN); Hub `rotated_rtmdet_dota_le90_3x`, **77.60%** official Task 1 |
-| **v0.4.1** | **Native YOLO-OBB** (already in the tree; COCO pretrain and DOTA training next) |
+| **v0.4.1** | Shipped — **Citation and discoverability** (`CITATION.cff`, shared oriented/rotated + aerial/satellite copy) |
+| **v0.4.2** | **Native YOLO-OBB** (already in the tree; COCO pretrain and DOTA training next) |
+| **v0.4.3** | **Rotated RTMDet-S multi-scale DOTA**, after YOLO-OBB. Same 3× recipe as `rotated_rtmdet_dota_le90_3x` |
 | **v0.5–v0.8** | **Swin-FPN** backbone; Oriented R-CNN + Swin-T on Hub; extend to FCOS / speed models |
 | **v1.0** | Stable API, hosted docs, complete model zoo (accuracy / balanced / speed tiers) |
+
+**v0.4.3 detail.** MMRotate’s RTMDet-s MS+RR line is **79.98%** mAP50. The multi-scale part is the tile set, not a new head: patch **1024**, overlap **500**, resize rates **0.5 / 1.0 / 1.5**. Three `train_tiles_dirs` are enough; `data_loader.shuffle` already mixes them. Validation stays on the single-scale tiles. A number next to 79.98% also needs the multi-scale test split and patch merge, not only single-scale `odet dota-submit`. `tools/tile_dota.py` can set the overlap today. It has no resize-rate flag.
 
 ## Model tiers (target v1.0)
 
