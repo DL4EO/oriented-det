@@ -1106,6 +1106,7 @@ class TrainingExperimentConfig:
     class_map: Optional[Dict[str, int]] = field(default=None, repr=False)
     class_names: Optional[List[str]] = field(default=None, repr=False)
     num_classes: Optional[int] = field(default=None, repr=False)  # Foreground classes only (model output = num_classes + 1 for background)
+    schema: Optional[str] = field(default=None, repr=False)  # Path to the JSON schema file
 
     def __post_init__(self) -> None:
         if self.evaluation.test_map and self.dataset is not None:
@@ -1119,6 +1120,9 @@ class TrainingExperimentConfig:
         """Convert config to dictionary, including class information."""
         config_dict = asdict(self)
         _normalize_legacy_loss_type(config_dict)
+        schema_ref = config_dict.pop("schema", None)
+        if schema_ref is not None:
+            config_dict["$schema"] = schema_ref
         # Convert Path objects to strings
         return self._convert_paths_to_strings(config_dict)
     
@@ -1173,6 +1177,11 @@ class TrainingExperimentConfig:
         # Use enhanced config loader that supports _base_ inheritance
         frozen_cfg = load_config(path)
         config_dict = frozen_cfg.to_dict()
+        if "$schema" in config_dict:
+            if "schema" in config_dict:
+                raise ValueError("Cannot set both '$schema' and 'schema' at the config root.")
+            config_dict["schema"] = config_dict.pop("$schema")
+        
         _normalize_legacy_loss_type(config_dict)
         _normalize_legacy_model_keys(config_dict)
         _normalize_legacy_roi_box_reg_keys(config_dict)
