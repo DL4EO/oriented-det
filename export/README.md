@@ -29,6 +29,7 @@ make export-onnx            # pretrained/rotated_fcos_*_dota_le90_1x → onnx_ex
 make export-onnx EXPERIMENT=runs/rotated_fcos/<timestamp>
 make export-onnx EXPERIMENT=runs/oriented_rcnn/<timestamp> EXPORT_MODE=oriented_rcnn_pre_nms
 make export-onnx EXPERIMENT=runs/rotated_faster_rcnn/<timestamp> EXPORT_MODE=faster_rcnn_pre_nms
+make export-onnx EXPERIMENT=runs/rotated_rtmdet/<timestamp> EXPORT_MODE=rotated_rtmdet_pre_nms
 make export-demo            # plane image + NMS assertions → onnx_export/demo/
 make export-zip             # zip onnx_export/ (no __pycache__) → onnx_export.zip
 ```
@@ -82,6 +83,7 @@ dets = detect_image("tile.jpg", "model.onnx")
 | `--mode` | Models | Notes |
 |----------|--------|--------|
 | `rotated_fcos_pre_nms` | Rotated FCOS | Default. Decode in ONNX; NMS in Python. |
+| `rotated_rtmdet_pre_nms` | Rotated RTMDet | Decode in ONNX; NMS in Python. |
 | `oriented_rcnn_pre_nms` | Oriented R-CNN | ROI decode in ONNX; NMS in Python. |
 | `faster_rcnn_pre_nms` | Rotated Faster R-CNN | ROI decode in ONNX; NMS in Python. |
 | `rotated_fcos_heads` / `retinanet_heads` / `backbone` | Tensor-only subgraphs | Full detections need decode + NMS elsewhere. |

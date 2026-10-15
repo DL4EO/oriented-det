@@ -5,6 +5,7 @@ Feature extractors for detectors:
 | Module | Role |
 |--------|------|
 | `resnet_fpn.py` | ResNet + FPN (`setup_backbone`, MMDet-style returned layers) |
+| `cspnext.py` | CSPNeXt + PAFPN. ImageNet load is `strict=True` after dropping the classifier `head` and aliasing `depthwise_conv` / `pointwise_conv` to `depthwise` / `pointwise`. |
 | `utils.py` | Backbone helpers shared by model constructors |
 
 Configured via `model.backbone`, `model.fpn_returned_layers`, `model.frozen_stages` / `model.trainable_layers` in [Configuration](../../docs/user-guide/configuration.md).

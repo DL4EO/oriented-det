@@ -81,21 +81,26 @@ from oriented_det.data import (
     build_split_dataset,
     dataset_format_name,
     format_airbus_empty_gt_filter_log,
+    format_coco_empty_gt_filter_log,
     format_dota_empty_gt_filter_log,
     format_fair1m_empty_gt_filter_log,
     format_hrsc_empty_gt_filter_log,
     format_hrsid_empty_gt_filter_log,
     format_ssdd_empty_gt_filter_log,
+    format_yolo_obb_empty_gt_filter_log,
     split_class_names,
 )
 from oriented_det.train import train, CheckpointManager, WarmupScheduler, OneCycleWrapper, get_best_checkpoint_path
 from oriented_det.train.utils import (
     capped_subset_indices,
     capture_source_provenance,
+    apply_weight_decay_multipliers,
     create_cosine_with_tail_lr_scheduler,
+    create_late_cosine_lr_scheduler,
     create_multistep_lr_scheduler,
     create_pytorch_cosine_lr_scheduler,
     format_cosine_with_tail_scheduler_description,
+    format_late_cosine_scheduler_description,
     format_pytorch_cosine_scheduler_description,
     model_has_rpn_head,
     set_backbone_requires_grad,
@@ -106,6 +111,8 @@ from oriented_det.train.config import (
     LossConfig,
     anchor_angles_deg_to_rad,
     effective_eval_metric_thresholds,
+    resolve_preds_score_threshold,
+    resolved_map_iou_thresholds,
     config_use_exact_rotated_iou_for_map,
     config_use_exact_rotated_iou_for_final_map,
 )
@@ -1091,10 +1098,26 @@ def create_model_from_config(
             nms_class_agnostic=getattr(config.model, "nms_class_agnostic", False),
             roi_class_weights=roi_class_weights,
         )
+    elif model_type == "rotated_rtmdet":
+        from oriented_det.models.rotated_rtmdet import build_rotated_rtmdet
+
+        model = build_rotated_rtmdet(
+            config.model,
+            num_classes,
+            roi_class_weights=roi_class_weights,
+        )
+    elif model_type == "yolo_obb":
+        from oriented_det.models.yolo_obb import build_yolo_obb
+
+        model = build_yolo_obb(
+            config.model,
+            num_classes,
+            roi_class_weights=roi_class_weights,
+        )
     else:
         raise ValueError(
             f"Unknown model_type: {model_type}. Supported: rotated_faster_rcnn, "
-            "oriented_rcnn, rotated_retinanet, rotated_fcos"
+            "oriented_rcnn, rotated_retinanet, rotated_fcos, rotated_rtmdet, yolo_obb"
         )
     
     model.to(device)
@@ -1503,6 +1526,26 @@ def main():
             print("HRSID filter_empty_gt:")
             print(format_hrsid_empty_gt_filter_log(train_dataset, split="train"))
             print(format_hrsid_empty_gt_filter_log(val_dataset, split="val"))
+    elif rank == 0 and dataset_format == "coco":
+        print(
+            f"\nUsing COCO dataset: {config.dataset.data_root} "
+            f"(train split={getattr(train_dataset, 'split', 'train2017')}, "
+            f"val split={getattr(val_dataset, 'split', 'val2017')})"
+        )
+        if train_filter_empty:
+            print("COCO filter_empty_gt:")
+            print(format_coco_empty_gt_filter_log(train_dataset, split="train"))
+            print(format_coco_empty_gt_filter_log(val_dataset, split="val"))
+    elif rank == 0 and dataset_format == "yolo_obb":
+        print(
+            f"\nUsing YOLO-OBB dataset: {config.dataset.data_root} "
+            f"(train split={getattr(train_dataset, 'split', 'train')}, "
+            f"val split={getattr(val_dataset, 'split', 'val')})"
+        )
+        if train_filter_empty:
+            print("YOLO-OBB filter_empty_gt:")
+            print(format_yolo_obb_empty_gt_filter_log(train_dataset, split="train"))
+            print(format_yolo_obb_empty_gt_filter_log(val_dataset, split="val"))
     elif rank == 0 and train_filter_empty:
         print("DOTA filter_empty_gt (MMRotate-style):")
         print(format_dota_empty_gt_filter_log(train_dataset, split="train"))
@@ -1847,6 +1890,31 @@ def main():
     rotate_on = getattr(prep, "enable_random_rotate", False) if prep is not None else False
     rotate_prob = getattr(prep, "random_rotate_prob", 0.5) if prep is not None else 0.5
     rotate_range = getattr(prep, "random_rotate_angle_range", 180.0) if prep is not None else 180.0
+    rotate_rect_labels = list(getattr(prep, "random_rotate_rect_labels", None) or []) if prep is not None else []
+    mosaic_on = bool(getattr(prep, "enable_mosaic", False)) if prep is not None else False
+    mosaic_scale = getattr(prep, "mosaic_img_scale", None) if prep is not None else None
+    if mosaic_scale is not None:
+        mosaic_scale = (int(mosaic_scale[0]), int(mosaic_scale[1]))
+    mosaic_ratio = getattr(prep, "mosaic_ratio_range", None) if prep is not None else None
+    mosaic_ratio = (0.5, 1.5) if not mosaic_ratio else (float(mosaic_ratio[0]), float(mosaic_ratio[1]))
+    mosaic_center = getattr(prep, "mosaic_center_ratio_range", None) if prep is not None else None
+    mosaic_center = (0.5, 1.5) if not mosaic_center else (float(mosaic_center[0]), float(mosaic_center[1]))
+    collate_geom = dict(
+        random_rotate_rect_labels=rotate_rect_labels or None,
+        enable_mosaic=mosaic_on,
+        mosaic_prob=float(getattr(prep, "mosaic_prob", 1.0) if prep is not None else 1.0),
+        mosaic_img_scale=mosaic_scale,
+        mosaic_center_ratio_range=mosaic_center,
+        mosaic_pad_val=int(getattr(prep, "mosaic_pad_val", 114) if prep is not None else 114),
+        mosaic_max_cached_images=int(
+            getattr(prep, "mosaic_max_cached_images", 40) if prep is not None else 40
+        ),
+        mosaic_ratio_range=mosaic_ratio,
+        mosaic_disable_last_n_epochs=int(
+            getattr(prep, "mosaic_disable_last_n_epochs", 0) if prep is not None else 0
+        ),
+        mosaic_total_epochs=int(config.training.num_epochs),
+    )
 
     if config.enable_albumentation:
         train_collate_fn = create_collate_fn(
@@ -1866,6 +1934,7 @@ def main():
             normalize_std=norm_std,
             difficult_strategy=getattr(config.dataset, "difficult_strategy", "drop"),
             lookalike_labels=getattr(config.dataset, "lookalike_labels", None),
+            **collate_geom,
         )
         if rank == 0:
             print("  - Training: with Albumentations augmentation")
@@ -1887,6 +1956,7 @@ def main():
             normalize_std=norm_std,
             difficult_strategy=getattr(config.dataset, "difficult_strategy", "drop"),
             lookalike_labels=getattr(config.dataset, "lookalike_labels", None),
+            **collate_geom,
         )
         if rank == 0:
             flip_parts = []
@@ -1964,6 +2034,30 @@ def main():
         collate_fn=val_collate_fn,
         pin_memory=config.data_loader.pin_memory if (torch.cuda.is_available()) else False,
     )
+
+    test_loader = None
+    if config.evaluation.test_map:
+        # Empty chips stay in the test score. Train/val keep dataset.filter_empty_gt.
+        test_dataset = build_split_dataset(
+            config.dataset, "test", filter_empty_gt=False
+        )
+        if is_distributed:
+            test_sampler = DistributedSampler(
+                test_dataset, num_replicas=world_size, rank=rank, shuffle=False
+            )
+        else:
+            test_sampler = None
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=config.data_loader.batch_size,
+            shuffle=False,
+            sampler=test_sampler,
+            num_workers=num_workers,
+            collate_fn=val_collate_fn,
+            pin_memory=config.data_loader.pin_memory if (torch.cuda.is_available()) else False,
+        )
+        if rank == 0:
+            print(f"Test samples: {len(test_dataset)} (empty chips kept)")
     
     if rank == 0:
         print(f"Training samples: {len(train_dataset)}")
@@ -2044,12 +2138,19 @@ def main():
     # those parameters skip the loss graph → DDP must traverse unused params or reduction breaks.
     _fb_pre_ddp = int(getattr(config.training, "freeze_backbone_epochs", 0) or 0)
     _fr_pre_ddp = int(getattr(config.training, "freeze_rpn_epochs", 0) or 0)
-    _ddp_find_unused = (_fb_pre_ddp > 0 or _fr_pre_ddp > 0)
+    _force_horizontal = bool(getattr(config.model, "yolo_obb_force_horizontal", False))
+    _ddp_find_unused = (_fb_pre_ddp > 0 or _fr_pre_ddp > 0 or _force_horizontal)
     if is_distributed:
         if _ddp_find_unused and rank == 0:
-            print(
-                "  DDP: find_unused_parameters=True (required while backbone/RPN are frozen by epoch)."
-            )
+            if _force_horizontal and _fb_pre_ddp <= 0 and _fr_pre_ddp <= 0:
+                print(
+                    "  DDP: find_unused_parameters=True "
+                    "(YOLO-OBB angle head is outside the loss graph)."
+                )
+            else:
+                print(
+                    "  DDP: find_unused_parameters=True (required while backbone/RPN are frozen by epoch)."
+                )
         model = torch.nn.parallel.DistributedDataParallel(
             model,
             device_ids=None,
@@ -2149,6 +2250,12 @@ def main():
             f"\nPartial freeze (0-based epoch indices; ROI always trains): "
             f"freeze_backbone_epochs={freeze_backbone_epochs}, freeze_rpn_epochs={freeze_rpn_epochs}"
         )
+    opt_name = (getattr(config.training, "optimizer", None) or "sgd").strip().lower()
+    if opt_name in ("adam_w",):
+        opt_name = "adamw"
+    norm_wd_mult = float(getattr(config.training, "weight_decay_norm_mult", 1.0))
+    bias_wd_mult = float(getattr(config.training, "weight_decay_bias_mult", 1.0))
+    split_weight_decay = norm_wd_mult != 1.0 or bias_wd_mult != 1.0
     if use_lr_param_groups:
         optimizer_param_groups, optimizer_group_summary = build_optimizer_param_groups(
             model,
@@ -2157,12 +2264,15 @@ def main():
             config=config,
             include_frozen_parameters=use_phase_freeze,
         )
-        optimizer = optim.SGD(
-            optimizer_param_groups,
-            lr=config.training.learning_rate,
-            momentum=config.training.momentum,
-            weight_decay=config.training.weight_decay,
-        )
+        if split_weight_decay:
+            optimizer_param_groups = apply_weight_decay_multipliers(
+                optimizer_param_groups,
+                model,
+                config.training.weight_decay,
+                norm_wd_mult,
+                bias_wd_mult,
+            )
+        optimizer_params = optimizer_param_groups
         if rank == 0:
             print("\nOptimizer param groups enabled:")
             for group_name in ["backbone", "rpn", "roi", "head", "other"]:
@@ -2175,12 +2285,43 @@ def main():
                     f"(x{details['multiplier']:.2f}), "
                     f"params={int(details['num_params']):,}"
                 )
+    elif split_weight_decay:
+        optimizer_params = apply_weight_decay_multipliers(
+            [{"params": [p for p in model.parameters() if p.requires_grad]}],
+            model,
+            config.training.weight_decay,
+            norm_wd_mult,
+            bias_wd_mult,
+        )
     else:
+        optimizer_params = model.parameters()
+    if opt_name == "adamw":
+        betas_raw = getattr(config.training, "adamw_betas", None) or [0.9, 0.999]
+        adamw_betas = (float(betas_raw[0]), float(betas_raw[1]))
+        optimizer = optim.AdamW(
+            optimizer_params,
+            lr=config.training.learning_rate,
+            weight_decay=config.training.weight_decay,
+            betas=adamw_betas,
+        )
+        if rank == 0:
+            print(f"\nOptimizer: AdamW (betas={adamw_betas})")
+    elif opt_name in ("sgd", ""):
         optimizer = optim.SGD(
-            model.parameters(),
+            optimizer_params,
             lr=config.training.learning_rate,
             momentum=config.training.momentum,
             weight_decay=config.training.weight_decay,
+        )
+    else:
+        raise ValueError(
+            f"Unknown training.optimizer {opt_name!r}. Expected 'sgd' or 'adamw'."
+        )
+    if split_weight_decay and rank == 0:
+        print(
+            "  Weight decay groups: "
+            f"conv/other={config.training.weight_decay:g}, "
+            f"norm×{norm_wd_mult:g}, bias×{bias_wd_mult:g}"
         )
     
     # Create LR scheduler (type from config: multistep/step, reduce_on_plateau, one_cycle, cosine_annealing)
@@ -2226,6 +2367,26 @@ def main():
             eta_min,
             config.training.lr_warmup_steps,
             config.training.num_epochs,
+        )
+        if config.training.lr_warmup_steps > 0:
+            lr_scheduler = WarmupScheduler(
+                optimizer, base_lr_scheduler, config.training.lr_warmup_steps,
+            )
+            if rank == 0:
+                print(f"\nLR scheduler: {sched_desc}")
+        else:
+            lr_scheduler = base_lr_scheduler
+            if rank == 0:
+                print(f"\nLR scheduler: {sched_desc}")
+    elif sched_type in ("cosine_annealing_late", "cosine_late"):
+        base_lr_scheduler, cosine_start, eta_min = create_late_cosine_lr_scheduler(
+            optimizer, config.training,
+        )
+        sched_desc = format_late_cosine_scheduler_description(
+            cosine_start,
+            config.training.num_epochs,
+            eta_min,
+            config.training.lr_warmup_steps,
         )
         if config.training.lr_warmup_steps > 0:
             lr_scheduler = WarmupScheduler(
@@ -2319,6 +2480,13 @@ def main():
         keep_last_n=3,
     )
     eval_thr_sc, eval_thr_pc, eval_thr_iou = effective_eval_metric_thresholds(config)
+    eval_test_score_threshold = None
+    eval_test_score_src = None
+    if config.evaluation.test_map:
+        eval_test_score_threshold, eval_test_score_src = resolve_preds_score_threshold(
+            config, data_split="test"
+        )
+    eval_map_ious = resolved_map_iou_thresholds(config)
     eval_use_exact_rotated_iou = config_use_exact_rotated_iou_for_map(config)
     eval_use_exact_rotated_iou_for_final_map = config_use_exact_rotated_iou_for_final_map(config)
     
@@ -2351,11 +2519,22 @@ def main():
         _eval_thr_extra = (
             f", per_class_score_threshold={eval_thr_pc}" if eval_thr_pc else ""
         )
+        if eval_map_ious:
+            from oriented_det.data.evaluation import format_map_iou_span
+
+            _map_iou_note = f"mean AP over IoU {format_map_iou_span(eval_map_ious)}"
+        else:
+            _map_iou_note = f"iou_threshold={eval_thr_iou}"
         print(
             f"  Eval (mAP / val matching): score_threshold={eval_thr_sc}, "
-            f"iou_threshold={eval_thr_iou}{_eval_thr_extra}"
-            " (evaluation.train_val_score_threshold; production does not override)"
+            f"{_map_iou_note}{_eval_thr_extra}"
+            " (evaluation.val_score_threshold; production does not override)"
         )
+        if eval_test_score_threshold is not None:
+            print(
+                f"  Eval score floor (test mAP): {eval_test_score_threshold} "
+                f"({eval_test_score_src})"
+            )
         print(
             f"  Eval IoU backend (mAP / GT cover): "
             f"{'exact CPU polygon' if eval_use_exact_rotated_iou else 'GPU sampling (approx)'}"
@@ -2373,12 +2552,13 @@ def main():
                 f"(effective; production overrides evaluation when set)"
             )
             print(f"  [debug] Classes: {config.class_names}")
-            map_every = getattr(config.evaluation, "compute_map_every_n_epochs", 0)
+            map_every = config.evaluation.val_map_every_n_epochs
             print(f"  [debug] mAP computed every N epochs: {map_every if map_every else 'final only'}")
     
     # Load checkpoint if specified
     checkpoint_loaded = False
     checkpoint_epoch = None
+    checkpoint = None
     start_epoch = config.checkpoint.start_epoch
     checkpoint_path = None
 
@@ -2508,6 +2688,8 @@ def main():
                 "cosine",
                 "cosine_annealing_with_tail",
                 "cosine_with_tail",
+                "cosine_annealing_late",
+                "cosine_late",
             )
             and int(getattr(config.training, "lr_warmup_steps", 0) or 0) == 0
         ):
@@ -2520,6 +2702,15 @@ def main():
                 )
                 sched_desc = format_cosine_with_tail_scheduler_description(
                     cosine_ep, tail_ep, eta_min_cont, tail_lr, 0,
+                )
+            elif sched_type in ("cosine_annealing_late", "cosine_late"):
+                lr_scheduler, cosine_start, eta_min_cont = create_late_cosine_lr_scheduler(
+                    optimizer,
+                    config.training,
+                    last_epoch=int(checkpoint_epoch),
+                )
+                sched_desc = format_late_cosine_scheduler_description(
+                    cosine_start, config.training.num_epochs, eta_min_cont, 0,
                 )
             else:
                 lr_scheduler, t_max, eta_min_cont = create_pytorch_cosine_lr_scheduler(
@@ -2606,6 +2797,32 @@ def main():
         print("=" * 80)
         print()
     
+    ema = None
+    if bool(getattr(config.training, "use_ema", False)):
+        from oriented_det.train.ema import ExpMomentumEMA
+
+        ema_model = model_for_weights if is_distributed else model
+        ema = ExpMomentumEMA(
+            ema_model,
+            momentum=float(getattr(config.training, "ema_momentum", 0.0002)),
+            gamma=float(getattr(config.training, "ema_gamma", 2000.0)),
+        )
+        if (
+            checkpoint_loaded
+            and isinstance(checkpoint, dict)
+            and checkpoint.get("ema_state_dict") is not None
+            and bool(config.checkpoint.resume_from_checkpoint_epoch)
+        ):
+            ema.load_state_dict(checkpoint["ema_state_dict"])
+            if rank == 0:
+                print(f"  Resume: loaded EMA state (step {ema.step})")
+        elif rank == 0:
+            print(
+                "\nEMA enabled: "
+                f"momentum={ema.momentum:g}, gamma={ema.gamma:g}. "
+                "Validation and best_mAP use EMA weights."
+            )
+
     debug_mode = getattr(args, "debug", False)
     if debug_mode:
         enable_tracing()
@@ -2626,6 +2843,7 @@ def main():
                     device=device,
                     num_epochs=config.training.num_epochs,
                     val_loader=val_loader,
+                    test_loader=test_loader,
                     lr_scheduler=lr_scheduler,
                     checkpoint_manager=checkpoint_manager,
                     use_amp=config.training.use_amp,
@@ -2638,12 +2856,15 @@ def main():
                     class_map=config.class_map,
                     class_names=config.class_names,
                     eval_score_threshold=eval_thr_sc,
+                    eval_test_score_threshold=eval_test_score_threshold,
                     eval_per_class_score_threshold=eval_thr_pc,
                     eval_vis_score_threshold=getattr(getattr(config, "tensorboard", None), "vis_score_threshold", None),
                     eval_iou_threshold=eval_thr_iou,
-                    eval_extended_gt_metrics=getattr(config.evaluation, "extended_gt_metrics", False),
-                    eval_compute_map_final=config.evaluation.compute_map_final,
-                    eval_compute_map_every_n_epochs=getattr(config.evaluation, "compute_map_every_n_epochs", 0),
+                    eval_map_iou_thresholds=eval_map_ious,
+                    eval_extended_gt_metrics=config.evaluation.val_extended_gt_metrics,
+                    eval_compute_map_final=config.evaluation.val_map_at_end,
+                    eval_compute_map_test=config.evaluation.test_map,
+                    eval_compute_map_every_n_epochs=config.evaluation.val_map_every_n_epochs,
                     log_debug_anchors_proposals=log_debug_anchors,
                     profiler=profiler,
                     normalize_mean=norm_mean,
@@ -2663,6 +2884,7 @@ def main():
                     freeze_rpn_epochs=freeze_rpn_epochs,
                     eval_use_exact_rotated_iou=eval_use_exact_rotated_iou,
                     eval_use_exact_rotated_iou_for_final_map=eval_use_exact_rotated_iou_for_final_map,
+                    ema=ema,
                 )
             if rank == 0:
                 print("\n" + "=" * 80)
@@ -2676,6 +2898,7 @@ def main():
                 device=device,
                 num_epochs=config.training.num_epochs,
                 val_loader=val_loader,
+                test_loader=test_loader,
                 lr_scheduler=lr_scheduler,
                 checkpoint_manager=checkpoint_manager,
                 use_amp=config.training.use_amp,
@@ -2688,12 +2911,15 @@ def main():
                 class_map=config.class_map,
                 class_names=config.class_names,
                 eval_score_threshold=eval_thr_sc,
+                eval_test_score_threshold=eval_test_score_threshold,
                 eval_per_class_score_threshold=eval_thr_pc,
                 eval_vis_score_threshold=getattr(getattr(config, "tensorboard", None), "vis_score_threshold", None),
                 eval_iou_threshold=eval_thr_iou,
-                eval_extended_gt_metrics=getattr(config.evaluation, "extended_gt_metrics", False),
-                eval_compute_map_final=config.evaluation.compute_map_final,
-                eval_compute_map_every_n_epochs=getattr(config.evaluation, "compute_map_every_n_epochs", 0),
+                eval_map_iou_thresholds=eval_map_ious,
+                eval_extended_gt_metrics=config.evaluation.val_extended_gt_metrics,
+                eval_compute_map_final=config.evaluation.val_map_at_end,
+                eval_compute_map_test=config.evaluation.test_map,
+                eval_compute_map_every_n_epochs=config.evaluation.val_map_every_n_epochs,
                 log_debug_anchors_proposals=log_debug_anchors,
                 profiler=None,
                 normalize_mean=norm_mean,
@@ -2713,6 +2939,7 @@ def main():
                 freeze_rpn_epochs=freeze_rpn_epochs,
                 eval_use_exact_rotated_iou=eval_use_exact_rotated_iou,
                 eval_use_exact_rotated_iou_for_final_map=eval_use_exact_rotated_iou_for_final_map,
+                ema=ema,
             )
         
         if rank == 0:

@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import math
 import shutil
-from collections.abc import Sequence
+from collections.abc import Sequence, Sized
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -24,6 +24,10 @@ try:
     from PIL import Image
 except ImportError:
     Image = None  # type: ignore
+
+from tqdm import tqdm
+
+from oriented_det.utils.progress import tqdm_progress_stream
 
 from .dota import DOTAAnnotation, DOTASample
 
@@ -430,7 +434,13 @@ def write_dota_split(
     image_dir.mkdir(parents=True, exist_ok=True)
     label_dir.mkdir(parents=True, exist_ok=True)
     n = 0
-    for sample in samples:
+    total = len(samples) if isinstance(samples, Sized) else None
+    for sample in tqdm(
+        samples,
+        total=total,
+        desc=f"Writing {split}",
+        file=tqdm_progress_stream(),
+    ):
         stem = Path(sample.image_path).stem
         export_rgb_image(
             Path(sample.image_path),

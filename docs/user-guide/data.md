@@ -4,7 +4,7 @@ The data module provides dataset loading, image tiling, data augmentation, and e
 
 ## Train / eval splits
 
-`make eval-val` always scores the recipe **val** split. Whether that split is held-out depends on the dataset:
+`make eval-val` always scores the recipe **val** split. `make eval-test` scores a configured labeled **test** split (`dataset.test_tiles_dir(s)` or `dataset.test_split`) and refuses recipes that do not declare one. Whether val is held-out depends on the dataset:
 
 | Dataset | Train | `make eval-val` | Held-out test |
 |---------|-------|-----------------|---------------|
@@ -13,8 +13,11 @@ The data module provides dataset loading, image tiling, data augmentation, and e
 | **FAIR1M** | official **train** tiles only | official **val** tiles | Gaofen test labels are not public; val is **not** in train |
 | **SSDD** | official last-digit **train** (~928) | official last-digit **test** (~232) | Same as eval-val — test is **not** in train |
 | **HRSID** | official **train** (65%) | official **test** (35%) | Same as eval-val — no official val; test is **not** in train |
+| **OSSDD** | official **train** chips | official **val** chips | official **test** (`make eval-test`; not in train). `evaluation.test_map` scores that split once on the best val checkpoint |
 
 Do **not** call HRSC, FAIR1M, SSDD, or HRSID `make eval-val` leaky. That word is DOTA-only. For DOTA, quote **Task 1** as the real test; eval-val is a convenience metric on tiles the model already saw.
+
+OSSDD recipes set `evaluation.map_iou_thresholds` to 0.10, 0.15, …, 0.95. The logged mAP (and `best_metric`) is the mean of the area under the precision-recall curve at those rotated-IoU thresholds. `evaluation.iou_threshold` stays 0.5 for GT-cover and the precision-recall operating point. Passing `--iou-threshold` to `odet preds` scores a single IoU instead.
 
 ## DOTA Dataset
 
@@ -489,7 +492,8 @@ Native loader (`dataset.format: ssdd`) discovers, in order: official `JPEGImages
   "format": "ssdd",
   "data_root": "/path/to/data/Official-SSDD-OPEN",
   "train_split": "train",
-  "val_split": "test"
+  "val_split": "test",
+  "test_split": "test"
 }
 ```
 
@@ -523,7 +527,7 @@ This run is **in band** (~89% Faster R-CNN). Treat **<80%** overall as a failed 
 
 ## HRSID
 
-High-Resolution SAR Images Dataset (Wei et al., IEEE Access 2020). **5,604** 800×800 chips, **16,951** ships, Sentinel-1B / TerraSAR-X / TanDEM-X, 0.5–3 m. MS COCO **polygons** → le90 rbox (n-gons use min-area rectangle). Official **65/35 train/test**; **no val** — recipes evaluate on test. `make eval-val` is held-out.
+High-Resolution SAR Images Dataset (Wei et al., IEEE Access 2020). **5,604** 800×800 chips, **16,951** ships, Sentinel-1B / TerraSAR-X / TanDEM-X, 0.5–3 m. MS COCO **polygons** → le90 rbox (n-gons use min-area rectangle). Official **65/35 train/test**; **no val** — `val_split` and `test_split` are both **`test`**, so `make eval-val` and `make eval-test` score the same held-out set.
 
 Native loader (`dataset.format: hrsid`) reads `annotations/train2017.json` + `test2017.json` next to `JPEGImages/` (or MMRotate `trainsplit` / `testsplit`). Point `data_root` at `HRSID_JPG`. Whole-image keep-ratio **800** + pad-32. **No tiling** (chips are already 800×800). **No HRSID Hub weights** in v0.3.
 
@@ -564,6 +568,17 @@ A full 12-epoch finetune of [`hrsid_le90_1x.json`](https://github.com/DL4EO/orie
 Wei et al. (IEEE Access 2020, Table 4) report **horizontal** bbox AP on official 65/35 test: SOTA two-stage **>84.7%** AP50 and **>67.2%** AP75. That protocol is COCO **HBB**, not OrientedDet rotated IoU on min-area rectangles. A later Detectron2 Faster R-CNN reimplementation reported 71.88% AP50 on a **different** split — not the paper baseline.
 
 This run is **in band** (healthy rotated AP50: high 70s–mid 80s). Treat **<70%** eval-val as a failed train. Oriented R-CNN / FCOS 1× on HRSID are **not yet run**. No inshore/offshore split (unlike SSDD).
+
+## COCO 2017
+
+Official detection set used as a horizontal pretrain for YOLO-OBB S. `dataset.format: coco` reads:
+
+- `/path/to/data/coco/train2017/*.jpg` and `val2017/*.jpg`
+- `annotations/instances_train2017.json` and `annotations/instances_val2017.json`
+
+The detection `bbox` (`x, y, w, h`) is stored as le90 `(cx, cy, w, h, 0)`. The segmentation polygon is ignored. `iscrowd` annotations are dropped. The 80 category ids are not contiguous; they map onto labels `1..80` in ascending id order. Images with no objects are kept.
+
+`yolo_obb_force_horizontal` replaces the predicted angle with a constant 0 outside the graph before ProbIoU and DFL, so the angle head stays at init. Setting `yolo_obb_angle_weight` to 0 does not do that. The DOTA finetune ([`configs/yolo_obb/dota_le90_6x_s_coco.json`](../../configs/yolo_obb/dota_le90_6x_s_coco.json)) loads the backbone, neck, and box towers, then restarts the 15-way classifier and the angle head. Download and launch commands: [configs/yolo_obb/README.md](../../configs/yolo_obb/README.md).
 
 ## Image Tiling
 

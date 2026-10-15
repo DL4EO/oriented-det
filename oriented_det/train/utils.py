@@ -347,6 +347,7 @@ class CheckpointManager:
         *,
         suffix: str = "",
         custom_filename: Optional[str] = None,
+        ema_state_dict: Optional[Dict[str, Any]] = None,
     ) -> Path:
         """Save a checkpoint.
         
@@ -368,6 +369,8 @@ class CheckpointManager:
             checkpoint["optimizer_state_dict"] = optimizer.state_dict()
         if scheduler is not None and hasattr(scheduler, "state_dict"):
             checkpoint["scheduler_state_dict"] = scheduler.state_dict()
+        if ema_state_dict is not None:
+            checkpoint["ema_state_dict"] = ema_state_dict
         
         if custom_filename:
             filename = custom_filename if custom_filename.endswith(".pth") else f"{custom_filename}.pth"
@@ -591,10 +594,26 @@ class CheckpointManager:
                     f"(include={include_prefixes or None}, exclude={exclude_prefixes or None})."
                 )
 
+            # YOLO-OBB COCO (80) → DOTA (15): keep backbone, neck, and box towers.
+            # Drop the angle head and the last classification conv. A same-shape
+            # checkpoint still loads in full, so a DOTA resume is unchanged.
+            model_sd = model.state_dict()
+            from oriented_det.models.yolo_obb import drop_yolo_obb_class_transfer_keys
+
+            checkpoint_state_dict, transfer_skipped = drop_yolo_obb_class_transfer_keys(
+                model_sd, checkpoint_state_dict
+            )
+            if transfer_skipped:
+                print(
+                    f"  YOLO-OBB class transfer: skipped {len(transfer_skipped)} keys "
+                    "(angle head and last classification conv stay at init):"
+                )
+                for key in transfer_skipped:
+                    print(f"     - {key}")
+
             # Drop keys whose tensor shapes differ from the model (e.g. ROI classifier when
             # num_classes changes, or RPN convs when anchor counts differ). PyTorch raises on
             # shape mismatch even when strict=False, which would otherwise abort the whole load.
-            model_sd = model.state_dict()
             shape_skipped_detail: List[tuple] = []
             aligned_state_dict: Dict[str, Any] = {}
             for key, value in checkpoint_state_dict.items():
@@ -620,16 +639,35 @@ class CheckpointManager:
             missing_keys, unexpected_keys = model.load_state_dict(
                 checkpoint_state_dict, strict=False
             )
-            
+
+            # Shape-filtered tensors are absent from the dict passed to load_state_dict,
+            # so they show up here even though the checkpoint file contains them.
+            shape_skipped_keys = {item[0] for item in shape_skipped_detail}
+            missing_shape = [k for k in missing_keys if k in shape_skipped_keys]
+            missing_absent = [k for k in missing_keys if k not in shape_skipped_keys]
+
             # Print warnings if there are mismatches
             if missing_keys:
-                print(f"\n⚠️  Warning: Model architecture mismatch - {len(missing_keys)} keys not found in checkpoint:")
-                print(f"   Missing keys (model expects but checkpoint doesn't have):")
-                for key in missing_keys[:10]:  # Show first 10
-                    print(f"     - {key}")
-                if len(missing_keys) > 10:
-                    print(f"     ... and {len(missing_keys) - 10} more")
-                print(f"   These layers will be initialized randomly.")
+                print(
+                    f"\n⚠️  Warning: Model architecture mismatch - "
+                    f"{len(missing_keys)} keys not loaded from checkpoint:"
+                )
+                if missing_shape:
+                    print(
+                        "   Shape mismatch (checkpoint has these tensors; they were skipped, "
+                        "often because the number of classes differs):"
+                    )
+                    for key in missing_shape[:10]:
+                        print(f"     - {key}")
+                    if len(missing_shape) > 10:
+                        print(f"     ... and {len(missing_shape) - 10} more")
+                if missing_absent:
+                    print("   Missing keys (model expects but checkpoint doesn't have):")
+                    for key in missing_absent[:10]:
+                        print(f"     - {key}")
+                    if len(missing_absent) > 10:
+                        print(f"     ... and {len(missing_absent) - 10} more")
+                print("   These layers will be initialized randomly.")
             
             if unexpected_keys:
                 print(f"\n⚠️  Warning: Model architecture mismatch - {len(unexpected_keys)} keys in checkpoint not used:")
@@ -734,6 +772,57 @@ class CosineAnnealingWithFixedTailLR(_lr_scheduler_base_class()):  # type: ignor
                 for base_lr in self.base_lrs
             ]
         return [self.tail_lr for _ in self.base_lrs]
+
+
+class CosineAnnealingLateLR(_lr_scheduler_base_class()):  # type: ignore[misc, valid-type]
+    """Hold the base LR, then cosine-decay to ``eta_min`` by ``num_epochs``.
+
+    ``last_epoch`` matches PyTorch schedulers (0 right after construction).
+    Epochs before ``cosine_start_epoch`` stay at the base LR. The cosine
+    argument is 0 at ``cosine_start_epoch`` and 1 at ``num_epochs``, so the
+    minimum is the LR after that last epoch step. Stepped once per epoch,
+    same as :class:`torch.optim.lr_scheduler.CosineAnnealingLR`.
+    """
+
+    def __init__(
+        self,
+        optimizer: "optim.Optimizer",
+        num_epochs: int,
+        cosine_start_epoch: int,
+        eta_min: float = 0.0,
+        last_epoch: int = -1,
+    ) -> None:
+        _require_torch()
+        self.num_epochs = int(num_epochs)
+        self.cosine_start_epoch = int(cosine_start_epoch)
+        self.eta_min = float(eta_min)
+        if self.num_epochs < 1:
+            raise ValueError(f"num_epochs must be >= 1, got {self.num_epochs}")
+        if self.cosine_start_epoch < 0 or self.cosine_start_epoch >= self.num_epochs:
+            raise ValueError(
+                "cosine_start_epoch must be in [0, num_epochs); "
+                f"got {self.cosine_start_epoch} for num_epochs={self.num_epochs}"
+            )
+        super().__init__(optimizer, last_epoch)
+
+    def get_lr(self) -> List[float]:
+        return self._lr_at_epoch(int(self.last_epoch))
+
+    def _get_closed_form_lr(self) -> List[float]:
+        return self._lr_at_epoch(int(self.last_epoch))
+
+    def _lr_at_epoch(self, epoch: int) -> List[float]:
+        if epoch < self.cosine_start_epoch:
+            return [float(base) for base in self.base_lrs]
+        span = float(self.num_epochs - self.cosine_start_epoch)
+        progress = (float(epoch) - float(self.cosine_start_epoch)) / span
+        if progress >= 1.0:
+            return [self.eta_min for _ in self.base_lrs]
+        return [
+            self.eta_min
+            + (float(base) - self.eta_min) * (1.0 + math.cos(math.pi * progress)) / 2.0
+            for base in self.base_lrs
+        ]
 
 
 def _resolve_cosine_phase_epochs(training: Any) -> int:
@@ -866,6 +955,55 @@ def create_cosine_with_tail_lr_scheduler(
     return scheduler, cosine_epochs, tail_epochs, tail_lr
 
 
+def resolve_late_cosine_start_epoch(training: Any) -> int:
+    """Epoch index where late cosine leaves the flat base LR (default half the schedule)."""
+    num_epochs = int(training.num_epochs)
+    start_cfg = getattr(training, "lr_scheduler_cosine_start_epoch", None)
+    start = num_epochs // 2 if start_cfg is None else int(start_cfg)
+    if start < 0 or start >= num_epochs:
+        raise ValueError(
+            "lr_scheduler_cosine_start_epoch must be in [0, num_epochs); "
+            f"got {start} for num_epochs={num_epochs}"
+        )
+    return start
+
+
+def create_late_cosine_lr_scheduler(
+    optimizer: "optim.Optimizer",
+    training: Any,
+    *,
+    last_epoch: int = -1,
+) -> Tuple[Any, int, float]:
+    """Flat base LR until ``lr_scheduler_cosine_start_epoch``, then cosine to ``eta_min``."""
+    _require_torch()
+    start = resolve_late_cosine_start_epoch(training)
+    eta_min = float(getattr(training, "lr_scheduler_cosine_eta_min", 1e-6))
+    scheduler = CosineAnnealingLateLR(
+        optimizer,
+        num_epochs=int(training.num_epochs),
+        cosine_start_epoch=start,
+        eta_min=eta_min,
+        last_epoch=last_epoch,
+    )
+    return scheduler, start, eta_min
+
+
+def format_late_cosine_scheduler_description(
+    start_epoch: int,
+    num_epochs: int,
+    eta_min: float,
+    warmup_steps: int,
+) -> str:
+    """Human-readable line for ``cosine_annealing_late``."""
+    core = (
+        f"CosineAnnealingLateLR (flat until epoch {start_epoch}, "
+        f"cosine to eta_min={eta_min:g} by epoch {num_epochs})"
+    )
+    if warmup_steps > 0:
+        return f"{core} + warmup {warmup_steps} steps"
+    return core
+
+
 def format_pytorch_cosine_scheduler_description(
     t_max: int,
     eta_min: float,
@@ -897,6 +1035,74 @@ def format_cosine_with_tail_scheduler_description(
     if warmup_steps > 0:
         return f"{core} + warmup {warmup_steps} steps"
     return core
+
+
+def _norm_parameter_types() -> Tuple[type, ...]:
+    """BatchNorm and GroupNorm (including SyncBatchNorm)."""
+    _require_torch()
+    types: List[type] = [
+        torch.nn.BatchNorm1d,
+        torch.nn.BatchNorm2d,
+        torch.nn.BatchNorm3d,
+        torch.nn.GroupNorm,
+    ]
+    sync = getattr(torch.nn, "SyncBatchNorm", None)
+    if sync is not None:
+        types.append(sync)
+    return tuple(types)
+
+
+def apply_weight_decay_multipliers(
+    param_groups: Sequence[Dict[str, Any]],
+    model: "nn.Module",
+    weight_decay: float,
+    norm_mult: float,
+    bias_mult: float,
+) -> List[Dict[str, Any]]:
+    """Split param groups so norm and bias can use a different weight decay.
+
+    When both multipliers are 1, groups are returned unchanged. Otherwise each
+    group is split into conv/other weights (``weight_decay``), BatchNorm and
+    GroupNorm parameters (``weight_decay * norm_mult``), and other biases
+    (``weight_decay * bias_mult``).
+    """
+    if float(norm_mult) == 1.0 and float(bias_mult) == 1.0:
+        return [dict(group) for group in param_groups]
+    _require_torch()
+    norm_types = _norm_parameter_types()
+    norm_ids: set[int] = set()
+    bias_ids: set[int] = set()
+    for module in model.modules():
+        if isinstance(module, norm_types):
+            for param in module.parameters(recurse=False):
+                norm_ids.add(id(param))
+        bias = getattr(module, "bias", None)
+        if isinstance(bias, torch.nn.Parameter):
+            bias_ids.add(id(bias))
+    out: List[Dict[str, Any]] = []
+    decay_value = float(weight_decay)
+    buckets_wd = (
+        ("decay", decay_value),
+        ("norm", decay_value * float(norm_mult)),
+        ("bias", decay_value * float(bias_mult)),
+    )
+    for group in param_groups:
+        buckets: Dict[str, List[Any]] = {"decay": [], "norm": [], "bias": []}
+        for param in group["params"]:
+            if id(param) in norm_ids:
+                buckets["norm"].append(param)
+            elif id(param) in bias_ids:
+                buckets["bias"].append(param)
+            else:
+                buckets["decay"].append(param)
+        for key, wd in buckets_wd:
+            if not buckets[key]:
+                continue
+            new_group = {k: v for k, v in group.items() if k != "params"}
+            new_group["params"] = buckets[key]
+            new_group["weight_decay"] = wd
+            out.append(new_group)
+    return out
 
 
 def save_training_config(config: Dict[str, Any], path: str | Path) -> None:
@@ -1094,18 +1300,23 @@ class OneCycleWrapper:
 __all__ = [
     "MetricTracker",
     "CheckpointManager",
+    "CosineAnnealingLateLR",
     "CosineAnnealingWithFixedTailLR",
+    "apply_weight_decay_multipliers",
     "capped_subset_indices",
     "collate_dota_samples",
     "collate_fn_generic",
     "create_cosine_with_tail_lr_scheduler",
+    "create_late_cosine_lr_scheduler",
     "create_multistep_lr_scheduler",
     "create_pytorch_cosine_lr_scheduler",
     "multistep_lr_factor",
     "resolve_multistep_gammas",
     "format_cosine_with_tail_scheduler_description",
+    "format_late_cosine_scheduler_description",
     "format_pytorch_cosine_scheduler_description",
     "resolve_cosine_with_tail_lengths",
+    "resolve_late_cosine_start_epoch",
     "resolve_pytorch_cosine_t_max",
     "save_training_config",
     "WarmupScheduler",

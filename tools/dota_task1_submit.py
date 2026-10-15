@@ -66,6 +66,18 @@ def _predictions_json_from_run(meta: dict, output_dir: str | None = None) -> Pat
     )
 
 
+def _official_unlabeled_test_dir(test_dir: str | None, data_root: str | None) -> str:
+    """Task 1 images. Never ``dataset.test_tiles_dir`` (DOTA points that at leaky val)."""
+    if test_dir:
+        return test_dir
+    if not data_root:
+        raise ValueError(
+            "dota-submit needs --test-dir or --data-root for unlabeled official test images. "
+            "dataset.test_tiles_dir is the labeled test_map split, not Task 1."
+        )
+    return str(Path(data_root) / "test")
+
+
 def _run_test_preds(
     *,
     experiment_dir: str | None,
@@ -78,6 +90,7 @@ def _run_test_preds(
 ) -> Path:
     from tools.save_predictions import resolve_preds_model_paths, run_inference_and_save
 
+    test_dir = _official_unlabeled_test_dir(test_dir, data_root)
     exp_dir, ckpt, cfg = resolve_preds_model_paths(
         experiment_dir=experiment_dir,
         checkpoint=checkpoint,
@@ -177,12 +190,12 @@ def main(argv: list[str] | None = None) -> None:
     if args.from_json is None and not args.experiment_dir and not args.checkpoint:
         parser.error("Provide --from-json, --checkpoint (hf://<slug>), or --experiment-dir")
 
-    if args.from_json is None and args.checkpoint and not args.experiment_dir:
-        if not args.test_dir and not args.data_root:
-            parser.error(
-                "When using --checkpoint, pass --test-dir (e.g. /data/DOTA-v1.0/test) "
-                "or --data-root (official test images under <root>/test)."
-            )
+    if args.from_json is None and not args.test_dir and not args.data_root:
+        parser.error(
+            "Pass --test-dir (e.g. /path/to/data/DOTA-v1.0/test) or --data-root "
+            "(official test images under <root>/test). dataset.test_tiles_dir is the "
+            "labeled test_map split (DOTA: leaky val tiles), not Task 1."
+        )
 
     if args.from_json is not None:
         pred_json = _resolve_predictions_json(args.from_json)

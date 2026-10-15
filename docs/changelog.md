@@ -4,6 +4,47 @@ All notable changes to OrientedDet will be documented in this file.
 
 ## [Unreleased]
 
+Toward **v0.4.2** (native YOLO-OBB). The detector is already in the tree (`model_type: yolo_obb`). Next is COCO pretrain and DOTA.
+
+## [0.4.1] - 2026-10-10
+
+Citation and discoverability. No model or API changes.
+
+### Added
+
+- **`CITATION.cff`** — Citation File Format for GitHub “Cite this repository” and Zenodo.
+- Shared project one-liner: oriented and rotated object detection in aerial and satellite images (README, docs, PyPI description, keywords). Overview: [oriented detection in aerial and satellite images](https://deeplearning.earth/oriented-detection-in-satellite-images/).
+
+### Changed
+
+- Roadmap: native YOLO-OBB moves to **v0.4.2**; Rotated RTMDet multi-scale DOTA to **v0.4.3**.
+
+## [0.4.0] - 2026-10-10
+
+Rotated RTMDet. `rotated_rtmdet_dota_le90_3x` (CSPNeXt-S + PAFPN) is on the Hub at official Task 1 **77.60%**, the top of the DOTA zoo. Native YOLO-OBB is **0.4.2**.
+
+### Added
+
+- **Rotated RTMDet** (`model_type: rotated_rtmdet`) — clean-room CSPNeXt backbone + CSPNeXt-PAFPN neck, SepBN head (shared convs, per-level BN), dynamic soft-label assigner, Quality Focal Loss + decoded rotated IoU box loss. Base fragments: [`rotated_rtmdet_cspnext_s.json`](../configs/_base_/models/rotated_rtmdet_cspnext_s.json) and [`rotated_rtmdet_cspnext_tiny.json`](../configs/_base_/models/rotated_rtmdet_cspnext_tiny.json) (tiny has no Hub weights).
+- **RTMDet-S 3× Hub** — `rotated_rtmdet_dota_le90_3x`. Official Task 1 **77.60%** (AP75 52.01, COCO mAP 49.02; deploy **0.45**; leaky eval-val 82.75%). Recipe: [`dota_le90_3x_s.json`](../configs/rotated_rtmdet/dota_le90_3x_s.json) (36 epochs, AdamW, EMA, random rotate p=0.5 ±180°, mosaic off). Report: [`docs/eval-reports/rotated_rtmdet_dota_le90_3x/`](eval-reports/rotated_rtmdet_dota_le90_3x/model_analysis.md).
+- **EMA** — `training.use_ema` / `ema_momentum` / `ema_gamma`. Validation and `best_mAP_*.pth` use the EMA weights; epoch checkpoints keep raw weights plus `ema_state_dict` for resume.
+- **AdamW and weight-decay groups** — `training.optimizer: adamw` (`adamw_betas`), `weight_decay_norm_mult` / `weight_decay_bias_mult`. `max_grad_norm: null` disables clipping. Defaults (SGD, multipliers 1, clip 1.0) are unchanged.
+- **`lr_scheduler_type: cosine_annealing_late`** — flat LR after warmup until `lr_scheduler_cosine_start_epoch`, then cosine to `lr_scheduler_cosine_eta_min`.
+- **`preprocessing.random_rotate_rect_labels`** — tiles containing those classes rotate by 90° steps only (RTMDet uses `storage-tank` and `roundabout`).
+- **Cached mosaic** (`preprocessing.enable_mosaic` and `mosaic_*` keys), off by default and off in every published recipe.
+- `tools/bench_latency.py` — single-tile forward latency (backbone + head + decode + NMS) for several detectors on the same canvas and device.
+- **OSSDD FCOS and Faster R-CNN 3×** — [`ossdd_le90_vh_3x.json`](../configs/rotated_fcos/ossdd_le90_vh_3x.json) and [`ossdd_le90_vh_3x.json`](../configs/rotated_faster_rcnn/ossdd_le90_vh_3x.json) inherit VH 1× finetunes of the DOTA 1× hubs (36 epochs, MultiStep milestones 24/33, 512 crop, batch 4).
+- **OSSDD mAP** — `evaluation.map_iou_thresholds` averages the area under the precision-recall curve over rotated IoU 0.10 to 0.95 step 0.05. Set on the OSSDD recipes only. `best_metric` mAP uses that average. `iou_threshold` stays 0.5 for GT-cover and the precision-recall operating point.
+- **RTMDet ONNX** — `odet export onnx --mode rotated_rtmdet_pre_nms`. CSPNeXt + SepBN head + box decode in the graph; rotated NMS stays in Python. Fixed H×W, batch 1, same pre-NMS tensors as FCOS.
+
+### Changed
+
+- **Evaluation split into `val_*` and `test_*`.** Periodic val and `make eval-val` use `val_score_threshold` (often 0.3). `test_map` and `make eval-test` use `test_score_threshold` (null → **0.05**). The 1× schedule sets `test_map: true` and `val_map_at_end: false`. DOTA and FAIR1M point `test_tiles_dir` at the val tiles (leaky). `dota-submit` still requires the unlabeled official test and does not read `test_tiles_dir`. Older keys (`train_val_score_threshold`, `preds_score_threshold`, `compute_map_final`, `compute_map_test`, …) remap on load. Published Hub sidecars in `pretrained/` use the new names.
+- **`odet preds` / `make metrics` metrics margin** defaults to **0** (every GT and detection is scored). It no longer reads `production.ignore_margin_pixels`, tile overlap, or a margin stored in `predictions.json`. Pass `--metrics-margin-pixels` for a positive band. Deploy / `image_demo` still use `production.ignore_margin_pixels`.
+- Tutorial notebooks write to **`work_dirs/`** in a checkout (was `tutorial_work/`). `ORIENTED_DET_TUTORIAL_WORK` and the Kaggle `/kaggle/working` default are unchanged.
+
+ONNX export covers Rotated FCOS, Rotated RTMDet, Oriented R-CNN, and Rotated Faster R-CNN.
+
 ## [0.3.1] - 2026-09-21
 
 Patch: Rotated RetinaNet Hub default is **OBB** (no suffix). Circum-HBB lives at `*_hbb`. Official Task 1 **71.72%** (1×) / **73.89%** (3×).

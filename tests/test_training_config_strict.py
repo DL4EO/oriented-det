@@ -168,7 +168,7 @@ def test_apply_inference_config_to_model_sets_existing_attrs():
     assert m.final_nms_iou_threshold == 0.35
 
 
-def test_resolve_preds_score_ignores_production_and_train_eval_floor(tmp_path: Path):
+def test_resolve_score_val_uses_val_floor_test_uses_published_floor(tmp_path: Path):
     p = tmp_path / "preds_score.json"
     p.write_text(
         json.dumps(
@@ -182,14 +182,17 @@ def test_resolve_preds_score_ignores_production_and_train_eval_floor(tmp_path: P
         encoding="utf-8",
     )
     cfg = TrainingExperimentConfig.load(p)
-    sc, src = resolve_preds_score_threshold(cfg)
-    assert sc == pytest.approx(0.05)
-    assert "0.05" in src
+    val_sc, val_src = resolve_preds_score_threshold(cfg, data_split="val")
+    assert val_sc == pytest.approx(0.3)
+    assert "val_score_threshold" in val_src
+    test_sc, test_src = resolve_preds_score_threshold(cfg, data_split="test")
+    assert test_sc == pytest.approx(0.05)
+    assert "0.05" in test_src
     assert resolve_inference_score_threshold(cfg) == pytest.approx(0.3)
     train_sc, _, _ = effective_eval_metric_thresholds(cfg)
-    assert train_sc == pytest.approx(0.3)  # evaluation.train_val_score_threshold; not production
+    assert train_sc == pytest.approx(0.3)
 
-    sc_cli, src_cli = resolve_preds_score_threshold(cfg, cli_score_threshold=0.12)
+    sc_cli, src_cli = resolve_preds_score_threshold(cfg, data_split="test", cli_score_threshold=0.12)
     assert sc_cli == pytest.approx(0.12)
     assert "CLI" in src_cli
 
@@ -206,9 +209,9 @@ def test_resolve_preds_score_ignores_production_and_train_eval_floor(tmp_path: P
         encoding="utf-8",
     )
     cfg_set = TrainingExperimentConfig.load(p_set)
-    sc_set, src_set = resolve_preds_score_threshold(cfg_set)
+    sc_set, src_set = resolve_preds_score_threshold(cfg_set, data_split="test")
     assert sc_set == pytest.approx(0.08)
-    assert "preds_score_threshold" in src_set
+    assert "test_score_threshold" in src_set
 
 
 def test_legacy_evaluation_score_threshold_alias(tmp_path: Path):
@@ -223,9 +226,9 @@ def test_legacy_evaluation_score_threshold_alias(tmp_path: Path):
         ),
         encoding="utf-8",
     )
-    with pytest.warns(DeprecationWarning, match="train_val_score_threshold"):
+    with pytest.warns(DeprecationWarning, match="val_score_threshold"):
         cfg = TrainingExperimentConfig.load(p)
-    assert cfg.evaluation.train_val_score_threshold == pytest.approx(0.27)
+    assert cfg.evaluation.val_score_threshold == pytest.approx(0.27)
     train_sc, _, _ = effective_eval_metric_thresholds(cfg)
     assert train_sc == pytest.approx(0.27)
 

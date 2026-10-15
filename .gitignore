@@ -26,6 +26,7 @@ predictions/
 previews/
 temp/
 work_dirs/
+tutorial_work/
 
 # Raw val detections are too large for GitHub (one file can exceed 100 MB)
 docs/eval-reports/**/predictions.json

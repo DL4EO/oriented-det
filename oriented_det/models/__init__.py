@@ -3,6 +3,8 @@
 from .oriented_rcnn import RotatedFasterRCNN, OrientedRCNN
 from .rotated_retinanet import RotatedRetinaNet
 from .rotated_fcos import RotatedFCOS
+from .rotated_rtmdet import RotatedRTMDet, build_rotated_rtmdet
+from .yolo_obb import YoloOBB, build_yolo_obb
 from .backbones import build_resnet_fpn_backbone
 from .bbox_coder import (
     DeltaXYWHBBoxCoder,
@@ -28,6 +30,10 @@ __all__ = [
     "OrientedRCNN",
     "RotatedRetinaNet",
     "RotatedFCOS",
+    "RotatedRTMDet",
+    "build_rotated_rtmdet",
+    "YoloOBB",
+    "build_yolo_obb",
     "build_resnet_fpn_backbone",
     "DeltaXYWHBBoxCoder",
     "DeltaXYWHAHBBoxCoder",

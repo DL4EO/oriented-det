@@ -422,6 +422,14 @@ def load_model_from_checkpoint(checkpoint_path: str, config_path: str, device: s
             final_nms_use_cpu=getattr(m, "final_nms_use_cpu", False) if m else False,
             nms_class_agnostic=getattr(m, "nms_class_agnostic", False) if m else False,
         )
+    elif "rtmdet" in model_type_lower:
+        from oriented_det.models.rotated_rtmdet import build_rotated_rtmdet
+
+        model = build_rotated_rtmdet(config.model, num_classes)
+    elif "yolo_obb" in model_type_lower:
+        from oriented_det.models.yolo_obb import build_yolo_obb
+
+        model = build_yolo_obb(config.model, num_classes)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     

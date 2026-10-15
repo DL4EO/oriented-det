@@ -33,6 +33,7 @@ from typing import Any
 
 import torch
 from torch.utils.data import Subset
+from tqdm import tqdm
 from torchvision import transforms as T
 from PIL import Image
 
@@ -43,6 +44,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from oriented_det.data import build_split_dataset
 from oriented_det.train.config import TrainingExperimentConfig
+from oriented_det.utils.progress import tqdm_progress_stream
 
 
 def build_dataset_from_config(config: TrainingExperimentConfig, split: str):
@@ -77,7 +79,7 @@ def run_sanity_checks(dataset, max_samples: int | None = None) -> dict[str, Any]
     seen_paths: set[str] = set()
     duplicates = []
 
-    for idx in range(n):
+    for idx in tqdm(range(n), desc="Sanity checks", file=tqdm_progress_stream()):
         sample = dataset[idx]
         path = Path(sample.image_path)
         path_str = str(path.resolve())
@@ -143,7 +145,7 @@ def run_dataset_stats(dataset, max_samples: int | None = None) -> dict[str, Any]
     ann_widths: list[float] = []
     ann_heights: list[float] = []
 
-    for idx in indices:
+    for idx in tqdm(indices, desc="Dataset stats", file=tqdm_progress_stream(), total=n):
         sample = dataset[idx]
         n_objs = len(getattr(sample, "annotations", ()))
         objs_per_image.append(n_objs)
@@ -201,7 +203,7 @@ def compute_mean_std(
     sum_sq_c = torch.zeros(3, dtype=torch.float64)
 
     total = len(dataset)
-    for idx in range(total):
+    for idx in tqdm(range(total), desc="Normalization", file=tqdm_progress_stream()):
         sample = dataset[idx]
         image_path = sample.image_path
         if not Path(image_path).exists():

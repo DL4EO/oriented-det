@@ -1,5 +1,5 @@
 .PHONY: help install check-install docs-deps train wizard train-wizard train-multi-gpu train-help lr-finder stats tensorboard free-gpu clean \
-	preds metrics eval-val dota-submit train-preds viewer demo test docs docs-serve sync-configs check-configs build twine-check publish-deps publish-testpypi publish-pypi upload-pretrained \
+	preds metrics eval-val eval-test dota-submit train-preds viewer demo test docs docs-serve sync-configs check-configs build twine-check publish-deps publish-testpypi publish-pypi upload-pretrained \
 	export-onnx export-demo export-zip export-verify export-preds export-metrics export-test
 
 .DEFAULT_GOAL := help
@@ -92,7 +92,8 @@ help:
 	@echo ""
 	@echo "=== Tiled val: predictions & offline metrics ==="
 	@echo "  make eval-val               - preds then metrics on latest run val (or EXPERIMENT=; CONFIG= is make train only). DOTA: leaky; real test is Task 1"
-	@echo "  make preds                  - Val inference → predictions/<ts>/predictions.json (eval NMS via evaluation.final_nms_iou_threshold; no GPU mAP)"
+	@echo "  make eval-test              - same pipeline on the configured labeled test split (EXPERIMENT=). Refuses recipes with no test split. DOTA Task 1 stays make dota-submit"
+	@echo "  make preds                  - Val inference → predictions/<ts>/predictions.json (score floor evaluation.val_score_threshold; no GPU mAP)"
 	@echo "  make metrics                - Offline mAP/PR on METRICS_PRED_DIR or latest predictions/"
 	@echo "  make train-preds            - Train split + tile_metrics.csv (latest exp; SAVE_TRAIN_PRED_OUT= optional)"
 	@echo "  make dota-submit            - Task 1 zip from FROM_JSON=, CHECKPOINT=hf://<slug>, or EXPERIMENT= + TEST_DIR="
@@ -110,7 +111,7 @@ help:
 	@echo "  make export-preds           - val inference with the ONNX bundle"
 	@echo "  make export-metrics         - offline mAP on newest onnx_export/predictions/"
 	@echo "  make export-test            - pytest export/tests/"
-	@echo "    EXPERIMENT=runs/<model>/<ts>  EXPORT_MODE=rotated_fcos_pre_nms|oriented_rcnn_pre_nms|faster_rcnn_pre_nms"
+	@echo "    EXPERIMENT=runs/<model>/<ts>  EXPORT_MODE=rotated_fcos_pre_nms|rotated_rtmdet_pre_nms|oriented_rcnn_pre_nms|faster_rcnn_pre_nms"
 	@echo ""
 	@echo "=== Docs & tests ==="
 	@echo "  make docs-deps              - pip install -e \".[docs]\" (MkDocs + mkdocstrings)"
@@ -135,8 +136,8 @@ help:
 	@echo "  DOTA_DATA_ROOT: if unset for preds / train-preds, data paths come from experiment config.json"
 	@echo "  Checkpoint loading (training): config-only — checkpoint.load_from_checkpoint, load_from_experiment,"
 	@echo "    discover_previous_run, resume_from_checkpoint_epoch, etc."
-	@echo "  preds: score/overlap/margins from production.*; final NMS from evaluation.final_nms_iou_threshold when set"
-	@echo "    (evaluation.* is training-time val only). Advanced overrides: call tools/save_predictions.py manually."
+	@echo "  preds: val score floor is evaluation.val_score_threshold; test (make eval-test) is evaluation.test_score_threshold (null → 0.05)."
+	@echo "    Overlap/margins from production.*; final NMS from evaluation.final_nms_iou_threshold when set."
 	@echo "  stats / training paths: edit tools/train.py for DATA_ROOT, fine-tuning, pretrained weights as needed."
 	@echo "  make demo: DEMO_DIR=$(DEMO_DIR) — only *.jpg, *.jpeg, *.png directly under that folder (not subdirs e.g. out/)."
 	@echo ""
@@ -320,16 +321,25 @@ preds: check-install
 	MODEL_TYPE=$$(basename $$(dirname "$$LATEST_EXP")); \
 	echo "Experiment: $$LATEST_EXP"; \
 	echo "Model type: $$MODEL_TYPE"; \
-	echo "preds: val inference from experiment config (evaluation.final_nms_iou_threshold for NMS when set; see tools/save_predictions.py). GPU mAP: run make metrics."; \
+	echo "preds: $(SPLIT) inference from experiment config (evaluation.final_nms_iou_threshold for NMS when set; see tools/save_predictions.py). GPU mAP: run make metrics."; \
+	REQUIRE=""; \
+	if [ "$(SPLIT)" = "test" ]; then REQUIRE="--require-test-split"; fi; \
 	if [ -n "$$DOTA_DATA_ROOT" ]; then \
-		$(TRAIN_ENV) odet preds --model-type "$$MODEL_TYPE" --experiment-dir "$$LATEST_EXP" --data-root "$$DOTA_DATA_ROOT" --data-split val --no-diagnostics; \
+		$(TRAIN_ENV) odet preds --model-type "$$MODEL_TYPE" --experiment-dir "$$LATEST_EXP" --data-root "$$DOTA_DATA_ROOT" --data-split "$(SPLIT)" $$REQUIRE --no-diagnostics; \
 	else \
-		echo "DOTA_DATA_ROOT not set; using data path from experiment config (dataset.data_root / val_tiles_dir)."; \
-		$(TRAIN_ENV) odet preds --model-type "$$MODEL_TYPE" --experiment-dir "$$LATEST_EXP" --data-split val --no-diagnostics; \
+		echo "DOTA_DATA_ROOT not set; using data path from experiment config (dataset.data_root / $(SPLIT) tiles)."; \
+		$(TRAIN_ENV) odet preds --model-type "$$MODEL_TYPE" --experiment-dir "$$LATEST_EXP" --data-split "$(SPLIT)" $$REQUIRE --no-diagnostics; \
 	fi
 
 # Tiled val: inference then offline mAP/PR (metrics uses newest predictions/<ts>/ unless METRICS_PRED_DIR= is set).
+# SPLIT=test is make eval-test (requires dataset.test_tiles_* or dataset.test_split).
+SPLIT ?= val
 eval-val: preds metrics
+
+# Labeled held-out test, then offline mAP. No test split in the experiment config is an error.
+eval-test:
+	@$(MAKE) preds SPLIT=test
+	@$(MAKE) metrics
 
 # Offline mAP / PR / analysis from predictions.json (no GPU inference).
 # Uses METRICS_PRED_DIR or the newest directory under predictions/.

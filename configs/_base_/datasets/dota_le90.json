@@ -3,6 +3,7 @@
     "data_root": "/path/to/data/DOTA-v1.0-tiled",
     "train_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/train",
     "val_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/val",
+    "test_tiles_dir": "/path/to/data/DOTA-v1.0-tiled/val",
     "overlap": 200,
     "difficult_strategy": "keep"
   },

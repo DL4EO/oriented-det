@@ -34,6 +34,10 @@
       "default": true,
       "notes": "Primary delivery. GroupNorm stays in the graph. NMS is Python."
     },
+    "rotated_rtmdet_pre_nms": {
+      "models": ["rotated_rtmdet"],
+      "notes": "CSPNeXt + SepBN head + DistanceAnglePointCoder decode. NMS is Python."
+    },
     "faster_rcnn_pre_nms": {
       "models": ["rotated_faster_rcnn"],
       "notes": "ROI decode in ONNX. NMS in Python."

@@ -1,6 +1,6 @@
 # oriented_det
 
-PyTorch package for rotated (oriented) object detection in aerial and satellite imagery.
+Open-source PyTorch framework for oriented and rotated object detection in aerial and satellite images.
 
 ## Subpackages
 

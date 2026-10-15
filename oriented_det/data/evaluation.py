@@ -66,6 +66,100 @@ class ClassEvalMetrics:
     ap: float
 
 
+def ossdd_map_iou_thresholds() -> List[float]:
+    """Rotated-IoU thresholds for the OSSDD paper mAP (0.10, 0.15, ..., 0.95)."""
+    return [round(0.10 + 0.05 * i, 2) for i in range(18)]
+
+
+def format_map_iou_span(thresholds: Sequence[float]) -> str:
+    """Compact label for a uniform or arbitrary IoU list."""
+    vals = [float(t) for t in thresholds]
+    if len(vals) >= 2:
+        step = vals[1] - vals[0]
+        uniform = all(
+            abs((vals[i + 1] - vals[i]) - step) < 1e-6 for i in range(len(vals) - 1)
+        )
+        if uniform:
+            return f"{vals[0]:.2f} to {vals[-1]:.2f} step {step:.2f} ({len(vals)} values)"
+    return ", ".join(f"{t:.2f}" for t in vals)
+
+
+def average_precision_area(recalls: Sequence[float], precisions: Sequence[float]) -> float:
+    """Area under the precision-recall curve (VOC 2010 all-point interpolation)."""
+    if not recalls:
+        return 0.0
+    mrec = [0.0, *[float(r) for r in recalls], 1.0]
+    mpre = [0.0, *[float(p) for p in precisions], 0.0]
+    for i in range(len(mpre) - 1, 0, -1):
+        if mpre[i - 1] < mpre[i]:
+            mpre[i - 1] = mpre[i]
+    ap = 0.0
+    for i in range(len(mrec) - 1):
+        delta = mrec[i + 1] - mrec[i]
+        if delta:
+            ap += delta * mpre[i + 1]
+    return ap
+
+
+def _greedy_tp_fp(
+    sorted_dets: Sequence[Detection],
+    ground_truths: Sequence[GroundTruth],
+    candidates: Sequence[Sequence[Tuple[int, float]]],
+    iou_threshold: float,
+) -> Tuple[List[int], List[int]]:
+    """Score-ordered greedy match. Difficult ground truths absorb a detection without counting."""
+    gt_matched = [False] * len(ground_truths)
+    tp: List[int] = []
+    fp: List[int] = []
+    for det_idx, _det in enumerate(sorted_dets):
+        best_iou = 0.0
+        best_gt_idx = -1
+        for gt_idx, det_iou in candidates[det_idx]:
+            if gt_matched[gt_idx]:
+                continue
+            if det_iou > best_iou:
+                best_iou = det_iou
+                best_gt_idx = gt_idx
+        if best_iou >= iou_threshold and best_gt_idx >= 0:
+            if ground_truths[best_gt_idx].difficult == 0:
+                gt_matched[best_gt_idx] = True
+                tp.append(1)
+                fp.append(0)
+            else:
+                tp.append(0)
+                fp.append(0)
+        else:
+            tp.append(0)
+            fp.append(1)
+    return tp, fp
+
+
+def _precision_recall_curve(
+    tp: Sequence[int],
+    fp: Sequence[int],
+    num_positives: int,
+) -> Tuple[List[float], List[float], float]:
+    """Cumulative precision/recall in score order, and recall after the last detection."""
+    tp_cumsum: List[int] = []
+    fp_cumsum: List[int] = []
+    cumsum_tp = 0
+    cumsum_fp = 0
+    for t, f in zip(tp, fp):
+        cumsum_tp += int(t)
+        cumsum_fp += int(f)
+        tp_cumsum.append(cumsum_tp)
+        fp_cumsum.append(cumsum_fp)
+    if num_positives <= 0:
+        return [], [], 0.0
+    recalls = [t / num_positives for t in tp_cumsum]
+    precisions = [
+        tp_cumsum[i] / (tp_cumsum[i] + fp_cumsum[i]) if (tp_cumsum[i] + fp_cumsum[i]) > 0 else 0.0
+        for i in range(len(tp_cumsum))
+    ]
+    final_recall = recalls[-1] if recalls else 0.0
+    return recalls, precisions, final_recall
+
+
 class APCalculator:
     """Calculate Average Precision (AP) for oriented object detection."""
 
@@ -404,7 +498,134 @@ class APCalculator:
             recall=final_recall,
             ap=ap,
         )
-    
+
+    def _iou_matrix(
+        self,
+        det_rboxes: Sequence[Any],
+        gt_rboxes: Sequence[Any],
+    ) -> List[List[float]]:
+        """Pairwise rotated IoU. One matrix is reused across IoU thresholds."""
+        if not det_rboxes or not gt_rboxes:
+            return [[] for _ in det_rboxes]
+        from ..utils import is_gpu_device
+
+        use_gpu = (
+            not self.use_exact_rotated_iou
+            and torch is not None
+            and self.device is not None
+            and is_gpu_device(self.device)
+        )
+        if use_gpu:
+            from ..ops.gpu_ops import oriented_box_iou_gpu
+            from ..ops.utils import rboxes_to_tensor
+
+            det_tensors = rboxes_to_tensor(list(det_rboxes), device=self.device)
+            gt_tensors = rboxes_to_tensor(list(gt_rboxes), device=self.device)
+            return oriented_box_iou_gpu(det_tensors, gt_tensors).detach().cpu().tolist()
+        from ..ops.iou import batch_rbox_iou
+
+        return batch_rbox_iou(
+            list(det_rboxes),
+            list(gt_rboxes),
+            device=self.device,
+            intersection_backend=(
+                self._exact_iou_backend if self.use_exact_rotated_iou else "auto"
+            ),
+        )
+
+    def _iou_candidates(
+        self,
+        sorted_dets: Sequence[Detection],
+        ground_truths: Sequence[GroundTruth],
+    ) -> List[List[Tuple[int, float]]]:
+        """Per detection, ``(gt_index, iou)`` for ground truths on the same image.
+
+        A missing ``image_id`` matches every box, same as the single-threshold matcher.
+        """
+        dets_by_image: Dict[Optional[str], List[int]] = defaultdict(list)
+        gts_by_image: Dict[Optional[str], List[int]] = defaultdict(list)
+        for det_idx, det in enumerate(sorted_dets):
+            dets_by_image[det.image_id].append(det_idx)
+        for gt_idx, gt in enumerate(ground_truths):
+            gts_by_image[gt.image_id].append(gt_idx)
+        none_gts = gts_by_image.get(None, [])
+        candidates: List[List[Tuple[int, float]]] = [[] for _ in sorted_dets]
+        for image_id, det_idxs in dets_by_image.items():
+            if image_id is None:
+                gt_idxs = list(range(len(ground_truths)))
+            else:
+                gt_idxs = list(gts_by_image.get(image_id, [])) + list(none_gts)
+            if not gt_idxs:
+                continue
+            matrix = self._iou_matrix(
+                [sorted_dets[i].rbox for i in det_idxs],
+                [ground_truths[j].rbox for j in gt_idxs],
+            )
+            for row, det_i in enumerate(det_idxs):
+                candidates[det_i] = [
+                    (gt_idxs[col], float(matrix[row][col]))
+                    for col in range(len(gt_idxs))
+                ]
+        return candidates
+
+    def compute_ap_over_thresholds(
+        self,
+        detections: Sequence[Detection],
+        ground_truths: Sequence[GroundTruth],
+        iou_thresholds: Sequence[float],
+        *,
+        class_name: Optional[str] = None,
+        min_box_size: float = 1.0,
+    ) -> Tuple[float, ClassEvalMetrics, Dict[float, float]]:
+        """Mean of area-under-PR over ``iou_thresholds``. IoU is computed once.
+
+        Recall on the returned metrics is at ``self.iou_threshold`` when that
+        value is in the list, otherwise at the closest listed threshold.
+        """
+        thresholds = [float(t) for t in iou_thresholds]
+        if not thresholds:
+            raise ValueError("iou_thresholds must not be empty")
+        if class_name:
+            detections = [d for d in detections if d.class_name == class_name]
+            ground_truths = [gt for gt in ground_truths if gt.class_name == class_name]
+        detections = [d for d in detections if d.rbox.is_valid(min_size=min_box_size)]
+        ground_truths = [gt for gt in ground_truths if gt.rbox.is_valid(min_size=min_box_size)]
+        num_dets = len(detections)
+        if not ground_truths:
+            ap = 0.0 if detections else 1.0
+            per_thr = {thr: ap for thr in thresholds}
+            return ap, ClassEvalMetrics(
+                num_gts=0,
+                num_dets=num_dets,
+                recall=0.0,
+                ap=ap,
+            ), per_thr
+
+        sorted_dets = sorted(detections, key=lambda d: d.score, reverse=True)
+        candidates = self._iou_candidates(sorted_dets, ground_truths)
+        num_positives = sum(1 for gt in ground_truths if gt.difficult == 0)
+        per_thr: Dict[float, float] = {}
+        recall_at_ref = 0.0
+        ref = min(thresholds, key=lambda t: abs(t - self.iou_threshold))
+        for thr in thresholds:
+            tp, fp = _greedy_tp_fp(sorted_dets, ground_truths, candidates, thr)
+            if num_positives == 0:
+                ap_thr = 0.0
+                final_recall = 0.0
+            else:
+                recalls, precisions, final_recall = _precision_recall_curve(tp, fp, num_positives)
+                ap_thr = average_precision_area(recalls, precisions)
+            per_thr[thr] = ap_thr
+            if thr == ref:
+                recall_at_ref = final_recall
+        mean_ap = sum(per_thr.values()) / len(per_thr)
+        return mean_ap, ClassEvalMetrics(
+            num_gts=num_positives,
+            num_dets=num_dets,
+            recall=recall_at_ref,
+            ap=mean_ap,
+        ), per_thr
+
     def compute_map(
         self,
         all_detections: Dict[str, List[Detection]],  # image_id -> detections
@@ -413,6 +634,8 @@ class APCalculator:
         progress_stream: Optional[Any] = None,
         max_iou_calculations_per_class: int = 10_000_000,  # 10M IoU calculations max per class
         min_box_size: float = 1.0,
+        iou_thresholds: Optional[Sequence[float]] = None,
+        iou_ap_out: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, float], Dict[str, ClassEvalMetrics]]:
         """Compute mAP across all classes.
         
@@ -440,6 +663,8 @@ class APCalculator:
         # Aggregate detections and ground truths by class
         class_aps: Dict[str, float] = {}
         class_metrics: Dict[str, ClassEvalMetrics] = {}
+        thresholds = [float(t) for t in iou_thresholds] if iou_thresholds else None
+        ap_sums: Dict[float, float] = {thr: 0.0 for thr in thresholds} if thresholds else {}
         sorted_classes = sorted(all_classes)
         num_classes = len(sorted_classes)
         
@@ -486,15 +711,26 @@ class APCalculator:
                     else:
                         class_iter.set_postfix_str(f"{class_name}: {num_dets} dets, {num_gts} GTs")
                 
-                ap, metrics = self.compute_ap(
-                    class_detections,
-                    class_ground_truths,
-                    class_name=class_name,
-                    show_progress=show_det_progress,
-                    progress_stream=progress_stream,
-                    max_iou_calculations=max_iou_calculations_per_class,
-                    min_box_size=min_box_size,
-                )
+                if thresholds:
+                    ap, metrics, ap_at = self.compute_ap_over_thresholds(
+                        class_detections,
+                        class_ground_truths,
+                        thresholds,
+                        class_name=class_name,
+                        min_box_size=min_box_size,
+                    )
+                    for thr, thr_ap in ap_at.items():
+                        ap_sums[thr] = ap_sums.get(thr, 0.0) + float(thr_ap)
+                else:
+                    ap, metrics = self.compute_ap(
+                        class_detections,
+                        class_ground_truths,
+                        class_name=class_name,
+                        show_progress=show_det_progress,
+                        progress_stream=progress_stream,
+                        max_iou_calculations=max_iou_calculations_per_class,
+                        min_box_size=min_box_size,
+                    )
                 class_aps[class_name] = ap
                 class_metrics[class_name] = metrics
                 
@@ -522,6 +758,11 @@ class APCalculator:
                 if use_pbar and isinstance(class_iter, tqdm):
                     class_iter.set_postfix_str(f"{class_name}: ERROR")
 
+        if iou_ap_out is not None and thresholds and class_aps:
+            n_classes = len(class_aps)
+            iou_ap_out["thresholds"] = list(thresholds)
+            iou_ap_out["per_iou"] = [ap_sums[thr] / n_classes for thr in thresholds]
+
         return class_aps, class_metrics
 
 
@@ -537,13 +778,16 @@ def compute_oriented_map(
     device: DeviceType = None,
     min_box_size: float = 1.0,
     use_exact_rotated_iou: bool = True,
+    iou_thresholds: Optional[Sequence[float]] = None,
+    iou_ap_out: Optional[Dict[str, Any]] = None,
 ) -> Tuple[float, Dict[str, float], Dict[str, ClassEvalMetrics]]:
     """Compute mean Average Precision (mAP) for oriented detection.
     
     Args:
         detections: Dictionary mapping image_id -> list of Detection objects
         ground_truths: Dictionary mapping image_id -> list of GroundTruth objects
-        iou_threshold: IoU threshold for positive matches
+        iou_threshold: IoU threshold for positive matches. Also the recall operating
+            point when ``iou_thresholds`` is set.
         class_names: Optional list of class names to evaluate
         show_progress: Whether to show progress bars during computation
         progress_stream: If set (e.g. original stderr when stdout is teed to a log file),
@@ -555,19 +799,38 @@ def compute_oriented_map(
                      Boxes smaller than this will be filtered out (default: 1.0).
         use_exact_rotated_iou: When True, mAP matching uses exact polygon IoU on CPU
             (Shapely when installed); never ``oriented_box_iou_gpu``. When False, uses GPU
-            sampling IoU (controlled by ``evaluation.use_exact_rotated_iou`` in training config).
+            sampling IoU (controlled by ``evaluation.val_exact_rotated_iou`` in training config).
+        iou_thresholds: When set, mAP is the mean of area-under-PR at each rotated-IoU
+            threshold. The pairwise IoU matrix is built once. ``None`` keeps the
+            single-threshold 11-point AP at ``iou_threshold``.
+        iou_ap_out: When set with ``iou_thresholds``, receives ``thresholds`` and
+            ``per_iou`` (mean AP at each threshold).
     
     Returns:
         Tuple of (mAP, class_ap_dict, class_metrics) where mAP is the mean of all
         class APs and ``class_metrics`` holds per-class gts/dets/recall (MMRotate-style).
     """
-    if use_exact_rotated_iou and show_progress:
-        backend = resolve_exact_polygon_iou_backend()
-        print(
-            f"mAP: exact rotated IoU on CPU (backend={backend!r}; "
-            "GPU sampling IoU disabled)",
-            flush=True,
-        )
+    thresholds = [float(t) for t in iou_thresholds] if iou_thresholds else None
+    if show_progress:
+        if thresholds:
+            backend = (
+                resolve_exact_polygon_iou_backend()
+                if use_exact_rotated_iou
+                else "gpu-sampling"
+            )
+            print(
+                "mAP: mean of area-under-PR over rotated IoU "
+                f"{format_map_iou_span(thresholds)} "
+                f"(backend={backend!r}; IoU matrix once)",
+                flush=True,
+            )
+        elif use_exact_rotated_iou:
+            backend = resolve_exact_polygon_iou_backend()
+            print(
+                f"mAP: exact rotated IoU on CPU (backend={backend!r}; "
+                "GPU sampling IoU disabled)",
+                flush=True,
+            )
     calculator = APCalculator(
         iou_threshold=iou_threshold,
         class_names=class_names,
@@ -581,6 +844,8 @@ def compute_oriented_map(
         progress_stream=progress_stream,
         max_iou_calculations_per_class=max_iou_calculations_per_class,
         min_box_size=min_box_size,
+        iou_thresholds=thresholds,
+        iou_ap_out=iou_ap_out,
     )
 
     if not class_aps:

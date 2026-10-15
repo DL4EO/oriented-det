@@ -87,8 +87,8 @@
         "format": {
           "type": "string",
           "default": "dota",
-          "enum": ["dota", "airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid"],
-          "description": "Dataset format. 'dota' expects train_tiles_dir/val_tiles_dir or train_tiles_dirs/val_tiles_dirs. 'airbus_playground' expects annotations_file/split_file. 'hrsc2016' expects official FullDataSet + ImageSets under data_root. 'fair1m' expects official train/validation (+ labelXml) or Kaggle Dataset/Images under data_root; tiled DOTA recipes use format dota after odet fair1m-to-dota. 'ssdd' expects official last-digit train/test (VOC XML, COCO, or DOTA). 'hrsid' expects COCO train2017/test2017 (or trainsplit/testsplit)."
+          "enum": ["dota", "airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid", "yolo_obb", "coco"],
+          "description": "Dataset format. 'yolo_obb' expects data_root/images/<split>, data_root/labels/<split> (normalized quads) and data_root/classes.txt. 'coco' expects official COCO 2017 train2017/ and val2017/ plus annotations/instances_{train,val}2017.json (bbox as horizontal le90, 80 category ids mapped to labels 1..80). 'dota' expects train_tiles_dir/val_tiles_dir or train_tiles_dirs/val_tiles_dirs. 'airbus_playground' expects annotations_file/split_file. 'hrsc2016' expects official FullDataSet + ImageSets under data_root. 'fair1m' expects official train/validation (+ labelXml) or Kaggle Dataset/Images under data_root; tiled DOTA recipes use format dota after odet fair1m-to-dota. 'ssdd' expects official last-digit train/test (VOC XML, COCO, or DOTA). 'hrsid' expects COCO train2017/test2017 (or trainsplit/testsplit)."
         },
         "data_root": { "type": "string", "description": "Root directory of the dataset." },
         "train_tiles_dir": { "type": "string", "description": "Directory containing training tiles (DOTA format)." },
@@ -102,6 +102,12 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Optional list of validation tile roots (union via ConcatDataset). When set, overrides val_tiles_dir."
+        },
+        "test_tiles_dir": { "type": "string", "description": "Directory containing labeled test tiles (DOTA format). Omit when the dataset has no test split." },
+        "test_tiles_dirs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Optional list of labeled test tile roots. When set, overrides test_tiles_dir. make eval-test and evaluation.test_map use this split. DOTA sets this to the val tiles (leaky). dota-submit ignores it and uses the unlabeled official test."
         },
         "same_folder": { "type": "boolean", "default": false, "description": "If true, DOTA images and annotation .txt files are in the same directory (train_tiles_dir and val_tiles_dir). If false, expect train_tiles_dir/images and train_tiles_dir/labels (and same for val)." },
         "overlap": {
@@ -165,6 +171,11 @@
         "val_split": {
           "type": ["string", "null"],
           "description": "HRSC2016 / FAIR1M split name for the training-loop val role. HRSC null → test (MMRotate). FAIR1M null → val. Ignored for DOTA / Airbus."
+        },
+        "test_split": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Native-format third split (HRSC, FAIR1M, SSDD, HRSID, YOLO-OBB, COCO). Null means no test split. DOTA-layout test data uses test_tiles_dir / test_tiles_dirs."
         },
         "tile_metrics_csv": {
           "type": ["string", "null"],
@@ -266,6 +277,24 @@
         },
         "fcos_angle_weight": { "type": "number", "default": 1.0, "description": "Weight on le90-wrapped angle L1 in FCOS box regression." },
         "fcos_nms_pre": { "type": "integer", "default": 2000, "description": "Max FCOS candidates kept per FPN level before NMS." },
+        "rtmdet_stacked_convs": { "type": "integer", "default": 2, "description": "Rotated RTMDet SepBN head stacked convs per branch." },
+        "rtmdet_norm_on_bbox": { "type": "boolean", "default": true, "description": "Divide RTMDet box distances by the FPN stride." },
+        "rtmdet_scale_angle": { "type": "boolean", "default": true, "description": "Learnable scale on the RTMDet angle head." },
+        "rtmdet_exp_on_reg": { "type": "boolean", "default": true, "description": "Exponentiate RTMDet box-distance predictions." },
+        "rtmdet_qfl_beta": { "type": "number", "default": 2.0, "description": "Quality focal loss beta for Rotated RTMDet." },
+        "rtmdet_angle_weight": { "type": "number", "default": 0.2, "description": "Weight on the RTMDet angle L1 term. 0 drops that term; rotated IoU weight stays box_reg_weight." },
+        "rtmdet_assign_topk": { "type": "integer", "default": 13, "description": "Dynamic soft-label assignment top-k for Rotated RTMDet." },
+        "rtmdet_soft_center_radius": { "type": "number", "default": 3.0, "description": "Soft center radius (in stride units) for RTMDet assignment." },
+        "rtmdet_assign_iou_weight": { "type": "number", "default": 3.0, "description": "IoU cost weight in RTMDet dynamic assignment." },
+        "rtmdet_nms_pre": { "type": "integer", "default": 2000, "description": "Max RTMDet candidates kept per FPN level before NMS." },
+        "yolo_obb_reg_max": { "type": "integer", "default": 16, "description": "YOLO-OBB distribution focal bins per box side." },
+        "yolo_obb_tal_topk": { "type": "integer", "default": 13, "description": "Task-aligned assigner top-k for YOLO-OBB." },
+        "yolo_obb_tal_alpha": { "type": "number", "default": 0.5, "description": "Task-aligned assigner classification exponent." },
+        "yolo_obb_tal_beta": { "type": "number", "default": 6.0, "description": "Task-aligned assigner rotated-IoU exponent." },
+        "yolo_obb_dfl_weight": { "type": "number", "default": 1.5, "description": "Weight on the YOLO-OBB distribution focal loss." },
+        "yolo_obb_angle_weight": { "type": "number", "default": 0.2, "description": "Weight on the YOLO-OBB le90 angle L1 term. ProbIoU weight is box_reg_weight." },
+        "yolo_obb_force_horizontal": { "type": "boolean", "default": false, "description": "Replace the predicted YOLO-OBB angle with a constant 0 outside the graph before ProbIoU and DFL. Used for horizontal COCO pretrain. angle_weight 0 is not enough." },
+        "yolo_obb_nms_pre": { "type": "integer", "default": 2000, "description": "Max YOLO-OBB candidates kept per FPN level before NMS." },
         "aux_loss_type": { "type": ["string", "null"], "default": null, "enum": [null, "kfiou", "probiou"], "description": "FCOS decoded auxiliary box loss on positives (centerness-weighted). Use with aux_loss_weight > 0 and L1 primary. Sampling riou is rejected. Includes an aspect-gated heading term unless aux_angle_weight is 0." },
         "aux_loss_weight": { "type": "number", "default": 0.0, "description": "Weight for FCOS aux_loss_type. 0 disables aux. Typical 0.1 with L1 primary." },
         "aux_angle_weight": { "type": "number", "default": 1.0, "description": "Weight of the aspect-gated heading term inside FCOS decoded aux (ω sin²(2Δθ)). 0 disables; ignored when aux is off. Typical 1.0." },
@@ -305,7 +334,7 @@
       },
       "additionalProperties": false,
       "properties": {
-        "lr_scheduler_type": { "type": ["string", "null"], "description": "LR scheduler: null/'multistep'/'step' = MultiStepLR/StepLR; 'reduce_on_plateau' = ReduceLROnPlateau; 'one_cycle' = OneCycleLR (per-step); 'cosine_annealing'/'cosine' = PyTorch CosineAnnealingLR (SGDR restarts if num_epochs > T_max); 'cosine_annealing_with_tail'/'cosine_with_tail' = cosine phase then fixed tail_lr." },
+        "lr_scheduler_type": { "type": ["string", "null"], "description": "LR scheduler: null/'multistep'/'step' = MultiStepLR/StepLR; 'reduce_on_plateau' = ReduceLROnPlateau; 'one_cycle' = OneCycleLR (per-step); 'cosine_annealing'/'cosine' = PyTorch CosineAnnealingLR (SGDR restarts if num_epochs > T_max); 'cosine_annealing_with_tail'/'cosine_with_tail' = cosine phase then fixed tail_lr; 'cosine_annealing_late'/'cosine_late' = flat base LR until lr_scheduler_cosine_start_epoch, then cosine to eta_min by num_epochs." },
         "lr_scheduler_step_epochs": { "type": "integer", "default": 8, "description": "StepLR period in epochs (LR *= gamma every N epochs). Distinct from lr_warmup_steps (optimizer steps)." },
         "lr_scheduler_milestones": { "type": ["array", "null"], "items": { "type": "integer" }, "description": "Optional MultiStepLR milestones in epochs. When set, takes precedence over lr_scheduler_step_epochs." },
         "lr_scheduler_gamma": { "default": 0.1, "description": "LR drop factor. Number: same factor at every StepLR/MultiStepLR drop. Array: one factor per lr_scheduler_milestones entry.", "oneOf": [ { "type": "number" }, { "type": "array", "items": { "type": "number" } } ] },
@@ -319,6 +348,7 @@
         "lr_scheduler_cosine_epochs": { "type": ["integer", "null"], "minimum": 1, "description": "Cosine decay length in epochs (PyTorch CosineAnnealingLR T_max). With tail settings, num_epochs should equal cosine_epochs + tail_epochs. Legacy lr_scheduler_cosine_t_max remaps onto this key." },
         "lr_scheduler_cosine_tail_epochs": { "type": "integer", "default": 0, "minimum": 0, "description": "Fixed-LR tail after cosine (0 = auto from num_epochs - cosine_epochs when longer)." },
         "lr_scheduler_cosine_tail_lr": { "type": ["number", "null"], "description": "Constant LR during tail; default lr_scheduler_cosine_eta_min." },
+        "lr_scheduler_cosine_start_epoch": { "type": ["integer", "null"], "default": null, "description": "cosine_annealing_late: keep the base LR until this epoch (PyTorch last_epoch), then cosine to eta_min at num_epochs. Null uses num_epochs // 2." },
         "lr_warmup_steps": { "type": "integer", "default": 500, "description": "Number of optimizer steps for linear warmup." },
         "lr_scaling_with_accumulation": { "type": "string", "enum": ["linear", "sqrt", "none"], "default": "linear", "description": "Scale base LR by effective batch size: linear, sqrt, or none." },
         "lr_scale_with_world_size": { "type": "boolean", "default": false, "description": "If true, multiply base LR by DDP world size. MMRotate parity mode keeps this false." },
@@ -330,11 +360,18 @@
         "lr_mult_head": { "type": ["number", "null"], "default": null, "description": "Optional LR multiplier for head.* (RetinaNet). When set, rpn_head.* and roi_head.* use the same multiplier (single knob for detector heads); when null, head.* uses lr_mult_other and two-stage heads use lr_mult_rpn / lr_mult_roi." },
         "num_epochs": { "type": "integer", "default": 20, "minimum": 1, "description": "Number of training epochs." },
         "learning_rate": { "type": "number", "default": 0.001, "description": "Base learning rate (scaled by gradient accumulation / world size when configured)." },
+        "optimizer": { "type": "string", "enum": ["sgd", "adamw"], "default": "sgd", "description": "Optimizer. sgd uses momentum. adamw uses adamw_betas (default 0.9, 0.999)." },
         "momentum": { "type": "number", "default": 0.9, "description": "SGD momentum." },
         "weight_decay": { "type": "number", "default": 0.0001, "description": "Weight decay (L2)." },
+        "adamw_betas": { "type": ["array", "null"], "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "AdamW betas. Null uses (0.9, 0.999)." },
+        "weight_decay_norm_mult": { "type": "number", "default": 1, "description": "Multiplier on weight_decay for BatchNorm/GroupNorm weight and bias. 1 leaves decay unchanged. 0 disables it." },
+        "weight_decay_bias_mult": { "type": "number", "default": 1, "description": "Multiplier on weight_decay for biases that are not part of a norm layer. 1 leaves decay unchanged. 0 disables it. Conv weights keep weight_decay." },
+        "use_ema": { "type": "boolean", "default": false, "description": "Track ExpMomentumEMA weights. Validation and best_mAP checkpoints use the EMA copy. checkpoint_epoch_*.pth still stores raw weights plus ema_state_dict." },
+        "ema_momentum": { "type": "number", "default": 0.0002, "description": "Late EMA mix coefficient on the live weights (m in (1-m)*exp(-(1+t)/gamma)+m)." },
+        "ema_gamma": { "type": "number", "default": 2000, "description": "EMA warmup gamma. Early steps track the live weights; later steps use ema_momentum." },
         "use_amp": { "type": "boolean", "default": true, "description": "Mixed precision (FP16) training." },
         "gradient_accumulation_steps": { "type": "integer", "default": 2, "minimum": 1, "description": "Accumulate gradients over this many steps; effective batch = batch_size × this." },
-        "max_grad_norm": { "type": "number", "default": 1.0, "description": "Gradient clipping." },
+        "max_grad_norm": { "type": ["number", "null"], "default": 1.0, "description": "Max gradient norm. Null disables clipping." },
         "freeze_backbone_epochs": { "type": "integer", "default": 0, "minimum": 0, "description": "While training loop epoch index epoch < N (0-based), freeze backbone.* (requires_grad=False). ROI head still trains. 0 = disabled." },
         "freeze_rpn_epochs": { "type": "integer", "default": 0, "minimum": 0, "description": "While epoch < N, freeze rpn_head.* on two-stage detectors. No-op without rpn_head (e.g. RetinaNet). 0 = disabled." },
         "loss_weights": { "type": ["object", "null"], "additionalProperties": { "type": "number" }, "description": "Per-loss weights, e.g. { \"loss_box_reg\": 0.5 } to stabilize ROI head." },
@@ -352,20 +389,22 @@
       },
       "additionalProperties": false,
       "properties": {
-        "train_val_score_threshold": { "type": "number", "default": 0.3, "description": "Min confidence for in-train val mAP / best_mAP and TensorBoard viz fallback (recipe default 0.3 for speed). Not used by make eval-val / odet preds. Legacy JSON alias evaluation.score_threshold is remapped on load." },
-        "preds_score_threshold": { "type": ["number", "null"], "default": null, "description": "Global score floor for odet preds / make eval-val only. When null, those tools use 0.05 (published protocol). Ignores production.score_threshold and evaluation.train_val_score_threshold. Deploy / image_demo keep production.score_threshold." },
-        "per_class_score_threshold": {
+        "val_score_threshold": { "type": "number", "default": 0.3, "description": "Score floor for in-train val mAP, best_mAP, val_map_at_end, and make eval-val. Legacy aliases evaluation.score_threshold and evaluation.train_val_score_threshold are remapped on load." },
+        "val_per_class_score_threshold": {
           "type": ["object", "null"],
           "additionalProperties": { "type": "number" },
-          "description": "Optional class_name -> min score; classes not listed use train_val_score_threshold."
+          "description": "Optional class_name -> min score for the val pass; classes not listed use val_score_threshold. Legacy alias evaluation.per_class_score_threshold."
         },
-        "iou_threshold": { "type": "number", "default": 0.5, "description": "IoU threshold for mAP matching (not detection NMS)." },
-        "final_nms_iou_threshold": { "type": ["number", "null"], "default": null, "description": "Final detection NMS IoU for odet preds / make eval-val only (MMRotate test parity). When set, overrides production.final_nms_iou_threshold on that path. Deploy / image_demo keep production.*; training val uses model.final_nms_iou_threshold." },
-        "compute_map_every_n_epochs": { "type": "integer", "default": 0, "description": "If >0, compute mAP every N epochs during training (current model). 0 = only at end; final mAP uses best checkpoint when compute_map_final is true." },
-        "compute_map_final": { "type": "boolean", "default": true, "description": "If true, after training load the best checkpoint and compute mAP once (final mAP uses best model)." },
-        "extended_gt_metrics": { "type": "boolean", "default": false, "description": "If true, compute expensive GT–IoU histogram diagnostics (mean/median/buckets, 0% best-IoU GT count, wrong-class counts) and class-agnostic duplicate rate on post-threshold detections (same schedule as mAP during training)." },
-        "use_exact_rotated_iou": { "type": "boolean", "default": true, "description": "When true, periodic mAP and GT-cover / accuracy matching use exact CPU polygon IoU (Shapely when installed). When false, use GPU sampling IoU (faster, approximate). Does not affect final detection NMS or production/deploy decode." },
-        "use_exact_rotated_iou_for_final_map": { "type": ["boolean", "null"], "default": null, "description": "IoU backend for compute_map_final only (best-checkpoint mAP after training). When null, uses use_exact_rotated_iou. Set true for exact publishable final mAP while keeping periodic in-training mAP on GPU sampling." }
+        "val_map_every_n_epochs": { "type": "integer", "default": 0, "description": "If >0, compute val mAP every N epochs on the current model. 0 skips periodic mAP. Legacy alias evaluation.compute_map_every_n_epochs." },
+        "val_exact_rotated_iou": { "type": "boolean", "default": true, "description": "When true, periodic val mAP and GT-cover use exact CPU polygon IoU. When false, GPU sampling. Does not affect detection NMS. Legacy alias evaluation.use_exact_rotated_iou." },
+        "val_extended_gt_metrics": { "type": "boolean", "default": false, "description": "If true, compute GT–IoU histogram diagnostics on the val mAP schedule. Legacy alias evaluation.extended_gt_metrics." },
+        "val_map_at_end": { "type": "boolean", "default": false, "description": "If true, after training reload the best checkpoint and score val once more at val_score_threshold. Prefer test_map. Legacy alias evaluation.compute_map_final." },
+        "test_map": { "type": "boolean", "default": false, "description": "If true, after training score the configured test split once on the best checkpoint at test_score_threshold (null → 0.05). Does not choose the checkpoint. Requires a test split. DOTA test tiles are the leaky val tiles. Legacy aliases evaluation.compute_map_test and evaluation.compute_test_map." },
+        "test_score_threshold": { "type": ["number", "null"], "default": null, "description": "Score floor for test_map, make eval-test, and dota-submit. Null → 0.05. make eval-val uses val_score_threshold. Legacy alias evaluation.preds_score_threshold." },
+        "test_exact_rotated_iou": { "type": ["boolean", "null"], "default": null, "description": "IoU backend for test_map. Null uses val_exact_rotated_iou. Legacy alias evaluation.use_exact_rotated_iou_for_final_map." },
+        "iou_threshold": { "type": "number", "default": 0.5, "description": "IoU threshold for single-threshold mAP matching, and for GT-cover / accuracy when map_iou_thresholds is set. Not detection NMS." },
+        "map_iou_thresholds": { "type": ["array", "null"], "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "default": null, "description": "When set, mAP is the mean of area-under-PR over these rotated-IoU thresholds (IoU matrix computed once). Null keeps 11-point AP at iou_threshold. OSSDD recipes set 0.10, 0.15, ..., 0.95. best_metric mAP uses this average. iou_threshold still drives GT-cover and the precision-recall operating point." },
+        "final_nms_iou_threshold": { "type": ["number", "null"], "default": null, "description": "Final detection NMS IoU for odet preds / make eval-val / make eval-test (MMRotate test parity). When set, overrides production.final_nms_iou_threshold on that path. Deploy / image_demo keep production.*; training val uses model.final_nms_iou_threshold." }
       }
     },
     "production": {
@@ -376,7 +415,7 @@
       },
       "additionalProperties": false,
       "properties": {
-        "score_threshold": { "type": ["number", "null"], "default": null, "description": "When set, deploy / image_demo display floor (resolve_inference_score_threshold). Does not override training val/mAP (evaluation.train_val_score_threshold only). odet preds / make eval-val ignore this and use evaluation.preds_score_threshold or 0.05." },
+        "score_threshold": { "type": ["number", "null"], "default": null, "description": "When set, deploy / image_demo display floor (resolve_inference_score_threshold). Does not override val mAP (evaluation.val_score_threshold) or test mAP (evaluation.test_score_threshold, null → 0.05)." },
         "per_class_score_threshold": {
           "type": ["object", "null"],
           "additionalProperties": { "type": "number" },
@@ -406,7 +445,7 @@
       "additionalProperties": false,
       "properties": {
         "log_debug_anchors_proposals": { "type": "boolean", "default": false, "description": "Log val/debug_anchors and val/debug_proposals (random val image each epoch with RPN anchors and proposals overlaid). Only applies to RCNN-style models." },
-        "vis_score_threshold": { "type": ["number", "null"], "default": null, "description": "Min score for boxes in TensorBoard prediction images; null = use evaluation.train_val_score_threshold." }
+        "vis_score_threshold": { "type": ["number", "null"], "default": null, "description": "Min score for boxes in TensorBoard prediction images; null = use evaluation.val_score_threshold." }
       }
     },
     "checkpoint": {
@@ -424,7 +463,7 @@
         "load_optimizer_state": { "type": "boolean", "default": true, "description": "When loading a checkpoint, restore optimizer state if present." },
         "load_scheduler_state": { "type": "boolean", "default": true, "description": "When resume_from_checkpoint_epoch is true, restore LR scheduler state from checkpoint if true. Set false with lr_warmup_steps=0 to rebuild cosine (see tools/train.py continuation path)." },
         "start_epoch": { "type": "integer", "default": 0, "description": "Epoch index to start from (overridden when resuming)." },
-        "best_metric": { "type": "string", "default": "total_loss", "description": "Metric used to save the best checkpoint. Use 'mAP' to save at best validation mAP, or 'total_loss' to save at lowest loss. evaluation.compute_map_final uses the best checkpoint for final mAP." },
+        "best_metric": { "type": "string", "default": "total_loss", "description": "Metric used to save the best checkpoint. Use 'mAP' to save at best validation mAP, or 'total_loss' to save at lowest loss. evaluation.test_map and evaluation.val_map_at_end score that checkpoint." },
         "higher_is_better": { "type": ["boolean", "null"], "default": null, "description": "If true, higher metric value is better (e.g. mAP). If false, lower is better (e.g. total_loss). If null, inferred from best_metric ('mAP' -> true, else false)." },
         "load_include_prefixes": { "type": ["array", "null"], "items": { "type": "string" }, "description": "When loading checkpoint: load only weights whose key starts with one of these prefixes. null = no filter." },
         "load_exclude_prefixes": { "type": ["array", "null"], "items": { "type": "string" }, "description": "When loading checkpoint: do not load weights whose key starts with one of these prefixes. null = no filter." }
@@ -476,7 +515,16 @@
         "enable_flip_diagonal": { "type": "boolean", "default": false, "description": "Apply random diagonal flip (MMRotate RRandomFlip direction=diagonal). With H+V+D enabled, each flip has 25% probability and 25% no flip." },
         "enable_random_rotate": { "type": "boolean", "default": false, "description": "Apply MMRotate-style PolyRandomRotate after flips during training (train only). FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°." },
         "random_rotate_prob": { "type": "number", "default": 0.5, "description": "Probability of applying a random rotate when enable_random_rotate is true." },
-        "random_rotate_angle_range": { "type": "number", "default": 180, "description": "Half-range in degrees. Angle is sampled uniformly from [-range, +range]. FCOS HRSC uses 20; MMRotate RR recipes use 180." }
+        "random_rotate_angle_range": { "type": "number", "default": 180, "description": "Half-range in degrees. Angle is sampled uniformly from [-range, +range]. FCOS HRSC uses 20; MMRotate RR recipes use 180." },
+        "random_rotate_rect_labels": { "type": ["array", "null"], "items": { "type": "string" }, "description": "Class names whose tiles rotate only by 90, 180, -90, or -180 degrees when random rotate fires. Other tiles use random_rotate_angle_range." },
+        "enable_mosaic": { "type": "boolean", "default": false, "description": "Train-only cached mosaic (four tiles on a 2× canvas, then resize-crop to target_size)." },
+        "mosaic_prob": { "type": "number", "default": 1, "description": "Probability of composing a mosaic once the cache holds more than four images." },
+        "mosaic_img_scale": { "type": ["array", "null"], "items": { "type": "integer" }, "description": "Cell size (H, W) of one mosaic tile. Null uses target_size." },
+        "mosaic_center_ratio_range": { "type": ["array", "null"], "items": { "type": "number" }, "description": "Random mosaic center as a fraction of the cell size. Null uses [0.5, 1.5]." },
+        "mosaic_pad_val": { "type": "integer", "default": 114, "description": "Fill value for mosaic canvas and per-tile rotate." },
+        "mosaic_max_cached_images": { "type": "integer", "default": 40, "minimum": 5, "description": "Worker-local mosaic cache length. Must be at least 5." },
+        "mosaic_ratio_range": { "type": ["array", "null"], "items": { "type": "number" }, "description": "Random resize ratio applied to the 2× mosaic canvas before cropping back to target_size. Null uses [0.5, 1.5]." },
+        "mosaic_disable_last_n_epochs": { "type": "integer", "default": 0, "minimum": 0, "description": "Turn mosaic off for the last N epochs (0 keeps it on for the whole run)." }
       }
     },
     "augmentation": {

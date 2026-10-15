@@ -230,7 +230,8 @@ def ort_run_pre_nms(
         if required not in name_to_val:
             raise KeyError(
                 f"Missing ONNX output {required!r}; got {sorted(name_to_val)}. "
-                "Re-export with faster_rcnn_pre_nms, oriented_rcnn_pre_nms, or rotated_fcos_pre_nms."
+                "Re-export with faster_rcnn_pre_nms, oriented_rcnn_pre_nms, "
+                "rotated_fcos_pre_nms, or rotated_rtmdet_pre_nms."
             )
     count = int(np.asarray(name_to_val["pre_nms_count"]).reshape(-1)[0])
     return (

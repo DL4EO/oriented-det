@@ -50,12 +50,14 @@ from oriented_det.data import (
     gt_best_iou_alignment_metrics_to_dict,
 )
 from oriented_det.data.build import build_split_dataset, dataset_format_name
+from oriented_det.data.evaluation import format_map_iou_span
 from oriented_det.geometry import RBox, normalize_le90
 from oriented_det.train.config import (
     TrainingExperimentConfig,
     get_preprocessing_params,
     apply_inference_config_to_model,
     effective_eval_metric_thresholds,
+    resolved_map_iou_thresholds,
     merge_per_class_score_thresholds,
     resolve_preds_score_threshold,
     resolve_preds_final_nms_iou_threshold,
@@ -114,13 +116,24 @@ def _rbox_centroid_in_tile_interior(
     return left <= cx <= right and top <= cy <= bottom
 
 
+def _eval_val_metrics_margin_pixels(margin_pixels: Optional[int]) -> int:
+    """Eval-val metric margin. Default 0 so every box is scored.
+
+    ``production.ignore_margin_pixels`` and tile overlap stay on the deploy path.
+    Pass ``--metrics-margin-pixels`` to drop the outer centroid band.
+    """
+    if margin_pixels is None:
+        return 0
+    return max(0, int(margin_pixels))
+
+
 def _resolve_metrics_margin_pixels(
     margin_pixels: Optional[int],
     overlap_ratio: Optional[float],
     overlap_pixels: int,
     preprocessing: Dict[str, Any],
 ) -> int:
-    """Resolve metrics margin (pixels). Default is overlap/2."""
+    """Resolve a deploy-style margin (pixels). Default is overlap/2."""
     if margin_pixels is not None:
         return max(0, int(margin_pixels))
     if overlap_ratio is not None:
@@ -402,8 +415,17 @@ def _write_model_analysis_md(
         "",
         "## Evaluation setup",
         (
-            f"- mAP / PR matching IoU (rotated boxes, VOC-style; **not** NMS IoU): "
-            f"`{float(analysis.get('iou_threshold', 0.5)):.2f}`"
+            (
+                "- mAP (rotated boxes; mean of area-under-PR over IoU "
+                f"`{format_map_iou_span(diagnostics['map_iou_thresholds'])}`; **not** NMS IoU). "
+                "PR matching IoU: "
+                f"`{float(analysis.get('iou_threshold', 0.5)):.2f}`"
+            )
+            if diagnostics and diagnostics.get("map_iou_thresholds")
+            else (
+                f"- mAP / PR matching IoU (rotated boxes, VOC-style; **not** NMS IoU): "
+                f"`{float(analysis.get('iou_threshold', 0.5)):.2f}`"
+            )
         ),
         (
             f"- NMS IoU (deduplication): `{float(diagnostics.get('final_nms_iou_threshold', 0.0)):.2f}`"
@@ -422,9 +444,14 @@ def _write_model_analysis_md(
         f"- F2 at best threshold: `{bt.get('f2', 0.0):.4f}`",
     ]
     if diagnostics and isinstance(diagnostics.get("mAP"), (int, float)):
+        _saved_ious = diagnostics.get("map_iou_thresholds")
         _miou = float(diagnostics.get("iou_threshold", analysis.get("iou_threshold", 0.5)))
+        if isinstance(_saved_ious, list) and _saved_ious:
+            _mlabel = f"mAP (mean over IoU {format_map_iou_span(_saved_ious)})"
+        else:
+            _mlabel = _map_metric_label(_miou)
         lines.append(
-            f"- {_map_metric_label(_miou)}: `{diagnostics['mAP']:.4f}` ({float(diagnostics['mAP']) * 100:.2f}%)"
+            f"- {_mlabel}: `{diagnostics['mAP']:.4f}` ({float(diagnostics['mAP']) * 100:.2f}%)"
         )
         align_raw = diagnostics.get("gt_alignment_metrics")
         if isinstance(align_raw, dict) and align_raw.get("per_class"):
@@ -461,7 +488,7 @@ def _write_model_analysis_md(
             lines.extend(
                 [
                     "",
-                    f"## Per-class metrics ({_map_metric_label(_miou)})",
+                    f"## Per-class metrics ({_mlabel})",
                     "",
                     "| Class | gts | dets | recall | AP |",
                     "| --- | ---: | ---: | ---: | ---: |",
@@ -492,7 +519,7 @@ def _write_model_analysis_md(
             lines.extend(
                 [
                     "",
-                    f"## Per-class AP ({_map_metric_label(_miou)})",
+                    f"## Per-class AP ({_mlabel})",
                     "",
                     "| Class | AP |",
                     "| --- | ---: |",
@@ -952,6 +979,7 @@ def run_diagnostics_pipeline(
     nms_threshold: float,
     nms_class_agnostic: bool,
     iou_threshold: float,
+    map_iou_thresholds: Optional[List[float]],
     pr_iou_threshold: Optional[float],
     pr_threshold_min: float,
     pr_threshold_max: float,
@@ -983,6 +1011,9 @@ def run_diagnostics_pipeline(
         'final_nms_iou_threshold': nms_threshold,
         'nms_class_agnostic': bool(nms_class_agnostic),
         'iou_threshold': iou_threshold,
+        'map_iou_thresholds': (
+            [float(t) for t in map_iou_thresholds] if map_iou_thresholds else None
+        ),
         'total_raw': total_raw,
         'total_after_threshold': total_after_threshold,
         'total_after_nms': total_after_nms,
@@ -1070,6 +1101,7 @@ def run_diagnostics_pipeline(
 
     try:
         device_obj = None if use_exact_rotated_iou else torch.device(device)
+        iou_ap_out: Dict[str, Any] = {}
         mean_ap, class_aps, class_metrics = compute_oriented_map(
             detections=all_detections,
             ground_truths=all_ground_truths,
@@ -1079,6 +1111,8 @@ def run_diagnostics_pipeline(
             progress_stream=tqdm_progress_stream(),
             device=device_obj,
             use_exact_rotated_iou=use_exact_rotated_iou,
+            iou_thresholds=map_iou_thresholds,
+            iou_ap_out=iou_ap_out,
         )
         diagnostics['mAP'] = mean_ap
         diagnostics['class_aps'] = class_aps
@@ -1091,14 +1125,29 @@ def run_diagnostics_pipeline(
             }
             for name, m in class_metrics.items()
         }
-        _ml = _map_metric_label(iou_threshold)
+        if map_iou_thresholds:
+            _ml = f"mAP (mean over IoU {format_map_iou_span(map_iou_thresholds)})"
+            _match_note = (
+                "each AP is the area under the precision-recall curve; "
+                f"recall below is at rotated IoU ≥ {float(iou_threshold):.2f}"
+            )
+        else:
+            _ml = _map_metric_label(iou_threshold)
+            _match_note = f"rotated IoU ≥ {float(iou_threshold):.2f} for GT–det matching"
         print("\n" + "=" * 60, flush=True)
         print(
             f"Final {_ml}: {mean_ap:.4f} ({mean_ap * 100:.2f}%)  "
-            f"[rotated IoU ≥ {float(iou_threshold):.2f} for GT–det matching; "
-            f"NMS IoU = {float(nms_threshold):.2f}]",
+            f"[{_match_note}; NMS IoU = {float(nms_threshold):.2f}]",
             flush=True,
         )
+        per_iou = iou_ap_out.get("per_iou")
+        if map_iou_thresholds and isinstance(per_iou, list) and len(per_iou) == len(map_iou_thresholds):
+            bits = [
+                f"{float(thr):.2f}:{float(ap):.3f}"
+                for thr, ap in zip(map_iou_thresholds, per_iou)
+            ]
+            print("mAP at each IoU: " + " ".join(bits), flush=True)
+            diagnostics["map_ap_per_iou"] = [float(v) for v in per_iou]
         if class_metrics:
             print("\nPer-class metrics:", flush=True)
             print("", flush=True)
@@ -1420,7 +1469,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         test_dir: unlabeled official DOTA test images (``test/`` or ``test/images/``)
         vis_score_threshold: score threshold for visualization (default: 0.5).
         score_threshold: score threshold for diagnostics and mAP. If None, uses
-            :func:`resolve_preds_score_threshold` (CLI → ``evaluation.preds_score_threshold`` → 0.05).
+            :func:`resolve_preds_score_threshold` (CLI, else ``val_score_threshold`` on val and ``test_score_threshold`` or 0.05 on test).
             Per-class floors merge ``evaluation`` then ``production`` via
             :func:`merge_per_class_score_thresholds`.
         overlap_pixels: sliding-window overlap per axis. If None (and ``overlap_ratio`` is None),
@@ -1434,10 +1483,10 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         nms_class_agnostic: if set, override model.nms_class_agnostic at inference time.
         iou_threshold: Rotated IoU threshold for mAP / PR matching. If None, uses
                        evaluation.iou_threshold from config (default 0.5).
-        metrics_margin_pixels: Edge-margin filter for metrics only. GT/detections whose
-            centroid lies in the outer band ([0, margin) or (W-margin, W] per axis) are
-            discarded; interior [margin, W-margin] is kept (same rule as deploy production.ignore_margin_pixels).
-            If None, uses ``production.ignore_margin_pixels`` when set, else overlap/2.
+        metrics_margin_pixels: Eval-val edge filter. None means 0 (score every box).
+            A positive value drops GT/detections whose centroid lies in the outer band
+            ([0, margin) or (W-margin, W] per axis). Does not read
+            ``production.ignore_margin_pixels`` or tile overlap.
         run_diagnostics: if True, compute per-image stats and mAP (default: True)
 
     Returns:
@@ -1545,7 +1594,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
 
     per_cls_thr: Optional[Dict[str, float]] = per_class_score_threshold
     score_threshold, score_src = resolve_preds_score_threshold(
-        config, cli_score_threshold=score_threshold
+        config, data_split=data_split, cli_score_threshold=score_threshold
     )
     print(f"Using score_threshold={score_threshold} from {score_src}")
     if ignore_config_per_class_score_threshold:
@@ -1581,11 +1630,20 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
             f"Using CLI nms_class_agnostic={bool(nms_class_agnostic)} "
             "(overrides config model.nms_class_agnostic)"
         )
+    map_iou_thresholds = None
     if iou_threshold is None:
         iou_threshold = cfg_thr_iou
-        print(
-            f"Using iou_threshold from config (evaluation.iou_threshold): {iou_threshold} (mAP / PR matching)"
-        )
+        map_iou_thresholds = resolved_map_iou_thresholds(config)
+        if map_iou_thresholds:
+            print(
+                "Using map_iou_thresholds from config (evaluation.map_iou_thresholds): "
+                f"{format_map_iou_span(map_iou_thresholds)} "
+                "(mean of area-under-PR; rotated boxes)"
+            )
+        else:
+            print(
+                f"Using iou_threshold from config (evaluation.iou_threshold): {iou_threshold} (mAP / PR matching)"
+            )
     else:
         print(f"Using CLI iou_threshold={iou_threshold} (mAP / PR matching)")
     preprocessing = get_preprocessing_params(config)
@@ -1595,15 +1653,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
     else:
         opx = overlap_pixels if overlap_pixels is not None else resolve_inference_sliding_window_overlap_pixels(config)
         print(f"Sliding-window overlap: {opx} px per axis (stride = tile size − overlap)")
-    margin_for_metrics = metrics_margin_pixels
-    if margin_for_metrics is None:
-        inf_m = getattr(getattr(config, "production", None), "ignore_margin_pixels", None)
-        if inf_m is not None:
-            margin_for_metrics = max(0, int(round(float(inf_m))))
-            print(
-                f"Using metrics_margin_pixels={margin_for_metrics} from production.ignore_margin_pixels",
-                flush=True,
-            )
+    resolved_metrics_margin_px = _eval_val_metrics_margin_pixels(metrics_margin_pixels)
     resolved_overlap_px = (
         overlap_pixels
         if overlap_pixels is not None
@@ -1623,15 +1673,10 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         f"({'keep overlap copies, then NMS' if resolved_window_margin_x == 0 and resolved_window_margin_y == 0 else 'drop interior overlap-band centroids, then NMS'})",
         flush=True,
     )
-    resolved_metrics_margin_px = _resolve_metrics_margin_pixels(
-        margin_pixels=margin_for_metrics,
-        overlap_ratio=overlap_ratio,
-        overlap_pixels=resolved_overlap_px,
-        preprocessing=preprocessing,
-    )
     print(
         f"Metrics edge margin: {resolved_metrics_margin_px}px "
-        "(GT/detections with centroid in outer [0,m) or (W-m,W] band are excluded from metrics)"
+        "(eval-val default 0 scores every box; "
+        "GT/detections with centroid in outer [0,m) or (W-m,W] are excluded from metrics)"
     )
 
     # Resolve data_root from config if not provided
@@ -1647,7 +1692,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
     label_dir = None
     same_folder = False
 
-    if dataset_format in ("airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid"):
+    if dataset_format in ("airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid", "yolo_obb"):
         from dataclasses import replace
 
         ds_config = config.dataset
@@ -1663,7 +1708,11 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         class_map = {name: i for i, name in enumerate(class_names)} if class_names else {}
         split_images = []
         gt_by_image_path = {}
-        for idx in range(len(native_dataset)):
+        for idx in tqdm(
+            range(len(native_dataset)),
+            desc="Loading annotations",
+            file=tqdm_progress_stream(),
+        ):
             sample = native_dataset[idx]
             split_images.append(Path(sample.image_path))
             gt_by_image_path[Path(sample.image_path)] = _annotations_to_ground_truths(
@@ -1688,6 +1737,11 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         elif dataset_format == "hrsid":
             print(
                 f"Using HRSID dataset: {data_root} "
+                f"(split={getattr(native_dataset, 'split', data_split)})"
+            )
+        elif dataset_format == "yolo_obb":
+            print(
+                f"Using YOLO-OBB dataset: {data_root} "
                 f"(split={getattr(native_dataset, 'split', data_split)})"
             )
         else:
@@ -2006,6 +2060,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
             nms_threshold=float(nms_threshold),
             nms_class_agnostic=bool(getattr(model, "nms_class_agnostic", False)),
             iou_threshold=float(iou_threshold),
+            map_iou_thresholds=map_iou_thresholds,
             pr_iou_threshold=pr_iou_threshold,
             pr_threshold_min=pr_threshold_min,
             pr_threshold_max=pr_threshold_max,
@@ -2117,10 +2172,16 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         if diagnostics.get('score_min') is not None:
             print(f"  Score distribution: min={diagnostics['score_min']:.4f} max={diagnostics['score_max']:.4f} mean={diagnostics['score_mean']:.4f}")
         if diagnostics.get('mAP') is not None:
-            _ml = _map_metric_label(float(iou_threshold))
+            _saved_ious = diagnostics.get("map_iou_thresholds")
+            if isinstance(_saved_ious, list) and _saved_ious:
+                _ml = f"mAP (mean over IoU {format_map_iou_span(_saved_ious)})"
+                _match_note = "area under the precision-recall curve at each rotated IoU; not NMS"
+            else:
+                _ml = _map_metric_label(float(iou_threshold))
+                _match_note = f"matching IoU ≥ {float(iou_threshold):.2f}; not NMS"
             print(
                 f"  {_ml}: {diagnostics['mAP']:.4f} ({diagnostics['mAP'] * 100:.2f}%)  "
-                f"(matching IoU ≥ {float(iou_threshold):.2f}; not NMS)"
+                f"({_match_note})"
             )
         else:
             print(f"  mAP: {diagnostics.get('mAP_error', 'N/A')}")
@@ -2203,6 +2264,10 @@ def main():
                        help='Path to data root directory (optional if config has dataset.data_root)')
     parser.add_argument('--data-split', type=str, default='val', choices=['train', 'val', 'test'],
                        help='Which data split to use (train, val, or test). Default: val')
+    parser.add_argument('--require-test-split', action='store_true',
+                       help='Fail unless the config declares a labeled test split '
+                            '(dataset.test_tiles_dir(s) or dataset.test_split). '
+                            'Used by make eval-test. Official DOTA Task 1 stays on make dota-submit.')
     parser.add_argument('--val-dir', type=str, default=None,
                        help='Override validation folder (for non-tiled DOTA val); when set, used instead of config dataset.val_tiles_dir')
     parser.add_argument('--test-dir', type=str, default=None,
@@ -2237,12 +2302,12 @@ def main():
     parser.add_argument('--vis-score-threshold', type=float, default=0.5,
                        help='Score threshold for visualization (default: 0.5).')
     parser.add_argument('--score-threshold', type=float, default=None,
-                       help='Score floor for odet preds / eval-val mAP and diagnostics. '
-                            'Default: evaluation.preds_score_threshold when set, else 0.05. '
-                            'Ignores production.score_threshold and evaluation.train_val_score_threshold '
-                            '(those stay for deploy and train val).')
+                       help='Score floor for odet preds diagnostics. '
+                            'Val uses evaluation.val_score_threshold. '
+                            'Test uses evaluation.test_score_threshold, or 0.05 when that is null. '
+                            'Ignores production.score_threshold.')
     parser.add_argument('--no-per-class-score-thresholds', action='store_true',
-                       help='Ignore evaluation.per_class_score_threshold from config and use the global score threshold only.')
+                       help='Ignore evaluation.val_per_class_score_threshold from config and use the global score threshold only.')
     parser.add_argument(
         '--nms-threshold',
         type=float,
@@ -2276,9 +2341,9 @@ def main():
         '--metrics-margin-pixels',
         type=int,
         default=None,
-        help='Interior margin in pixels for metrics-only filtering. GT/predictions whose centroid '
-             'falls inside [margin, W-margin]x[margin, H-margin] are discarded for metrics. '
-             'Default: overlap/2.',
+        help='Eval-val only: drop GT/detections whose centroid lies in the outer '
+             '[0, margin) or (W-margin, W] band. Default 0 (score every box). '
+             'Does not read production.ignore_margin_pixels or tile overlap.',
     )
     parser.add_argument('--pr-iou-threshold', type=float, default=None,
                        help='IoU threshold for precision/recall/F1/F2 matching (default: same as --iou-threshold)')
@@ -2347,14 +2412,7 @@ def main():
                 if cfg_path.is_file():
                     config = TrainingExperimentConfig.load(cfg_path)
 
-        mmargin = args.metrics_margin_pixels
-        if mmargin is None:
-            if config is not None:
-                inf_m = getattr(getattr(config, "production", None), "ignore_margin_pixels", None)
-                if inf_m is not None:
-                    mmargin = int(inf_m)
-            if mmargin is None:
-                mmargin = int(meta.get('metrics_margin_pixels', 0))
+        mmargin = _eval_val_metrics_margin_pixels(args.metrics_margin_pixels)
 
         diag_prev = meta.get('diagnostics') if isinstance(meta.get('diagnostics'), dict) else {}
 
@@ -2365,19 +2423,30 @@ def main():
             cfg_thr_pc = merge_per_class_score_thresholds(config)
 
         iou_thr = args.iou_threshold
+        map_iou_thresholds = None
         if iou_thr is None:
+            if config is not None:
+                map_iou_thresholds = resolved_map_iou_thresholds(config)
             if cfg_thr_iou is not None:
                 iou_thr = cfg_thr_iou
             else:
                 iou_thr = diag_prev.get('iou_threshold')
                 if iou_thr is None:
                     iou_thr = meta.get('pr_iou_threshold', 0.5)
+            if map_iou_thresholds is None:
+                saved = diag_prev.get("map_iou_thresholds")
+                if isinstance(saved, list) and saved:
+                    map_iou_thresholds = [float(v) for v in saved]
+        else:
+            map_iou_thresholds = None
         iou_thr = float(iou_thr)
 
         score_thr = args.score_threshold
         if score_thr is None:
             if config is not None:
-                score_thr, _ = resolve_preds_score_threshold(config)
+                score_thr, _ = resolve_preds_score_threshold(
+                    config, data_split=str(meta.get("data_split", "val"))
+                )
             elif cfg_thr_sc is not None:
                 score_thr = cfg_thr_sc
             else:
@@ -2407,11 +2476,16 @@ def main():
             results, int(mmargin), class_names,
         )
         device = str(get_device())
-        use_exact_map = (
-            bool(getattr(config.evaluation, "use_exact_rotated_iou", True))
-            if config is not None
-            else True
-        )
+        saved_split = str(meta.get("data_split", "val"))
+        if config is None:
+            use_exact_map = True
+        elif saved_split == "test":
+            override = config.evaluation.test_exact_rotated_iou
+            use_exact_map = (
+                config.evaluation.val_exact_rotated_iou if override is None else bool(override)
+            )
+        else:
+            use_exact_map = config.evaluation.val_exact_rotated_iou
         t_infer = float(meta.get('inference_loop_seconds', 0.0))
         sw_est = meta.get('estimated_sliding_window_positions')
         wb = meta.get('oriented_det_window_batch_size')
@@ -2428,6 +2502,7 @@ def main():
             nms_threshold=float(nms_thr),
             nms_class_agnostic=bool(nms_ag),
             iou_threshold=iou_thr,
+            map_iou_thresholds=map_iou_thresholds,
             pr_iou_threshold=args.pr_iou_threshold,
             pr_threshold_min=args.pr_threshold_min,
             pr_threshold_max=args.pr_threshold_max,
@@ -2481,6 +2556,15 @@ def main():
     print(f"  Experiment directory: {experiment_dir or '(pretrained / no run dir)'}")
     print(f"  Checkpoint: {checkpoint}")
     print(f"  Config: {config_path}")
+
+    if args.require_test_split:
+        loaded = TrainingExperimentConfig.load(config_path)
+        if loaded.dataset is None or not loaded.dataset.has_test_split():
+            raise SystemExit(
+                "This recipe has no test split. Set dataset.test_tiles_dir, "
+                "dataset.test_tiles_dirs, or dataset.test_split. "
+                "Official DOTA test labels are not in the config; use make dota-submit."
+            )
 
     run_inference_and_save(
         experiment_dir=experiment_dir,

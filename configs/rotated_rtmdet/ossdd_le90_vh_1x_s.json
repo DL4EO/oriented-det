@@ -1,0 +1,107 @@
+{
+  "_base_": [
+    "../_base_/datasets/ossdd.json",
+    "../_base_/models/rotated_rtmdet_cspnext_s.json",
+    "../_base_/schedules/1x.json",
+    "../_base_/preprocessing.json"
+  ],
+  "data_loader": {
+    "batch_size": 8,
+    "num_workers": 4,
+    "shuffle": true,
+    "pin_memory": true
+  },
+  "checkpoint": {
+    "load_from_checkpoint": "hf://rotated_rtmdet_dota_le90_3x",
+    "load_from_experiment": null,
+    "discover_previous_run": false,
+    "resume_from_checkpoint_epoch": false,
+    "load_optimizer_state": false,
+    "load_scheduler_state": false,
+    "start_epoch": 0,
+    "best_metric": "mAP",
+    "higher_is_better": true
+  },
+  "model": {
+    "rtmdet_angle_weight": 0,
+    "rtmdet_nms_pre": 30000
+  },
+  "training": {
+    "num_epochs": 12,
+    "optimizer": "adamw",
+    "learning_rate": 0.00025,
+    "weight_decay": 0.05,
+    "adamw_betas": [0.9, 0.999],
+    "weight_decay_norm_mult": 0,
+    "weight_decay_bias_mult": 0,
+    "use_ema": true,
+    "ema_momentum": 0.0002,
+    "ema_gamma": 2000,
+    "use_amp": false,
+    "gradient_accumulation_steps": 1,
+    "max_grad_norm": null,
+    "lr_scheduler_type": "cosine_annealing_late",
+    "lr_scheduler_cosine_start_epoch": 6,
+    "lr_scheduler_cosine_eta_min": 1.25e-5,
+    "lr_warmup_steps": 500,
+    "lr_scaling_with_accumulation": "linear",
+    "lr_scale_with_world_size": false,
+    "use_lr_param_groups": false
+  },
+  "loss": {
+    "loss_type": "focal",
+    "focal_alpha": 0.25,
+    "focal_gamma": 2.0
+  },
+  "preprocessing": {
+    "resize_mode": "crop",
+    "target_size": [512, 512],
+    "enable_flip_diagonal": true,
+    "enable_mosaic": false,
+    "enable_random_rotate": true,
+    "random_rotate_prob": 0.5,
+    "random_rotate_angle_range": 180
+  },
+  "evaluation": {
+    "iou_threshold": 0.5,
+    "map_iou_thresholds": [
+      0.1,
+      0.15,
+      0.2,
+      0.25,
+      0.3,
+      0.35,
+      0.4,
+      0.45,
+      0.5,
+      0.55,
+      0.6,
+      0.65,
+      0.7,
+      0.75,
+      0.8,
+      0.85,
+      0.9,
+      0.95
+    ],
+    "final_nms_iou_threshold": 0.1,
+    "val_score_threshold": 0.3,
+    "val_map_every_n_epochs": 4,
+    "val_extended_gt_metrics": true,
+    "val_exact_rotated_iou": false,
+    "val_map_at_end": false,
+    "test_map": true,
+    "test_exact_rotated_iou": true
+  },
+  "tensorboard": {
+    "log_debug_anchors_proposals": false,
+    "vis_score_threshold": 0.5
+  },
+  "production": {
+    "score_threshold": 0.3,
+    "final_nms_iou_threshold": 0.1,
+    "max_detections_per_image": 2000,
+    "ignore_margin_pixels": 0,
+    "overlap_pixels": 0
+  }
+}

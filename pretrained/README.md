@@ -10,14 +10,14 @@ Large checkpoint files live here (typically **gitignored**). Registered assets a
 | **`.pth` filename** | Content-addressed blob on disk / Hub | `oriented_rcnn_r50_fpn_dota_le90_3x-3730d3a9.pth` |
 | **mAP** | Metadata only (`eval_task1_map50` when present, else `eval_map50`) | See tables below |
 
-**Do not compare manifest `eval_map50` to training `compute_map_final` mAP, or to official Task 1.** They use different pipelines:
+**Do not compare manifest `eval_map50` to training `val_map_at_end` mAP, or to official Task 1.** They use different pipelines:
 
 | Metric | Source | Typical use |
 |--------|--------|-------------|
 | **`eval_task1_map50`** | DOTA v1.0 Task 1 qualification server (hidden test) | **Real DOTA test** — advertised zoo mAP50 when present |
 | **`eval_map50`** | `odet preds` on the recipe val split (`make eval-val` / `make metrics`) | **DOTA:** leaky val tiles (train includes val). **HRSC:** held-out ImageSets **test** (not in train) |
-| **Periodic mAP during training** | `evaluation.compute_map_every_n_epochs` on non-empty val tiles; often GPU-sampled IoU (`use_exact_rotated_iou: false`) | Monitor convergence |
-| **Final mAP after training** | `evaluation.compute_map_final` on best checkpoint; often exact CPU polygon IoU (`use_exact_rotated_iou_for_final_map: true`) | Training log headline number |
+| **Periodic mAP during training** | `evaluation.val_map_every_n_epochs` on non-empty val tiles; often GPU-sampled IoU (`val_exact_rotated_iou: false`) | Monitor convergence |
+| **Final mAP after training** | `evaluation.val_map_at_end` or `evaluation.test_map` on the best checkpoint; IoU backend is `test_exact_rotated_iou` (null inherits `val_exact_rotated_iou`) | Training log headline number |
 
 Example (Oriented R-CNN 3×): Hub `eval_map50` is **82.92%** from `odet preds` on val tiles using the published `oriented_rcnn_dota_le90_3x` checkpoint. Official Task 1 is **`eval_task1_map50` 74.88%**.
 
@@ -64,7 +64,7 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 
 **mAP** below is **official DOTA v1.0 Task 1** when the slug has `eval_task1_map50`. Training-time periodic mAP uses non-empty val tiles only and may be higher.
 
-**Deploy `production.score_threshold`** on DOTA recipes is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**). 3× inherits the 1× floor. `make eval-val` still uses score ≥ **0.05**. Oriented R-CNN 3× Hub advertises Task 1 **74.88%** (leaky eval-val 82.92%); RetinaNet 3× OBB Hub advertises Task 1 **73.89%** (leaky eval-val 78.56%); FCOS 3× Hub advertises Task 1 **72.91%** (leaky eval-val 82.32%). **Finetune from 1×**, not 3× — see [oriented_rcnn/README.md — 1x vs 3x](../configs/oriented_rcnn/README.md#1x-vs-3x).
+**Deploy `production.score_threshold`** on DOTA recipes is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**, RTMDet **0.45**). 3× inherits the 1× floor. `make eval-val` uses `evaluation.val_score_threshold`. `make eval-test` and `test_map` use `evaluation.test_score_threshold` (null → **0.05**). Published `eval_map50` numbers were scored at **0.05**. Oriented R-CNN 3× Hub advertises Task 1 **74.88%** (leaky eval-val 82.92%); RetinaNet 3× OBB Hub advertises Task 1 **73.89%** (leaky eval-val 78.56%); FCOS 3× Hub advertises Task 1 **72.91%** (leaky eval-val 82.32%). **Finetune from 1×**, not 3× — see [oriented_rcnn/README.md — 1x vs 3x](../configs/oriented_rcnn/README.md#1x-vs-3x).
 
 ### Oriented R-CNN R50-FPN
 
@@ -102,13 +102,19 @@ Hub **1× / 3×** are **OBB** assign (`use_hbb_for_matching: false`, MMRotate `R
 | `rotated_fcos_dota_le90_1x` | 1× decoded rIoU primary | **73.07%** | [`dota_le90_1x.json`](../configs/rotated_fcos/dota_le90_1x.json) | [`rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.json`](./rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.json) | [`rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.log`](./rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.log) |
 | `rotated_fcos_dota_le90_3x` | 3× decoded rIoU | **72.91%** (eval-val 82.32%) | [`dota_le90_3x.json`](../configs/rotated_fcos/dota_le90_3x.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.json) | [`rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log`](./rotated_fcos_r50_fpn_dota_le90_3x-6e383331.log) |
 
+### Rotated RTMDet CSPNeXt-S
+
+| Slug | Recipe | Official Task 1 | Config | Final config | Final log |
+|------|--------|-----------------|--------|--------------|-----------|
+| `rotated_rtmdet_dota_le90_3x` | 3× rotate, mosaic off | **77.60%** (eval-val 82.75%) | [`dota_le90_3x_s.json`](../configs/rotated_rtmdet/dota_le90_3x_s.json) | [`rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.json`](./rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.json) | [`rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.log`](./rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.log) |
+
 ## HRSC2016 le90 zoo
 
 **Training split: ImageSets trainval.** **Eval split: ImageSets test** (453 images; 15 empty) — **held-out**, not in training. Unlike DOTA, `make eval-val` here **is** the real test. Whole-image `keep_ratio` + pad-32 (no native sliding windows).
 
 **mAP** below is **`make eval-val`** mAP50 on that held-out test (rotated IoU ≥ 0.50, `evaluation.final_nms_iou_threshold` **0.1**; recipes and Hub sidecars also set production NMS **0.1**).
 
-**Deploy `production.score_threshold`** on these three HRSC recipes is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). 3× inherits the 1× floor. `make eval-val` still uses score ≥ **0.05**.
+**Deploy `production.score_threshold`** on these three HRSC recipes is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). 3× inherits the 1× floor. `make eval-val` uses `evaluation.val_score_threshold`. `make eval-test` and `test_map` use `evaluation.test_score_threshold` (null → **0.05**). Published `eval_map50` numbers were scored at **0.05**.
 
 ### Oriented R-CNN R50-FPN
 

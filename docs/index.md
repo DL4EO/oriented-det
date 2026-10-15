@@ -1,11 +1,11 @@
 # OrientedDet
 
-**OrientedDet** is a lightweight, modern PyTorch library for **rotated object detection** in aerial and satellite imagery.  
+**OrientedDet** (**oriented-det**) is an open-source PyTorch framework for **oriented and rotated object detection** in aerial and satellite images.  
 It focuses on clean geometry, reliable operators, simple datasets, and practical baseline models — without the complexity of large detection frameworks.
 
 OrientedDet is designed for researchers, practitioners, and geospatial developers who need **accurate rotation-aware detectors** with a clean and minimal API.
 
-For a quick overview and installation on GitHub, see the [repository README](https://github.com/DL4EO/oriented-det/blob/main/README.md). Write-ups with code, metrics, and inference knobs: [DeepLearning.Earth](https://deeplearning.earth). For consulting, training workshops, or custom development, see [DL4EO](https://dl4eo.com).
+For a quick overview and installation on GitHub, see the [repository README](https://github.com/DL4EO/oriented-det/blob/main/README.md). Short overview: [oriented detection in aerial and satellite images](https://deeplearning.earth/oriented-detection-in-satellite-images/). Write-ups with code, metrics, and inference knobs: [DeepLearning.Earth](https://deeplearning.earth). For consulting, training workshops, or custom development, see [DL4EO](https://dl4eo.com).
 
 ## 🚀 Features
 
@@ -37,8 +37,9 @@ For a quick overview and installation on GitHub, see the [repository README](htt
 - **Rotated Faster R-CNN** — horizontal RPN + horizontal RoIAlign + rotated ROI head (MMRotate DOTA baseline)
 - **Rotated RetinaNet** (1-stage baseline) — oriented anchors and focal loss head
 - **Rotated FCOS** (anchor-free 1-stage) — distance-angle coder, centerness, L1 / KFIoU / decoded rIoU
+- **Rotated RTMDet** (speed tier) — CSPNeXt + PAFPN, SepBN head, dynamic soft-label assigner, decoded rIoU
 - **True oriented detection**: Predicts rotation angles, not just axis-aligned boxes
-- Standard backbones (ResNet + FPN)
+- Standard backbones (ResNet + FPN, CSPNeXt + PAFPN)
 - **OrientedDet pretrained weights** via Hugging Face Hub (`odet pretrained download`)
 
 ### 🔸 Simple Training Pipeline
@@ -80,17 +81,17 @@ See [Installation](getting-started/installation.md) for CUDA, macOS, and CPU set
 - **[User Guide](user-guide/geometry.md)** - Detailed usage for each module
 - **[API Reference](api/geometry.md)** - Complete API documentation
 - **[Examples](examples/inference.md)** - Training, inference, [Docker deploy](examples/deploy.md), and [ONNX export](examples/export.md)
-- **[Roadmap](roadmap.md)** - Planned releases (v0.4–v1.0)
+- **[Roadmap](roadmap.md)** - Planned releases (v0.4.2–v1.0)
 
 ## Roadmap
 
-**v0.3** is shipped (HRSC2016 Hub 3× zoo; FAIR1M / SSDD / HRSID loaders and 1× recipes — train SAR locally, no SAR Hub; ONNX pre-NMS for three detectors). Next: RTMDet-R + native YOLO-OBB (v0.4), Swin-FPN backbones (v0.5+). Details: **[Roadmap](roadmap.md)**.
+**v0.4.1** is shipped (citation and discoverability). **v0.4.0** shipped Rotated RTMDet (Hub `rotated_rtmdet_dota_le90_3x`, **77.60%** official Task 1). Next: native YOLO-OBB (v0.4.2; already in the tree, COCO pretrain and DOTA training next), Swin-FPN backbones (v0.5+). Details: **[Roadmap](roadmap.md)**.
 
 ## Important Notes
 
 ### True Oriented Detection
 
-✅ **OrientedRCNN**, **RotatedFasterRCNN**, **RotatedRetinaNet**, and **RotatedFCOS** perform **true oriented object detection**:
+✅ **OrientedRCNN**, **RotatedFasterRCNN**, **RotatedRetinaNet**, **RotatedFCOS**, and **RotatedRTMDet** perform **true oriented object detection**:
 - Predict oriented bounding boxes with 5 parameters (cx, cy, w, h, angle)
 - Preserve angle information throughout training and inference
 - Use oriented IoU for matching and oriented NMS for post-processing

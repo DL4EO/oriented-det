@@ -15,6 +15,7 @@ if str(_REPO_ROOT) not in sys.path:
 from export import wrappers as _wrappers  # noqa: E402
 from oriented_det import OrientedRCNN, RotatedFasterRCNN, RotatedFCOS  # noqa: E402
 from oriented_det.models.rotated_retinanet import RotatedRetinaNet  # noqa: E402
+from oriented_det.models.rotated_rtmdet import RotatedRTMDet  # noqa: E402
 
 BackboneExportWrapper = _wrappers.BackboneExportWrapper
 RetinaNetBackboneHeadExportWrapper = _wrappers.RetinaNetBackboneHeadExportWrapper
@@ -22,6 +23,7 @@ RotatedFasterRCNNPreNmsExportWrapper = _wrappers.RotatedFasterRCNNPreNmsExportWr
 OrientedRCNNPreNmsExportWrapper = _wrappers.OrientedRCNNPreNmsExportWrapper
 RotatedFCOSHeadsExportWrapper = _wrappers.RotatedFCOSHeadsExportWrapper
 RotatedFCOSPreNmsExportWrapper = _wrappers.RotatedFCOSPreNmsExportWrapper
+RotatedRTMDetPreNmsExportWrapper = _wrappers.RotatedRTMDetPreNmsExportWrapper
 
 
 @pytest.fixture
@@ -177,3 +179,24 @@ def test_fcos_pre_nms_wrapper_shapes(tiny_fcos: RotatedFCOS) -> None:
     assert labels.shape == (32,)
     assert count.ndim == 0
     assert int(count.item()) <= 32
+
+
+def test_rtmdet_pre_nms_wrapper_shapes() -> None:
+    model = RotatedRTMDet(
+        num_classes=3,
+        backbone_name="cspnext_tiny",
+        pretrained_backbone=False,
+        nms_pre=32,
+    )
+    model.eval()
+    h, w = 128, 128
+    wrap = RotatedRTMDetPreNmsExportWrapper(model, height=h, width=w, max_candidates=48)
+    wrap.eval()
+    x = torch.randn(1, 3, h, w, dtype=torch.float32)
+    with torch.no_grad():
+        boxes, scores, labels, count = wrap(x)
+    assert boxes.shape == (48, 5)
+    assert scores.shape == (48,)
+    assert labels.shape == (48,)
+    assert count.ndim == 0
+    assert int(count.item()) <= 48

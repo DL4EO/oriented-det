@@ -1,5 +1,9 @@
 """Tests for oriented mAP evaluation."""
 
+from oriented_det.data.evaluation import (
+    average_precision_area,
+    ossdd_map_iou_thresholds,
+)
 from oriented_det.data import (
     APCalculator,
     ClassEvalMetrics,
@@ -183,4 +187,71 @@ def test_compute_gt_best_iou_alignment_metrics_per_class():
     table = format_gt_best_iou_alignment_table(metrics, markdown=True)
     assert "plane" in table
     assert "global" in table
+
+
+def test_average_precision_area_perfect_and_miss():
+    assert average_precision_area([1.0], [1.0]) == 1.0
+    assert average_precision_area([0.0], [0.0]) == 0.0
+
+
+def test_map_over_iou_thresholds_averages_area():
+    """IoU ~1/3 is a hit at 0.1 and a miss at 0.5. Mean AP is 0.5."""
+    gt = RBox(0, 0, 10, 10, 0)
+    det = RBox(5, 0, 10, 10, 0)
+    detections = {
+        "img": [Detection(rbox=det, score=0.9, class_id=0, class_name="ship", image_id="img")],
+    }
+    ground_truths = {
+        "img": [GroundTruth(rbox=gt, class_id=0, class_name="ship", image_id="img")],
+    }
+    score, class_aps, metrics = compute_oriented_map(
+        detections,
+        ground_truths,
+        iou_threshold=0.5,
+        iou_thresholds=[0.1, 0.5],
+        show_progress=False,
+    )
+    assert abs(score - 0.5) < 1e-6
+    assert abs(class_aps["ship"] - 0.5) < 1e-6
+    assert metrics["ship"].recall == 0.0
+    assert abs(metrics["ship"].ap - 0.5) < 1e-6
+
+
+def test_map_over_iou_thresholds_perfect_match():
+    box = RBox(10, 10, 8, 4, 0.2)
+    detections = {
+        "a": [Detection(rbox=box, score=0.8, class_id=0, class_name="ship", image_id="a")],
+    }
+    ground_truths = {
+        "a": [GroundTruth(rbox=box, class_id=0, class_name="ship", image_id="a")],
+    }
+    score, _, metrics = compute_oriented_map(
+        detections,
+        ground_truths,
+        iou_thresholds=ossdd_map_iou_thresholds(),
+        show_progress=False,
+    )
+    assert len(ossdd_map_iou_thresholds()) == 18
+    assert ossdd_map_iou_thresholds()[0] == 0.1
+    assert ossdd_map_iou_thresholds()[-1] == 0.95
+    assert abs(score - 1.0) < 1e-6
+    assert metrics["ship"].recall == 1.0
+
+
+def test_map_over_iou_thresholds_does_not_match_across_images():
+    box = RBox(10, 10, 8, 4, 0)
+    detections = {
+        "a": [Detection(rbox=box, score=0.9, class_id=0, class_name="ship", image_id="a")],
+    }
+    ground_truths = {
+        "b": [GroundTruth(rbox=box, class_id=0, class_name="ship", image_id="b")],
+    }
+    score, _, metrics = compute_oriented_map(
+        detections,
+        ground_truths,
+        iou_thresholds=[0.1, 0.5],
+        show_progress=False,
+    )
+    assert score == 0.0
+    assert metrics["ship"].recall == 0.0
 

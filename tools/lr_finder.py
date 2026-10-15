@@ -38,6 +38,7 @@ if sys.platform == "darwin":
 import numpy as np
 import torch
 import torch.optim as optim
+from tqdm import tqdm
 from torch.utils.data import DataLoader, Subset
 
 # Ensure tools dir is on path for local imports
@@ -53,6 +54,7 @@ from oriented_det.data import (
 from oriented_det.train.config import LossConfig, TrainingExperimentConfig
 from oriented_det.train.utils import capped_subset_indices
 from oriented_det.utils import get_device
+from oriented_det.utils.progress import tqdm_progress_stream
 
 from oriented_det.runtime.collate import create_collate_fn, create_train_augmentation, check_directories
 from train import (
@@ -490,7 +492,7 @@ def run_lr_finder(
 
     bs = config.data_loader.batch_size
     print(f"  Running {num_steps} steps (batch_size={bs})...", flush=True)
-    for step in range(num_steps):
+    for step in tqdm(range(num_steps), desc="LR finder", file=tqdm_progress_stream()):
         lr = start_lr * (end_lr / start_lr) ** (step / max(1, num_steps - 1))
         for i, group in enumerate(optimizer.param_groups):
             if multipliers and "group_name" in group:

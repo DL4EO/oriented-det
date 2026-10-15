@@ -131,7 +131,9 @@ def run_onnx_inference_and_save(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    score_thr, score_src = resolve_preds_score_threshold(config, cli_score_threshold=score_threshold)
+    score_thr, score_src = resolve_preds_score_threshold(
+        config, data_split=data_split, cli_score_threshold=score_threshold
+    )
     nms_backend = nms_backend or "shapely"
     nms_class_agnostic = bool(
         getattr(getattr(config, "production", None), "nms_class_agnostic", False)
@@ -170,7 +172,11 @@ def run_onnx_inference_and_save(
         ds_cfg = replace(config.dataset, data_root=data_root)
         native_dataset = build_split_dataset(ds_cfg, data_split, filter_empty_gt=False)
         gt_by_image_path = {}
-        for idx in range(len(native_dataset)):
+        for idx in tqdm(
+            range(len(native_dataset)),
+            desc="Loading annotations",
+            file=tqdm_progress_stream(),
+        ):
             sample = native_dataset[idx]
             gt_by_image_path[Path(sample.image_path)] = _annotations_to_ground_truths(
                 list(sample.annotations), class_map

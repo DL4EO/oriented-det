@@ -1,0 +1,75 @@
+{
+  "_base_": [
+    "../_base_/models/yolo_obb_s.json",
+    "../_base_/preprocessing.json"
+  ],
+  "data_loader": {
+    "batch_size": 16,
+    "num_workers": 4,
+    "shuffle": true,
+    "pin_memory": true
+  },
+  "checkpoint": {
+    "load_from_checkpoint": null,
+    "load_from_experiment": null,
+    "discover_previous_run": false,
+    "resume_from_checkpoint_epoch": false,
+    "load_optimizer_state": false,
+    "load_scheduler_state": false,
+    "start_epoch": 0,
+    "best_metric": "mAP",
+    "higher_is_better": true
+  },
+  "training": {
+    "num_epochs": 300,
+    "optimizer": "sgd",
+    "learning_rate": 0.0025,
+    "momentum": 0.9,
+    "weight_decay": 0.0001,
+    "use_amp": true,
+    "gradient_accumulation_steps": 1,
+    "max_grad_norm": 35.0,
+    "lr_scheduler_type": "cosine_annealing",
+    "lr_scheduler_cosine_eta_min": 2.5e-5,
+    "lr_warmup_steps": 22179,
+    "lr_scaling_with_accumulation": "linear",
+    "lr_scale_with_world_size": false,
+    "use_lr_param_groups": false
+  },
+  "loss": {
+    "loss_type": "focal",
+    "focal_alpha": 0.25,
+    "focal_gamma": 2.0
+  },
+  "model": {
+    "yolo_obb_force_horizontal": true
+  },
+  "dataset": {
+    "format": "coco",
+    "data_root": "/path/to/data/coco",
+    "filter_empty_gt": false
+  },
+  "preprocessing": {
+    "target_size": [640, 640],
+    "enable_mosaic": true,
+    "mosaic_img_scale": [640, 640],
+    "mosaic_ratio_range": [0.5, 1.5],
+    "mosaic_disable_last_n_epochs": 10,
+    "enable_random_rotate": false,
+    "normalize_mean": [0.307941, 0.311986, 0.297761],
+    "normalize_std": [0.192315, 0.187769, 0.181551]
+  },
+  "evaluation": {
+    "iou_threshold": 0.5,
+    "final_nms_iou_threshold": 0.1,
+    "val_score_threshold": 0.3,
+    "val_map_every_n_epochs": 50,
+    "val_exact_rotated_iou": false,
+    "val_map_at_end": true
+  },
+  "production": {
+    "score_threshold": 0.2,
+    "final_nms_iou_threshold": 0.1,
+    "max_detections_per_image": 2000
+  }
+}

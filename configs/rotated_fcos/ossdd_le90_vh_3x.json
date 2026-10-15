@@ -1,0 +1,12 @@
+{
+  "_base_": [
+    "ossdd_le90_vh_1x.json"
+  ],
+  "data_loader": {
+    "batch_size": 4
+  },
+  "training": {
+    "num_epochs": 36,
+    "lr_scheduler_milestones": [24, 33]
+  }
+}

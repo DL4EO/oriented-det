@@ -115,6 +115,15 @@
       "eval_map50": 0.8232,
       "eval_task1_map50": 0.7291,
       "eval_report": "docs/eval-reports/rotated_fcos_dota_le90_3x/model_analysis.md"
+    },
+    "rotated_rtmdet_dota_le90_3x": {
+      "filename": "rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.pth",
+      "sha256": "3f6a1a0b1c193a3df59b7ddcf4e3583df8549a76648d444470698df265899c96",
+      "source_recipe": "configs/rotated_rtmdet/dota_le90_3x_s.json",
+      "experiment_dir": "runs/rotated_rtmdet/20261002-102116",
+      "eval_map50": 0.8275,
+      "eval_task1_map50": 0.7760,
+      "eval_report": "docs/eval-reports/rotated_rtmdet_dota_le90_3x/model_analysis.md"
     }
   }
 }

@@ -73,6 +73,7 @@ try:
         _aggregate_gt_best_iou_samples,
         compute_oriented_map,
         detection_matches_ground_truth_class,
+        format_map_iou_span,
         format_gt_best_iou_alignment_table_from_dict,
         gt_best_iou_alignment_metrics_to_dict,
     )
@@ -82,6 +83,7 @@ except ImportError:
     Detection = None  # type: ignore
     GroundTruth = None  # type: ignore
     compute_oriented_map = None  # type: ignore
+    format_map_iou_span = None  # type: ignore
     RBox = None  # type: ignore
     viz = None  # type: ignore
 
@@ -396,6 +398,7 @@ def train_one_epoch(
     global_step: Optional[int] = None,
     profiler: Optional[Any] = None,
     lr_scheduler: Optional[Any] = None,
+    ema: Optional[Any] = None,
     rank: Optional[int] = None,
     progress_stream: Optional[Any] = None,
     debug: bool = False,
@@ -603,6 +606,8 @@ def train_one_epoch(
                         scaler.update()
                     else:
                         optimizer.step()
+                    if ema is not None:
+                        ema.update(model)
 
                     optimizer.zero_grad()
                 
@@ -778,6 +783,8 @@ def train_one_epoch(
                 scaler.update()
             else:
                 optimizer.step()
+            if ema is not None:
+                ema.update(model)
 
             optimizer.zero_grad()
 
@@ -990,7 +997,7 @@ def _compute_val_stats_from_dicts(
     sum_detection_scores, num_detection_scores, log_only GT–IoU diagnostics, and
     (when extended_gt_metrics) zero-best-IoU GT count, class-agnostic duplicate rate aggregates.
 
-    ``use_exact_rotated_iou`` follows ``evaluation.use_exact_rotated_iou`` (exact CPU polygon
+    ``use_exact_rotated_iou`` follows ``evaluation.val_exact_rotated_iou`` (exact CPU polygon
     IoU vs GPU sampling). Does not affect model inference / final NMS.
     """
     total_ground_truths = 0
@@ -1193,6 +1200,7 @@ def evaluate(
     per_class_score_threshold: Optional[Dict[str, float]] = None,
     vis_score_threshold: Optional[float] = None,
     iou_threshold: float = 0.5,
+    map_iou_thresholds: Optional[Sequence[float]] = None,
     extended_gt_metrics: bool = False,
     compute_map: bool = True,
     log_images: bool = True,
@@ -1227,7 +1235,8 @@ def evaluate(
         class_names: Optional list of class names (for evaluation)
         score_threshold: Minimum confidence score for detections (metrics and matching)
         vis_score_threshold: Min score for boxes drawn in TensorBoard images; None = use score_threshold
-        iou_threshold: IoU threshold for mAP calculation
+        iou_threshold: IoU threshold for single-threshold mAP, and for GT-cover / accuracy
+        map_iou_thresholds: When set, mAP is the mean of area-under-PR at these rotated-IoU values
         compute_map: Whether to compute mAP (can be slow with many detections)
         log_images: Whether to log prediction images to TensorBoard
         max_images_to_log: Maximum number of images to log per epoch (to avoid slowing down training)
@@ -1824,6 +1833,7 @@ def evaluate(
     summary = metric_tracker.get_summary()
 
     # Compute mAP if evaluation utilities are available and requested (only on rank 0 when we gathered)
+    iou_ap_out: Dict[str, Any] = {}
     if compute_map and compute_oriented_map is not None and Detection is not None and GroundTruth is not None:
         if did_gather and rank is not None and rank != 0:
             summary["mAP"] = -1.0
@@ -1843,8 +1853,15 @@ def evaluate(
                     num_images = 1
                 if rank is None or rank == 0:
                     print(f"\nComputing mAP (this may take a while)...")
+                    if map_iou_thresholds:
+                        iou_filter = (
+                            "mean AP over IoU "
+                            f"{format_map_iou_span(map_iou_thresholds)}"
+                        )
+                    else:
+                        iou_filter = f"IoU≥{iou_threshold:.2f}"
                     print(
-                        f"  Eval filters: score≥{score_threshold:.4f}, IoU≥{iou_threshold:.2f}"
+                        f"  Eval filters: score≥{score_threshold:.4f}, {iou_filter}"
                         + (
                             f", per-class floors on {len(per_class_score_threshold)} class(es)"
                             if per_class_score_threshold
@@ -1860,7 +1877,7 @@ def evaluate(
                     if total_dets > 50000:
                         print(f"  Warning: Large number of detections may slow down mAP computation")
                         print(
-                            f"  Consider increasing evaluation.train_val_score_threshold "
+                            f"  Consider increasing evaluation.val_score_threshold "
                             f"(current: {score_threshold}) for faster mAP matching"
                         )
                 _map_t0 = time.perf_counter()
@@ -1872,6 +1889,8 @@ def evaluate(
                     device=device,
                     progress_stream=progress_stream,
                     use_exact_rotated_iou=eval_use_exact_rotated_iou,
+                    iou_thresholds=map_iou_thresholds,
+                    iou_ap_out=iou_ap_out,
                 )
                 _map_elapsed = time.perf_counter() - _map_t0
                 summary["mAP"] = mean_ap
@@ -1931,6 +1950,11 @@ def evaluate(
     # Log-only diagnostics (do not send to TensorBoard).
     summary["eval_score_threshold"] = score_threshold
     summary["eval_iou_threshold"] = iou_threshold
+    if map_iou_thresholds:
+        summary["log_only_map_iou_thresholds"] = [float(t) for t in map_iou_thresholds]
+        per_iou = iou_ap_out.get("per_iou")
+        if isinstance(per_iou, list):
+            summary["log_only_map_ap_per_iou"] = [float(v) for v in per_iou]
     if per_class_score_threshold:
         summary["eval_per_class_score_threshold"] = dict(per_class_score_threshold)
     if not compute_matching_metrics:
@@ -2076,6 +2100,7 @@ def train(
     *,
     num_epochs: int = 10,
     val_loader: Optional[DataLoader] = None,
+    test_loader: Optional[DataLoader] = None,
     lr_scheduler: Optional[Any] = None,
     checkpoint_manager: Optional[CheckpointManager] = None,
     print_freq: int = 10,
@@ -2089,11 +2114,14 @@ def train(
     class_map: Optional[Dict[str, int]] = None,
     class_names: Optional[Sequence[str]] = None,
     eval_score_threshold: float = 0.05,
+    eval_test_score_threshold: Optional[float] = None,
     eval_per_class_score_threshold: Optional[Dict[str, float]] = None,
     eval_vis_score_threshold: Optional[float] = None,
     eval_iou_threshold: float = 0.5,
+    eval_map_iou_thresholds: Optional[Sequence[float]] = None,
     eval_extended_gt_metrics: bool = False,
-    eval_compute_map_final: bool = True,
+    eval_compute_map_final: bool = False,
+    eval_compute_map_test: bool = False,
     eval_compute_map_every_n_epochs: int = 0,
     log_images: bool = True,
     max_images_to_log: int = 4,
@@ -2119,6 +2147,7 @@ def train(
     freeze_rpn_epochs: int = 0,
     eval_use_exact_rotated_iou: bool = True,
     eval_use_exact_rotated_iou_for_final_map: Optional[bool] = None,
+    ema: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Complete training loop.
     
@@ -2140,9 +2169,15 @@ def train(
         writer: Optional TensorBoard SummaryWriter for logging
         class_map: Optional mapping from class names to class IDs (for evaluation)
         class_names: Optional list of class names (for evaluation)
-        eval_score_threshold: Minimum confidence score for evaluation detections
-        eval_iou_threshold: IoU threshold for mAP calculation
-        eval_compute_map_final: If True, after training load the best checkpoint and compute mAP once
+        eval_score_threshold: Minimum confidence score for in-train val and ``val_map_at_end``
+        eval_test_score_threshold: Score floor for ``test_map``. When None, uses
+            ``eval_score_threshold``. ``tools/train.py`` sets this from
+            ``evaluation.test_score_threshold`` (null → 0.05).
+        eval_iou_threshold: IoU threshold for single-threshold mAP and GT-cover / accuracy
+        eval_map_iou_thresholds: When set, reported mAP averages area-under-PR over these IoUs
+        eval_compute_map_final: If True, after training load the best checkpoint and compute val mAP once
+        eval_compute_map_test: If True, after training load that same checkpoint and compute test mAP once.
+            The test score does not choose the best checkpoint.
         eval_compute_map_every_n_epochs: If >0, compute mAP every N epochs during training (current model)
             (in addition to the final epoch). Use 0 to compute only at final epoch.
         log_images: Whether to log prediction images to TensorBoard
@@ -2224,6 +2259,9 @@ def train(
         # Also set epoch for validation sampler if using DistributedSampler
         if val_sampler is not None:
             val_sampler.set_epoch(epoch)
+        train_collate = getattr(train_loader, "collate_fn", None)
+        if train_collate is not None and hasattr(train_collate, "update_mosaic_for_epoch"):
+            train_collate.update_mosaic_for_epoch(epoch)
         
         train_model = model.module if hasattr(model, 'module') else model
         _fb = int(freeze_backbone_epochs or 0)
@@ -2310,6 +2348,7 @@ def train(
             global_step=global_step,
             profiler=profiler,
             lr_scheduler=lr_scheduler,
+            ema=ema,
             rank=rank,
             progress_stream=progress_stream,
             debug=debug,
@@ -2341,8 +2380,11 @@ def train(
             matching_metrics_this_epoch = compute_map_this_epoch or extended_gt_this_epoch
             
             # All ranks run validation forward pass (prevents DDP deadlock)
-            # Only rank 0 collects metrics and logs
-            val_metrics = evaluate(
+            # Only rank 0 collects metrics and logs. EMA weights are used for this
+            # forward, then the training weights are restored.
+            ema_backup = ema.apply_to_model(model) if ema is not None else None
+            try:
+                val_metrics = evaluate(
                 model=model,
                 data_loader=val_loader,
                 device=device,
@@ -2355,6 +2397,7 @@ def train(
                 per_class_score_threshold=eval_per_class_score_threshold,
                 vis_score_threshold=eval_vis_score_threshold,
                 iou_threshold=eval_iou_threshold,
+                map_iou_thresholds=eval_map_iou_thresholds,
                 extended_gt_metrics=extended_gt_this_epoch,
                 compute_map=compute_map_this_epoch and (rank is None or rank == 0),  # Only rank 0 computes mAP
                 log_images=log_images and (rank is None or rank == 0),  # Only rank 0 logs images
@@ -2372,16 +2415,19 @@ def train(
                 eval_use_exact_rotated_iou=eval_use_exact_rotated_iou,
                 compute_matching_metrics=matching_metrics_this_epoch,
             )
-            # Only rank 0 has meaningful metrics; other ranks return empty dict
-            if rank is None or rank == 0:
-                history["val"].append(val_metrics)
-                print(_format_validation_metrics(val_metrics, previous_val_metrics))
-                previous_val_metrics = _snapshot_val_metrics_for_comparison(
-                    val_metrics, previous_val_metrics
-                )
-            else:
-                # Non-zero ranks return empty metrics (they still ran forward pass for DDP sync)
-                history["val"].append({})
+                # Only rank 0 has meaningful metrics; other ranks return empty dict
+                if rank is None or rank == 0:
+                    history["val"].append(val_metrics)
+                    print(_format_validation_metrics(val_metrics, previous_val_metrics))
+                    previous_val_metrics = _snapshot_val_metrics_for_comparison(
+                        val_metrics, previous_val_metrics
+                    )
+                else:
+                    # Non-zero ranks return empty metrics (they still ran forward pass for DDP sync)
+                    history["val"].append({})
+            finally:
+                if ema is not None:
+                    ema.restore_model(model, ema_backup)
         
         # Synchronize all DDP ranks after validation.
         #
@@ -2440,6 +2486,7 @@ def train(
                 scheduler=lr_scheduler,
                 epoch=epoch,
                 metrics=train_metrics,
+                ema_state_dict=ema.state_dict() if ema is not None else None,
             )
             if val_loader is not None and (rank is None or rank == 0):
                 # Use val_metrics if available, otherwise train_metrics
@@ -2449,13 +2496,20 @@ def train(
             else:
                 # No validation pass: best checkpoint follows training metrics
                 metrics_for_best = train_metrics
-            checkpoint_manager.save_best(
-                model=model,
-                optimizer=optimizer,
-                scheduler=lr_scheduler,
-                epoch=epoch,
-                metrics=metrics_for_best,
-            )
+            # best_mAP stores EMA weights so dota-submit loads them unchanged.
+            # Epoch checkpoints above keep the raw training weights.
+            best_backup = ema.apply_to_model(model) if ema is not None else None
+            try:
+                checkpoint_manager.save_best(
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=lr_scheduler,
+                    epoch=epoch,
+                    metrics=metrics_for_best,
+                )
+            finally:
+                if ema is not None:
+                    ema.restore_model(model, best_backup)
         
         if rank is None or rank == 0:
             epoch_wall_s = time.perf_counter() - epoch_t0
@@ -2463,7 +2517,9 @@ def train(
             avg_s = sum(epoch_wall_times) / len(epoch_wall_times)
             remaining_epochs = start_epoch + num_epochs - epoch - 1
             map_n = max(0, int(eval_compute_map_every_n_epochs or 0))
-            want_final_map = bool(eval_compute_map_final and val_loader is not None)
+            want_final_val = bool(eval_compute_map_final and val_loader is not None)
+            want_final_test = bool(eval_compute_map_test and test_loader is not None)
+            want_final_map = want_final_val or want_final_test
             parts = [
                 f"  Timing: {_format_duration_hms(epoch_wall_s)} this epoch (avg {_format_duration_hms(avg_s)})",
             ]
@@ -2474,12 +2530,22 @@ def train(
                 )
                 if map_n > 0:
                     second += f", mAP every {map_n} epoch(s)"
-                if want_final_map:
+                if want_final_val and want_final_test:
+                    second += " and final val mAP and test mAP."
+                elif want_final_test:
+                    second += " and test mAP."
+                elif want_final_val:
                     second += " and final mAP."
                 else:
                     second += "."
                 parts.append(second)
-            elif want_final_map:
+            elif want_final_val and want_final_test:
+                parts.append(
+                    f"ETA ~{_format_duration_hms(avg_s)} for final val mAP and test mAP on best checkpoint."
+                )
+            elif want_final_test:
+                parts.append(f"ETA ~{_format_duration_hms(avg_s)} for test mAP on best checkpoint.")
+            elif want_final_val:
                 parts.append(f"ETA ~{_format_duration_hms(avg_s)} for final mAP on best checkpoint.")
             else:
                 parts.append("Training loop finished (no final mAP).")
@@ -2531,11 +2597,13 @@ def train(
         if device.type == "cuda":
             torch.cuda.empty_cache()
     
-    # Final mAP with best checkpoint (after training loop)
-    # DDP: all ranks must call evaluate() because evaluate() uses dist.gather_object on the val set.
-    # If only rank 0 runs evaluate(), gather_object waits forever for other ranks → hung job, no mAP in log.
+    # Final mAP with best checkpoint (after training loop).
+    # Val mAP and test mAP both use that checkpoint. Test mAP does not choose it.
+    # DDP: all ranks must call evaluate() because evaluate() uses dist.gather_object.
     _ran_final_map_evaluate = False
-    if eval_compute_map_final and val_loader is not None:
+    want_final_val = bool(eval_compute_map_final and val_loader is not None)
+    want_final_test = bool(eval_compute_map_test and test_loader is not None)
+    if want_final_val or want_final_test:
         best_path = checkpoint_manager.best_checkpoint_path if checkpoint_manager is not None else None
         # In DDP, only rank 0 updates checkpoint_manager.best_checkpoint_path during save_best().
         # Broadcast the resolved best checkpoint path so every rank enters final evaluate()
@@ -2546,18 +2614,23 @@ def train(
             dist.broadcast_object_list(best_path_list, src=0)
             best_path = Path(best_path_list[0]) if best_path_list[0] else None
         if best_path is not None and best_path.exists():
-            _ran_final_map_evaluate = True
             _final_map_exact_iou = (
                 eval_use_exact_rotated_iou
                 if eval_use_exact_rotated_iou_for_final_map is None
                 else bool(eval_use_exact_rotated_iou_for_final_map)
             )
+            test_map_score = (
+                float(eval_score_threshold)
+                if eval_test_score_threshold is None
+                else float(eval_test_score_threshold)
+            )
             if rank is None or rank == 0:
-                print("\nComputing final mAP using best checkpoint...")
                 print(
                     f"  Final mAP IoU backend: "
                     f"{'exact CPU polygon' if _final_map_exact_iou else 'GPU sampling (approx)'}"
                 )
+                if want_final_test:
+                    print(f"  Test mAP score floor: {test_map_score}")
             ckpt = torch.load(best_path, map_location=device)
             model_to_load = model.module if hasattr(model, "module") else model
             state_dict = ckpt["model_state_dict"]
@@ -2569,38 +2642,66 @@ def train(
             elif model_has_module and not ckpt_has_module:
                 state_dict = {f"module.{k}": v for k, v in state_dict.items()}
             model_to_load.load_state_dict(state_dict, strict=True)
-            final_metrics = evaluate(
-                model=model,
-                data_loader=val_loader,
-                device=device,
-                metric_tracker=val_tracker if (rank is None or rank == 0) else None,
-                writer=writer if (rank is None or rank == 0) else None,
-                epoch=start_epoch + num_epochs - 1,
-                class_map=class_map,
-                class_names=class_names,
-                score_threshold=eval_score_threshold,
-                per_class_score_threshold=eval_per_class_score_threshold,
-                vis_score_threshold=eval_vis_score_threshold,
-                iou_threshold=eval_iou_threshold,
-                extended_gt_metrics=eval_extended_gt_metrics,
-                compute_map=(rank is None or rank == 0),
-                log_images=False,
-                max_images_to_log=0,
-                fixed_image_index=fixed_image_index,
-                log_random_image=False,
-                image_pool_max_size=image_pool_max_size,
-                log_debug_anchors_proposals=False,
-                normalize_mean=normalize_mean,
-                normalize_std=normalize_std,
-                vis_image_size=vis_image_size,
-                rank=rank,
-                progress_stream=progress_stream,
-                debug=debug,
-                eval_use_exact_rotated_iou=_final_map_exact_iou,
-                compute_matching_metrics=True,
-            )
-            if rank is None or rank == 0:
-                print(_format_validation_metrics(final_metrics))
+
+            def _evaluate_best_split(
+                loader: DataLoader,
+                heading: str,
+                metrics_title: str,
+                score_threshold: float,
+            ) -> None:
+                nonlocal _ran_final_map_evaluate
+                _ran_final_map_evaluate = True
+                if rank is None or rank == 0:
+                    print(f"\n{heading}")
+                split_metrics = evaluate(
+                    model=model,
+                    data_loader=loader,
+                    device=device,
+                    metric_tracker=val_tracker if (rank is None or rank == 0) else None,
+                    writer=writer if (rank is None or rank == 0) else None,
+                    epoch=start_epoch + num_epochs - 1,
+                    class_map=class_map,
+                    class_names=class_names,
+                    score_threshold=score_threshold,
+                    per_class_score_threshold=eval_per_class_score_threshold,
+                    vis_score_threshold=eval_vis_score_threshold,
+                    iou_threshold=eval_iou_threshold,
+                    map_iou_thresholds=eval_map_iou_thresholds,
+                    extended_gt_metrics=eval_extended_gt_metrics,
+                    compute_map=(rank is None or rank == 0),
+                    log_images=False,
+                    max_images_to_log=0,
+                    fixed_image_index=fixed_image_index,
+                    log_random_image=False,
+                    image_pool_max_size=image_pool_max_size,
+                    log_debug_anchors_proposals=False,
+                    normalize_mean=normalize_mean,
+                    normalize_std=normalize_std,
+                    vis_image_size=vis_image_size,
+                    rank=rank,
+                    progress_stream=progress_stream,
+                    debug=debug,
+                    eval_use_exact_rotated_iou=_final_map_exact_iou,
+                    compute_matching_metrics=True,
+                )
+                if rank is None or rank == 0:
+                    print(_format_validation_metrics(split_metrics, title=metrics_title))
+
+            if want_final_val:
+                _evaluate_best_split(
+                    val_loader,
+                    "Computing final mAP using best checkpoint...",
+                    "Validation Metrics:",
+                    eval_score_threshold,
+                )
+            if want_final_test:
+                _evaluate_best_split(
+                    test_loader,
+                    "Computing test mAP using best checkpoint "
+                    "(chosen on val; this score does not select the checkpoint)...",
+                    "Test Metrics:",
+                    test_map_score,
+                )
         elif rank is None or rank == 0:
             print("\nSkipping final mAP: no best checkpoint saved.")
 
@@ -2677,7 +2778,12 @@ def _snapshot_val_metrics_for_comparison(
     return snap
 
 
-def _format_validation_metrics(metrics: Dict[str, Any], previous_metrics: Optional[Dict[str, Any]] = None) -> str:
+def _format_validation_metrics(
+    metrics: Dict[str, Any],
+    previous_metrics: Optional[Dict[str, Any]] = None,
+    *,
+    title: str = "Validation Metrics:",
+) -> str:
     """Format validation metrics for human-readable display with optional delta from previous epoch.
     
     Args:
@@ -2726,15 +2832,25 @@ def _format_validation_metrics(metrics: Dict[str, Any], previous_metrics: Option
         return line
     
     lines = []
-    lines.append("Validation Metrics:")
+    lines.append(title)
     lines.append("-" * 50)
 
     eval_sc = metrics.get("eval_score_threshold")
     eval_iou = metrics.get("eval_iou_threshold", metrics.get("iou_threshold"))
+    map_ious = metrics.get("log_only_map_iou_thresholds")
     if isinstance(eval_sc, (int, float)) or isinstance(eval_iou, (int, float)):
         sc_part = f"score≥{float(eval_sc):.4f}" if isinstance(eval_sc, (int, float)) else "score=?"
-        iou_part = f"IoU≥{float(eval_iou):.2f}" if isinstance(eval_iou, (int, float)) else "IoU=?"
-        lines.append(f"  Eval thresholds (mAP / matching): {sc_part}, {iou_part}")
+        if isinstance(map_ious, list) and map_ious and format_map_iou_span is not None:
+            lines.append(
+                f"  Eval thresholds (mAP): {sc_part}, mean AP over IoU {format_map_iou_span(map_ious)}"
+            )
+            if isinstance(eval_iou, (int, float)):
+                lines.append(
+                    f"  Eval thresholds (matching / GT cover): {sc_part}, IoU≥{float(eval_iou):.2f}"
+                )
+        else:
+            iou_part = f"IoU≥{float(eval_iou):.2f}" if isinstance(eval_iou, (int, float)) else "IoU=?"
+            lines.append(f"  Eval thresholds (mAP / matching): {sc_part}, {iou_part}")
     eval_pc = metrics.get("eval_per_class_score_threshold")
     if isinstance(eval_pc, dict) and eval_pc:
         lines.append(f"  Per-class score floors: {eval_pc}")
@@ -2894,6 +3010,18 @@ def _format_validation_metrics(metrics: Dict[str, Any], previous_metrics: Option
         else:
             delta_line = _format_with_delta("mAP", "mAP", map_val, ":.4f")
             lines.append(delta_line + f" ({map_val*100:.2f}%)")
+            per_iou = metrics.get("log_only_map_ap_per_iou")
+            if (
+                isinstance(map_ious, list)
+                and isinstance(per_iou, list)
+                and len(map_ious) == len(per_iou)
+                and per_iou
+            ):
+                bits = [
+                    f"{float(thr):.2f}:{float(ap):.3f}"
+                    for thr, ap in zip(map_ious, per_iou)
+                ]
+                lines.append("  mAP at each IoU: " + " ".join(bits))
     
     # Per-class APs (sorted)
     ap_keys = sorted([k for k in metrics.keys() if k.startswith("AP_")])

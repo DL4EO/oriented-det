@@ -45,6 +45,10 @@ try:
 except ImportError:
     Image = None  # type: ignore
 
+from tqdm import tqdm
+
+from oriented_det.utils.progress import tqdm_progress_stream
+
 from .dota import DOTAAnnotation, DOTASample
 from .fair1m_classes import FAIR1M_CLASSES, FAIR1M_CLASS_SET
 
@@ -804,7 +808,11 @@ def export_fair1m_to_dota(
         image_dir.mkdir(parents=True, exist_ok=True)
         label_dir.mkdir(parents=True, exist_ok=True)
         n = 0
-        for sample in dataset:
+        for sample in tqdm(
+            dataset,
+            desc=f"Exporting {split}",
+            file=tqdm_progress_stream(),
+        ):
             stem = sample.image_path.stem
             _export_fair1m_image(
                 sample.image_path,

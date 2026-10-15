@@ -5,6 +5,7 @@
 - [test_faster_rcnn_export_parity.py](test_faster_rcnn_export_parity.py): Pre-NMS export vs full `faster_rcnn_inference`.
 - [test_oriented_rcnn_export_parity.py](test_oriented_rcnn_export_parity.py): Pre-NMS export vs `OrientedRCNN` eval.
 - [test_rotated_fcos_export_parity.py](test_rotated_fcos_export_parity.py): Pre-NMS export vs `RotatedFCOS` eval; optional ONNX/ORT.
+- [test_rotated_rtmdet_export_parity.py](test_rotated_rtmdet_export_parity.py): Pre-NMS export vs `RotatedRTMDet` eval; optional ONNX/ORT.
 - [test_nms.py](test_nms.py): Rotated IoU / NMS from `export.nms` (python clip; Shapely if installed).
 - [test_postprocess.py](test_postprocess.py): Score prefilter vs post-NMS filter parity; pairwise rotated IoU helpers.
 - [test_standalone_runtime.py](test_standalone_runtime.py): Consumer stack (`demo` / `infer` / `runtime`) imports and runs without `oriented_det`. Copied `onnx_export/` bundle imports without the repo `export` package.

@@ -1,7 +1,10 @@
 """Tests for tiled-val metrics margin filtering (tools/save_predictions)."""
 
 from oriented_det.geometry import RBox
-from tools.save_predictions import _rbox_centroid_in_tile_interior  # metrics helpers stay in save_predictions CLI module
+from tools.save_predictions import (  # metrics helpers stay in save_predictions CLI module
+    _eval_val_metrics_margin_pixels,
+    _rbox_centroid_in_tile_interior,
+)
 
 
 def test_centroid_in_tile_interior_center_kept():
@@ -19,3 +22,10 @@ def test_centroid_in_edge_margin_band_excluded():
 def test_zero_margin_keeps_all():
     r = RBox(cx=1.0, cy=1.0, width=10.0, height=10.0, angle=0.0)
     assert _rbox_centroid_in_tile_interior(r, 1024, 1024, 0) is True
+
+
+def test_eval_val_metrics_margin_defaults_to_zero():
+    assert _eval_val_metrics_margin_pixels(None) == 0
+    assert _eval_val_metrics_margin_pixels(0) == 0
+    assert _eval_val_metrics_margin_pixels(100) == 100
+    assert _eval_val_metrics_margin_pixels(-5) == 0

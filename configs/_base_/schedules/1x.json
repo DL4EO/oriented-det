@@ -19,8 +19,9 @@
   },
   "evaluation": {
     "iou_threshold": 0.5,
-    "compute_map_final": true,
-    "train_val_score_threshold": 0.3
+    "val_score_threshold": 0.3,
+    "val_map_at_end": false,
+    "test_map": true
   },
   "data_loader": {
     "batch_size": 50,

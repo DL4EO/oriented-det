@@ -99,32 +99,59 @@ def _normalize_legacy_model_keys(config_dict: Dict[str, Any]) -> None:
         model.pop(key, None)
 
 
-def _normalize_legacy_evaluation_score_threshold(config_dict: Dict[str, Any]) -> None:
-    """Rewrite ``evaluation.score_threshold`` → ``train_val_score_threshold``.
+# Older evaluation keys, including the intermediate names from the 0.4 rename.
+# ``score_threshold`` was the in-train floor before ``train_val_score_threshold``.
+_LEGACY_EVALUATION_KEYS = {
+    "score_threshold": "val_score_threshold",
+    "train_val_score_threshold": "val_score_threshold",
+    "per_class_score_threshold": "val_per_class_score_threshold",
+    "compute_map_every_n_epochs": "val_map_every_n_epochs",
+    "extended_gt_metrics": "val_extended_gt_metrics",
+    "use_exact_rotated_iou": "val_exact_rotated_iou",
+    "compute_map_final": "val_map_at_end",
+    "compute_test_map": "test_map",
+    "compute_map_test": "test_map",
+    "preds_score_threshold": "test_score_threshold",
+    "use_exact_rotated_iou_for_final_map": "test_exact_rotated_iou",
+}
 
-    Older recipes / run ``config.json`` files used ``score_threshold`` for the
-    in-train mAP floor. That name collided with deploy / preds floors.
-    """
+
+def _legacy_eval_values_conflict(old: Any, new: Any) -> bool:
+    if old is None or new is None:
+        return old is not new
+    if isinstance(old, bool) or isinstance(new, bool):
+        return bool(old) != bool(new)
+    if isinstance(old, (int, float)) and isinstance(new, (int, float)):
+        return float(old) != float(new)
+    return old != new
+
+
+def _normalize_legacy_evaluation_keys(config_dict: Dict[str, Any]) -> None:
+    """Rewrite pre-split evaluation keys onto ``val_*`` / ``test_*``."""
     evaluation = config_dict.get("evaluation")
-    if not isinstance(evaluation, dict) or "score_threshold" not in evaluation:
+    if not isinstance(evaluation, dict):
         return
-    legacy = evaluation.pop("score_threshold")
-    if "train_val_score_threshold" in evaluation:
-        new_v = evaluation["train_val_score_threshold"]
-        if float(legacy) != float(new_v):
+    remapped: List[str] = []
+    for old, new in _LEGACY_EVALUATION_KEYS.items():
+        if old not in evaluation:
+            continue
+        legacy = evaluation.pop(old)
+        if new in evaluation and _legacy_eval_values_conflict(legacy, evaluation[new]):
             raise ValueError(
-                "evaluation.score_threshold and evaluation.train_val_score_threshold "
-                f"both set with different values ({legacy!r} vs {new_v!r}). "
-                "Use train_val_score_threshold only."
+                f"evaluation.{old} and evaluation.{new} both set with different "
+                f"values ({legacy!r} vs {evaluation[new]!r}). Use {new} only."
             )
-        return
-    evaluation["train_val_score_threshold"] = legacy
-    warnings.warn(
-        "evaluation.score_threshold is deprecated; use "
-        "evaluation.train_val_score_threshold (in-train mAP / best_mAP floor).",
-        DeprecationWarning,
-        stacklevel=2,
-    )
+        if new not in evaluation:
+            evaluation[new] = legacy
+            remapped.append(old)
+    if remapped:
+        warnings.warn(
+            "evaluation keys renamed: "
+            + ", ".join(f"{old} → {_LEGACY_EVALUATION_KEYS[old]}" for old in remapped)
+            + ". Use the val_* / test_* names.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
 
 def _normalize_legacy_roi_box_reg_keys(config_dict: Dict[str, Any]) -> None:
@@ -233,12 +260,15 @@ def _normalize_legacy_cosine_t_max(config_dict: Dict[str, Any]) -> None:
 class DatasetConfig:
     """Dataset configuration."""
     data_root: Path
-    format: str = "dota"  # Options: "dota", "airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid"
+    format: str = "dota"  # Options: "dota", "airbus_playground", "hrsc2016", "fair1m", "ssdd", "hrsid", "yolo_obb", "coco"
     train_tiles_dir: Optional[Path] = None
     val_tiles_dir: Optional[Path] = None
     # Optional list of tile roots (MMRotate trainval-style union without on-disk merge).
     train_tiles_dirs: Optional[List[Path]] = None
     val_tiles_dirs: Optional[List[Path]] = None
+    # Optional labeled test split (DOTA-layout folders). Null means no test tiles.
+    test_tiles_dir: Optional[Path] = None
+    test_tiles_dirs: Optional[List[Path]] = None
     same_folder: bool = False  # If True (DOTA), images and labels are in the same directory as train_tiles_dir/val_tiles_dir
     overlap: int = 16  # Tile overlap in pixels (even); deploy uses margin = overlap/2 when production.ignore_margin_pixels is null
     annotations_file: Optional[Path] = None
@@ -277,6 +307,9 @@ class DatasetConfig:
     # SSDD / HRSID defaults (when null): train → train, val → test (no official val).
     train_split: Optional[str] = None
     val_split: Optional[str] = None
+    # Native formats (HRSC, FAIR1M, SSDD, HRSID, YOLO-OBB, COCO). Null means no third split.
+    # DOTA-layout test data uses test_tiles_dir / test_tiles_dirs instead.
+    test_split: Optional[str] = None
     # Optional CSV from tools/save_predictions (--save-tile-metrics-csv); join on image_id / stem
     tile_metrics_csv: Optional[Path] = None
     hard_tile_metric_column: str = "f1"
@@ -305,6 +338,10 @@ class DatasetConfig:
             self.train_tiles_dirs = [Path(p) for p in self.train_tiles_dirs]
         if self.val_tiles_dirs is not None:
             self.val_tiles_dirs = [Path(p) for p in self.val_tiles_dirs]
+        if self.test_tiles_dir is not None:
+            self.test_tiles_dir = Path(self.test_tiles_dir)
+        if self.test_tiles_dirs is not None:
+            self.test_tiles_dirs = [Path(p) for p in self.test_tiles_dirs]
         if self.annotations_file is not None:
             self.annotations_file = Path(self.annotations_file)
         if self.split_file is not None:
@@ -334,6 +371,25 @@ class DatasetConfig:
             tiles_dirs=self.val_tiles_dirs,
             tiles_dir=self.val_tiles_dir,
             split_label="val",
+        )
+
+    def has_test_tiles(self) -> bool:
+        """True when DOTA-layout test tile root(s) are configured."""
+        return bool(self.test_tiles_dirs) or self.test_tiles_dir is not None
+
+    def has_test_split(self) -> bool:
+        """True when a labeled test split is configured (tiles or native ``test_split``)."""
+        if self.has_test_tiles():
+            return True
+        return bool((self.test_split or "").strip())
+
+    def get_test_tile_roots(self) -> List[Path]:
+        from ..data.dota import resolve_dota_tile_roots
+
+        return resolve_dota_tile_roots(
+            tiles_dirs=self.test_tiles_dirs,
+            tiles_dir=self.test_tiles_dir,
+            split_label="test",
         )
 
 
@@ -422,6 +478,27 @@ class ModelConfig:
     fcos_regress_ranges: Optional[List[List[float]]] = None
     fcos_angle_weight: float = 1.0
     fcos_nms_pre: int = 2000
+    # Rotated RTMDet
+    rtmdet_stacked_convs: int = 2
+    rtmdet_norm_on_bbox: bool = True
+    rtmdet_scale_angle: bool = True
+    rtmdet_exp_on_reg: bool = True
+    rtmdet_qfl_beta: float = 2.0
+    rtmdet_angle_weight: float = 0.2
+    rtmdet_assign_topk: int = 13
+    rtmdet_soft_center_radius: float = 3.0
+    rtmdet_assign_iou_weight: float = 3.0
+    rtmdet_nms_pre: int = 2000
+    # YOLO-OBB
+    yolo_obb_reg_max: int = 16
+    yolo_obb_tal_topk: int = 13
+    yolo_obb_tal_alpha: float = 0.5
+    yolo_obb_tal_beta: float = 6.0
+    yolo_obb_dfl_weight: float = 1.5
+    yolo_obb_angle_weight: float = 0.2
+    # Replace the predicted angle with a constant 0 outside the graph (COCO pretrain).
+    yolo_obb_force_horizontal: bool = False
+    yolo_obb_nms_pre: int = 2000
     aux_loss_type: Optional[str] = None
     aux_loss_weight: float = 0.0
     aux_angle_weight: float = 1.0
@@ -499,7 +576,7 @@ class ModelConfig:
 class TrainingConfig:
     """Training hyperparameters. Keys ordered: scheduler switch first, then lr_*, then rest."""
     # LR scheduler: switch first, then all lr_* grouped
-    lr_scheduler_type: Optional[str] = None  # None/"multistep"/"step" | "reduce_on_plateau" | "one_cycle" | "cosine_annealing" | "cosine_annealing_with_tail"
+    lr_scheduler_type: Optional[str] = None  # None/"multistep"/"step" | "reduce_on_plateau" | "one_cycle" | "cosine_annealing" | "cosine_annealing_with_tail" | "cosine_annealing_late"
     lr_scheduler_step_epochs: int = 8
     lr_scheduler_milestones: Optional[List[int]] = None
     # Scalar: same factor at every MultiStepLR/StepLR drop. List: one factor per milestone.
@@ -517,6 +594,9 @@ class TrainingConfig:
     lr_scheduler_cosine_epochs: Optional[int] = None
     lr_scheduler_cosine_tail_epochs: int = 0
     lr_scheduler_cosine_tail_lr: Optional[float] = None  # default: lr_scheduler_cosine_eta_min
+    # cosine_annealing_late: flat base LR until this epoch, then cosine to eta_min by num_epochs.
+    # None → num_epochs // 2.
+    lr_scheduler_cosine_start_epoch: Optional[int] = None
     lr_warmup_steps: int = 500
     lr_scaling_with_accumulation: str = "linear"
     lr_scale_with_world_size: bool = False
@@ -532,11 +612,21 @@ class TrainingConfig:
     # Other training
     num_epochs: int = 20
     learning_rate: float = 0.001
+    # "sgd" (default) or "adamw". Recipes that set adamw also set adamw_betas.
+    optimizer: str = "sgd"
     momentum: float = 0.9
     weight_decay: float = 0.0001
+    adamw_betas: Optional[List[float]] = None
+    # 1 keeps every parameter at weight_decay. 0 drops decay on norm / bias.
+    weight_decay_norm_mult: float = 1.0
+    weight_decay_bias_mult: float = 1.0
+    use_ema: bool = False
+    ema_momentum: float = 0.0002
+    ema_gamma: float = 2000.0
     use_amp: bool = True
     gradient_accumulation_steps: int = 2
-    max_grad_norm: float = 1.0
+    # Null disables clipping (MMYOLO rotated RTMDet does not clip).
+    max_grad_norm: Optional[float] = 1.0
     loss_weights: Optional[Dict[str, float]] = None
     # Optional partial freeze (0-based training-loop epoch index ``epoch``; same as checkpoint epoch).
     # While ``epoch < N``, the corresponding module does not train (``requires_grad=False``). ROI head
@@ -552,33 +642,57 @@ class TrainingConfig:
 
 @dataclass
 class EvaluationConfig:
-    """Evaluation configuration."""
-    # In-train val / mAP / best_mAP confidence floor (not eval-val / deploy).
-    train_val_score_threshold: float = 0.3
-    # Optional class_name -> min score; classes not listed use train_val_score_threshold
-    per_class_score_threshold: Optional[Dict[str, float]] = None
+    """Evaluation configuration.
+
+    ``val_*`` is the in-train monitor and ``make eval-val`` (higher score floor, checkpoint
+    selection). ``test_*`` is the once-at-the-end pass and ``make eval-test`` (published floor).
+    DOTA points ``dataset.test_tiles_dir`` at the leaky val tiles so ``test_map`` is that sweep.
+    """
+    # In-train val / best_mAP / make eval-val confidence floor (not deploy).
+    val_score_threshold: float = 0.3
+    # Optional class_name -> min score for the val pass; classes not listed use val_score_threshold.
+    val_per_class_score_threshold: Optional[Dict[str, float]] = None
+    val_map_every_n_epochs: int = 0  # If >0, compute val mAP every N epochs (current model)
+    # Val mAP matching uses exact CPU polygon IoU when True. When False, GPU sampling.
+    # Does not affect detection NMS or production/deploy decode.
+    val_exact_rotated_iou: bool = True
+    # Expensive GT–IoU histograms on the val mAP schedule.
+    val_extended_gt_metrics: bool = False
+    # After training, reload the best checkpoint and score val once more. Almost unused;
+    # the publishable number is test_map.
+    val_map_at_end: bool = False
+    # After training, score the configured test split once on the best checkpoint.
+    # Does not choose the checkpoint. Requires a test split. DOTA's test tiles are the val tiles.
+    test_map: bool = False
+    # Score floor for test_map / make eval-test / dota-submit. Null → 0.05.
+    # make eval-val uses val_score_threshold instead.
+    test_score_threshold: Optional[float] = None
+    # IoU backend for test_map. Null uses val_exact_rotated_iou.
+    test_exact_rotated_iou: Optional[bool] = None
     iou_threshold: float = 0.5  # IoU threshold for mAP calculation
-    # Global score floor for ``odet preds`` / ``make eval-val`` only (published protocol 0.05).
-    # When null, those tools use 0.05. Training val uses ``train_val_score_threshold`` (often 0.3).
-    # Deploy / image_demo use ``production.score_threshold`` (may be 0.3).
-    preds_score_threshold: Optional[float] = None
-    # Final detection NMS IoU for ``odet preds`` / ``make eval-val`` only (MMRotate test parity).
-    # When set, overrides ``production.final_nms_iou_threshold`` for that path. Deploy / image_demo
-    # still use ``production.*`` via ``apply_inference_config_to_model``. Training val uses ``model.*``.
+    # When set, mAP is the mean of area-under-PR at these rotated-IoU thresholds
+    # (IoU matrix once). Null keeps 11-point AP at iou_threshold. OSSDD recipes
+    # set 0.10, 0.15, ..., 0.95. iou_threshold still drives GT-cover and accuracy.
+    map_iou_thresholds: Optional[List[float]] = None
+    # Final detection NMS IoU for ``odet preds`` / ``make eval-val`` / ``make eval-test``
+    # (MMRotate test parity). When set, overrides ``production.final_nms_iou_threshold``
+    # on that path. Deploy / image_demo still use ``production.*``. Training val uses ``model.*``.
     final_nms_iou_threshold: Optional[float] = None
-    compute_map_final: bool = True  # After training, load best checkpoint and compute mAP once
-    compute_map_every_n_epochs: int = 0  # If >0, compute mAP every N epochs during training (current model)
-    # If True, compute expensive GT–IoU histograms (mean/median/buckets, wrong-class counts)
-    # and class-agnostic duplicate rate on post-threshold detections (greedy by score vs eval IoU).
-    extended_gt_metrics: bool = False
-    # mAP matching and GT-cover / accuracy use exact CPU polygon IoU when True (Shapely when
-    # installed). When False, use GPU sampling IoU (faster, approximate). Does not affect final
-    # detection NMS or production/deploy decode settings.
-    use_exact_rotated_iou: bool = True
-    # IoU backend for compute_map_final only (best-checkpoint mAP after training). When None,
-    # falls back to use_exact_rotated_iou. Set true for publishable exact mAP while keeping
-    # periodic in-training mAP on GPU sampling (use_exact_rotated_iou=false).
-    use_exact_rotated_iou_for_final_map: Optional[bool] = None
+
+    def __post_init__(self) -> None:
+        if not self.map_iou_thresholds:
+            self.map_iou_thresholds = None
+            return
+        cleaned: List[float] = []
+        for raw in self.map_iou_thresholds:
+            value = float(raw)
+            if not 0.0 < value <= 1.0:
+                raise ValueError(
+                    "evaluation.map_iou_thresholds values must be in (0, 1], "
+                    f"got {value}"
+                )
+            cleaned.append(value)
+        self.map_iou_thresholds = cleaned
 
 
 @dataclass
@@ -632,36 +746,38 @@ def resolve_inference_score_threshold(config: "TrainingExperimentConfig") -> flo
         v = getattr(config.production, "score_threshold", None)
         if v is not None:
             return float(v)
-    return float(getattr(config.evaluation, "train_val_score_threshold", 0.3))
+    return float(getattr(config.evaluation, "val_score_threshold", 0.3))
 
 
 def resolve_preds_score_threshold(
     config: "TrainingExperimentConfig",
     *,
+    data_split: str = "val",
     cli_score_threshold: Optional[float] = None,
 ) -> Tuple[float, str]:
-    """Global score floor for ``odet preds`` / ``make eval-val``.
+    """Score floor for ``odet preds`` on one split.
 
-    Priority:
-    1. CLI ``--score-threshold``
-    2. ``evaluation.preds_score_threshold`` when set
-    3. ``0.05`` (published eval-val protocol)
+    ``val`` (and ``train``) use ``evaluation.val_score_threshold``.
+    ``test`` uses ``evaluation.test_score_threshold`` when set, else ``0.05``.
 
-    Ignores ``production.score_threshold`` and
-    ``evaluation.train_val_score_threshold`` so deploy display (often 0.3) and
-    fast train-val (often 0.3) cannot raise the published mAP floor. Deploy /
-    ``image_demo`` keep :func:`resolve_inference_score_threshold`. Training val
-    keeps :func:`effective_eval_metric_thresholds`.
+    CLI ``--score-threshold`` wins for either split. Ignores
+    ``production.score_threshold``. Deploy / ``image_demo`` keep
+    :func:`resolve_inference_score_threshold`. ``evaluation.test_map`` uses the
+    test branch with no CLI override.
     """
     if cli_score_threshold is not None:
         return float(cli_score_threshold), "CLI --score-threshold"
     ev = getattr(config, "evaluation", None)
-    if ev is not None and getattr(ev, "preds_score_threshold", None) is not None:
-        return (
-            float(ev.preds_score_threshold),
-            "evaluation.preds_score_threshold (eval-val / odet preds)",
-        )
-    return 0.05, "default 0.05 (eval-val / odet preds)"
+    if (data_split or "val") == "test":
+        if ev is not None and getattr(ev, "test_score_threshold", None) is not None:
+            return (
+                float(ev.test_score_threshold),
+                "evaluation.test_score_threshold",
+            )
+        return 0.05, "default 0.05 (test)"
+    if ev is None:
+        return 0.3, "default 0.3 (val)"
+    return float(ev.val_score_threshold), "evaluation.val_score_threshold"
 
 
 def resolve_preds_final_nms_iou_threshold(
@@ -710,21 +826,30 @@ def resolve_preds_final_nms_iou_threshold(
 def effective_eval_metric_thresholds(
     config: "TrainingExperimentConfig",
 ) -> Tuple[float, Optional[Dict[str, float]], float]:
-    """Score / per-class / IoU thresholds for **training** validation and mAP.
+    """Score / per-class / IoU thresholds for the **val** monitor and ``make eval-val``.
 
-    Uses ``evaluation`` only. ``production.score_threshold`` is deploy /
+    Uses ``evaluation.val_*`` only. ``production.score_threshold`` is deploy /
     ``image_demo`` (see :func:`resolve_inference_score_threshold`); it must not
-    select ``best_mAP`` or reshape in-train mAP. ``odet preds`` / eval-val score
-    uses :func:`resolve_preds_score_threshold`. Per-class floors for preds/deploy
-    use :func:`merge_per_class_score_thresholds`.
+    select ``best_mAP``. The test pass uses :func:`resolve_preds_score_threshold`
+    with ``data_split='test'``.
     """
     ev = config.evaluation
-    sc = float(ev.train_val_score_threshold)
+    sc = float(ev.val_score_threshold)
     pc: Optional[Dict[str, float]] = None
-    if ev.per_class_score_threshold:
-        pc = {str(k): float(v) for k, v in ev.per_class_score_threshold.items()}
+    if ev.val_per_class_score_threshold:
+        pc = {str(k): float(v) for k, v in ev.val_per_class_score_threshold.items()}
     iou = float(ev.iou_threshold)
     return sc, pc, iou
+
+
+def resolved_map_iou_thresholds(
+    config: "TrainingExperimentConfig",
+) -> Optional[List[float]]:
+    """Rotated-IoU list for multi-threshold mAP, or None for single-threshold AP."""
+    raw = getattr(config.evaluation, "map_iou_thresholds", None)
+    if not raw:
+        return None
+    return [float(v) for v in raw]
 
 
 def merge_per_class_score_thresholds(
@@ -732,13 +857,13 @@ def merge_per_class_score_thresholds(
 ) -> Optional[Dict[str, float]]:
     """Per-class score floors for ``odet preds`` / deploy (not train-val mAP).
 
-    Start from ``evaluation.per_class_score_threshold``, then apply
+    Start from ``evaluation.val_per_class_score_threshold``, then apply
     ``production.per_class_score_threshold`` key overrides.
     """
     ev = config.evaluation
     pc: Optional[Dict[str, float]] = None
-    if ev.per_class_score_threshold:
-        pc = {str(k): float(v) for k, v in ev.per_class_score_threshold.items()}
+    if ev.val_per_class_score_threshold:
+        pc = {str(k): float(v) for k, v in ev.val_per_class_score_threshold.items()}
     inf = getattr(config, "production", None)
     if inf is not None and inf.per_class_score_threshold is not None:
         merged: Dict[str, float] = dict(pc) if pc else {}
@@ -748,27 +873,27 @@ def merge_per_class_score_thresholds(
 
 
 def config_use_exact_rotated_iou_for_map(config: "TrainingExperimentConfig") -> bool:
-    """Whether periodic mAP and GT-cover matching use exact CPU polygon IoU.
+    """Whether periodic val mAP and GT-cover matching use exact CPU polygon IoU.
 
-    Reads ``evaluation.use_exact_rotated_iou`` only. Final detection NMS and
+    Reads ``evaluation.val_exact_rotated_iou`` only. Final detection NMS and
     ``production.*`` decode settings are unrelated.
     """
     evaluation = getattr(config, "evaluation", None)
     if evaluation is None:
         return True
-    return bool(getattr(evaluation, "use_exact_rotated_iou", True))
+    return bool(getattr(evaluation, "val_exact_rotated_iou", True))
 
 
 def config_use_exact_rotated_iou_for_final_map(config: "TrainingExperimentConfig") -> bool:
-    """Whether the post-training ``compute_map_final`` pass uses exact CPU polygon IoU.
+    """Whether ``test_map`` uses exact CPU polygon IoU.
 
-    Reads ``evaluation.use_exact_rotated_iou_for_final_map`` when set; otherwise
-    ``evaluation.use_exact_rotated_iou``. Does not affect NMS or production decode.
+    Reads ``evaluation.test_exact_rotated_iou`` when set; otherwise
+    ``evaluation.val_exact_rotated_iou``. Does not affect NMS or production decode.
     """
     evaluation = getattr(config, "evaluation", None)
     if evaluation is None:
         return True
-    override = getattr(evaluation, "use_exact_rotated_iou_for_final_map", None)
+    override = getattr(evaluation, "test_exact_rotated_iou", None)
     if override is not None:
         return bool(override)
     return config_use_exact_rotated_iou_for_map(config)
@@ -872,7 +997,7 @@ class LossConfig:
 class TensorboardConfig:
     """TensorBoard and validation logging options."""
     log_debug_anchors_proposals: bool = False  # Log val/debug_anchors and val/debug_proposals
-    vis_score_threshold: Optional[float] = None  # Min score for boxes in TB prediction images; None = use evaluation.train_val_score_threshold
+    vis_score_threshold: Optional[float] = None  # Min score for boxes in TB prediction images; None = use evaluation.val_score_threshold
 
 
 # Default normalization: MMDetection/MMRotate (on [0,1] scale). Inference must use same as training.
@@ -899,6 +1024,16 @@ class PreprocessingConfig:
     enable_random_rotate: bool = False
     random_rotate_prob: float = 0.5
     random_rotate_angle_range: float = 180.0
+    # Class names whose tiles rotate by 90/180/−90/−180 instead of a free angle.
+    random_rotate_rect_labels: Optional[List[str]] = None
+    enable_mosaic: bool = False
+    mosaic_prob: float = 1.0
+    mosaic_img_scale: Optional[List[int]] = None
+    mosaic_center_ratio_range: Optional[List[float]] = None
+    mosaic_pad_val: int = 114
+    mosaic_max_cached_images: int = 40
+    mosaic_ratio_range: Optional[List[float]] = None
+    mosaic_disable_last_n_epochs: int = 0
 
 
 def get_preprocessing_params(config: Any) -> Dict[str, Any]:
@@ -973,7 +1108,14 @@ class TrainingExperimentConfig:
     num_classes: Optional[int] = field(default=None, repr=False)  # Foreground classes only (model output = num_classes + 1 for background)
     schema: Optional[str] = field(default=None, repr=False)  # Path to the JSON schema file
 
-    
+    def __post_init__(self) -> None:
+        if self.evaluation.test_map and self.dataset is not None:
+            if not self.dataset.has_test_split():
+                raise ValueError(
+                    "evaluation.test_map is true but the dataset has no test split. "
+                    "Set dataset.test_tiles_dir, dataset.test_tiles_dirs, or dataset.test_split."
+                )
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary, including class information."""
         config_dict = asdict(self)
@@ -1044,7 +1186,7 @@ class TrainingExperimentConfig:
         _normalize_legacy_model_keys(config_dict)
         _normalize_legacy_roi_box_reg_keys(config_dict)
         _normalize_legacy_cosine_t_max(config_dict)
-        _normalize_legacy_evaluation_score_threshold(config_dict)
+        _normalize_legacy_evaluation_keys(config_dict)
 
         # JSON `null` for a section should fall back to dataclass defaults, not be passed
         # as `None` into non-optional sub-configs.
@@ -1147,6 +1289,8 @@ class TrainingExperimentConfig:
             elif self.dataset.format == "hrsc2016":
                 print(f"  Train Split (ImageSets): {self.dataset.train_split or 'trainval'}")
                 print(f"  Val Split (ImageSets): {self.dataset.val_split or 'test'}")
+                if self.dataset.test_split:
+                    print(f"  Test Split (ImageSets): {self.dataset.test_split}")
             elif self.dataset.format == "fair1m":
                 print(f"  Train Split: {self.dataset.train_split or 'train'}")
                 print(f"  Val Split: {self.dataset.val_split or 'val'}")
@@ -1158,6 +1302,9 @@ class TrainingExperimentConfig:
             elif self.dataset.format == "hrsid":
                 print(f"  Train Split: {self.dataset.train_split or 'train'}")
                 print(f"  Val Split: {self.dataset.val_split or 'test'}")
+            elif self.dataset.format == "yolo_obb":
+                print(f"  Train Split: {self.dataset.train_split or 'train'}")
+                print(f"  Val Split: {self.dataset.val_split or 'val'}")
             else:
                 if self.dataset.train_tiles_dirs:
                     print(f"  Train Tiles: {self.dataset.train_tiles_dirs}")
@@ -1167,8 +1314,14 @@ class TrainingExperimentConfig:
                     print(f"  Val Tiles: {self.dataset.val_tiles_dirs}")
                 else:
                     print(f"  Val Tiles: {self.dataset.val_tiles_dir}")
+                if self.dataset.test_tiles_dirs:
+                    print(f"  Test Tiles: {self.dataset.test_tiles_dirs}")
+                elif self.dataset.test_tiles_dir is not None:
+                    print(f"  Test Tiles: {self.dataset.test_tiles_dir}")
                 if getattr(self.dataset, "same_folder", False):
                     print(f"  Same folder: images and labels in train/val tiles dirs")
+            if self.dataset.test_split and self.dataset.format != "hrsc2016":
+                print(f"  Test Split: {self.dataset.test_split}")
             if getattr(self.dataset, "lookalike_labels", None):
                 print(f"  Lookalike Labels (aliases): {self.dataset.lookalike_labels}")
             print(
@@ -1229,47 +1382,63 @@ class TrainingExperimentConfig:
         print()
         
         print("Evaluation:")
+        print(f"  val_score_threshold: {self.evaluation.val_score_threshold}")
         print(
-            f"  train_val_score_threshold: "
-            f"{self.evaluation.train_val_score_threshold}"
+            f"  test_score_threshold (test_map / eval-test): "
+            f"{self.evaluation.test_score_threshold!r}"
         )
-        print(
-            f"  preds_score_threshold (odet preds / eval-val): "
-            f"{self.evaluation.preds_score_threshold!r}"
-        )
-        if self.evaluation.per_class_score_threshold:
-            print(f"  Per-class score thresholds: {self.evaluation.per_class_score_threshold}")
-        print(f"  Extended GT metrics: {self.evaluation.extended_gt_metrics}")
+        if self.evaluation.val_per_class_score_threshold:
+            print(f"  Val per-class score thresholds: {self.evaluation.val_per_class_score_threshold}")
+        print(f"  Val extended GT metrics: {self.evaluation.val_extended_gt_metrics}")
         print(f"  IoU Threshold: {self.evaluation.iou_threshold}")
+        if self.evaluation.map_iou_thresholds:
+            from oriented_det.data.evaluation import format_map_iou_span
+
+            print(
+                "  mAP IoU thresholds: "
+                f"{format_map_iou_span(self.evaluation.map_iou_thresholds)} "
+                "(mean of area-under-PR; rotated boxes)"
+            )
         print(
             f"  final_nms_iou_threshold (odet preds / eval-val): "
             f"{self.evaluation.final_nms_iou_threshold!r}"
         )
-        print(f"  Compute mAP final (best model): {self.evaluation.compute_map_final}")
-        print(f"  Compute mAP every N epochs: {self.evaluation.compute_map_every_n_epochs}")
-        print(f"  Use exact rotated IoU (mAP / GT cover): {self.evaluation.use_exact_rotated_iou}")
-        _final_iou = getattr(self.evaluation, "use_exact_rotated_iou_for_final_map", None)
-        if _final_iou is not None:
-            print(f"  Use exact rotated IoU (final mAP): {_final_iou}")
+        print(f"  Val mAP at end (best model): {self.evaluation.val_map_at_end}")
+        print(f"  Test mAP (best model): {self.evaluation.test_map}")
+        print(f"  Val mAP every N epochs: {self.evaluation.val_map_every_n_epochs}")
+        print(f"  Val exact rotated IoU: {self.evaluation.val_exact_rotated_iou}")
+        _test_iou = self.evaluation.test_exact_rotated_iou
+        if _test_iou is not None:
+            print(f"  Test exact rotated IoU: {_test_iou}")
         print()
 
         print("Production (overrides; null = use evaluation/model/dataset):")
         inf = self.production
         ow_px = resolve_inference_sliding_window_overlap_pixels(self)
-        _train_sc, _train_pc, _train_iou = effective_eval_metric_thresholds(self)
+        _, _train_pc, _train_iou = effective_eval_metric_thresholds(self)
         _deploy_sc = resolve_inference_score_threshold(self)
         _preds_pc = merge_per_class_score_thresholds(self)
         _preds_nms, _preds_nms_src = resolve_preds_final_nms_iou_threshold(self)
-        _preds_sc, _preds_sc_src = resolve_preds_score_threshold(self)
+        _val_sc, _val_sc_src = resolve_preds_score_threshold(self, data_split="val")
+        _test_sc, _test_sc_src = resolve_preds_score_threshold(self, data_split="test")
         print(f"  score_threshold: {inf.score_threshold!r} → deploy {_deploy_sc}")
         print(
-            f"  train-val mAP score → {_train_sc} "
-            f"(evaluation.train_val_score_threshold only)"
+            f"  val mAP / eval-val score → {_val_sc} via {_val_sc_src}"
         )
-        print(f"  odet preds / eval-val score → {_preds_sc} via {_preds_sc_src}")
+        print(f"  test mAP / eval-test score → {_test_sc} via {_test_sc_src}")
         print(f"  per_class_score_threshold: {inf.per_class_score_threshold!r}")
         print(f"  → train-val {_train_pc!r}; preds/deploy {_preds_pc!r}")
-        print(f"  (mAP IoU from evaluation.iou_threshold: {_train_iou})")
+        _map_ious = resolved_map_iou_thresholds(self)
+        if _map_ious:
+            from oriented_det.data.evaluation import format_map_iou_span
+
+            print(
+                "  (mAP: mean of area-under-PR over "
+                f"{format_map_iou_span(_map_ious)}; "
+                f"GT-cover IoU {_train_iou})"
+            )
+        else:
+            print(f"  (mAP IoU from evaluation.iou_threshold: {_train_iou})")
         print(
             f"  final_nms_iou_threshold: {inf.final_nms_iou_threshold!r} "
             f"(deploy/image_demo); odet preds → {_preds_nms} via {_preds_nms_src}"

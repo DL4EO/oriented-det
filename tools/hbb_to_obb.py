@@ -14,9 +14,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
 
+from tqdm import tqdm
+
 from oriented_det import RBox
 from oriented_det.data.dota import DOTAAnnotation, format_dota_line
 from oriented_det.ops.iou import batch_rbox_iou
+from oriented_det.utils.progress import tqdm_progress_stream
 
 GtFormat = Literal["csv", "yolo", "dota"]
 
@@ -93,7 +96,11 @@ def load_gt_from_yolo(
     lbl_dir = dataset_root / labels_dir
     by_image: Dict[str, List[GtBox]] = {}
 
-    for img_path in sorted(img_dir.glob(image_glob)):
+    for img_path in tqdm(
+        sorted(img_dir.glob(image_glob)),
+        desc="Loading YOLO labels",
+        file=tqdm_progress_stream(),
+    ):
         for ext in (".txt",):
             label_path = lbl_dir / f"{img_path.stem}{ext}"
             if not label_path.exists():
@@ -158,7 +165,11 @@ def load_gt_from_dota(
     if not image_paths:
         image_paths = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.jpeg"))
 
-    for img_path in image_paths:
+    for img_path in tqdm(
+        image_paths,
+        desc="Loading DOTA labels",
+        file=tqdm_progress_stream(),
+    ):
         label_path = lbl_root / f"{img_path.stem}.txt"
         if not label_path.exists():
             continue
@@ -302,7 +313,8 @@ def filter_predictions(
     results_out: List[dict] = []
     stats = Counter()
 
-    for row in payload.get("results", []):
+    rows = payload.get("results", [])
+    for row in tqdm(rows, desc="Matching predictions", file=tqdm_progress_stream()):
         image_name = image_name_from_row(row)
         preds = normalize_predictions(row)
         gt_boxes = gt_by_image.get(image_name, [])

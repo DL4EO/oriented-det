@@ -1,0 +1,22 @@
+{
+  "model_type": "yolo_obb",
+  "model": {
+    "backbone": "yolo_obb_n",
+    "pretrained_backbone": false,
+    "frozen_stages": -1,
+    "fpn_strides": [8, 16, 32],
+    "yolo_obb_reg_max": 16,
+    "yolo_obb_tal_topk": 13,
+    "yolo_obb_tal_alpha": 0.5,
+    "yolo_obb_tal_beta": 6.0,
+    "yolo_obb_dfl_weight": 1.5,
+    "yolo_obb_angle_weight": 0.2,
+    "yolo_obb_nms_pre": 2000,
+    "box_reg_weight": 7.5,
+    "max_detections_per_image": 2000,
+    "final_nms_iou_threshold": 0.1
+  },
+  "tensorboard": {
+    "log_debug_anchors_proposals": false
+  }
+}

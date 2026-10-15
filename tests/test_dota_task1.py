@@ -111,6 +111,45 @@ def test_collect_dota_unlabeled_nested_and_flat(tmp_path: Path):
     assert {p.name for p in via_images} == {"P0001.png", "P0002.jpg"}
 
 
+def test_collect_split_images_labeled_test_tiles(tmp_path: Path):
+    from oriented_det.data.dota import dota_label_path_for_image
+    from oriented_det.train.config import DatasetConfig
+
+    root = tmp_path / "OSSDD-dota"
+    test_root = root / "test"
+    image = test_root / "images" / "chip.png"
+    _write_png(image)
+    label = test_root / "labels" / "chip.txt"
+    label.parent.mkdir(parents=True, exist_ok=True)
+    label.write_text("0, 0, 1, 0, 1, 1, 0, 1, ship, 0\n", encoding="utf-8")
+    ds = DatasetConfig(
+        data_root=root,
+        train_tiles_dir=root / "train",
+        val_tiles_dir=root / "val",
+        test_tiles_dirs=[test_root],
+    )
+    images, label_dir, fmt = collect_split_images(
+        SimpleNamespace(dataset=ds),
+        root,
+        data_split="test",
+        filter_empty_gt=False,
+    )
+    assert fmt == "dota"
+    assert [p.name for p in images] == ["chip.png"]
+    assert label_dir == test_root / "labels"
+    assert dota_label_path_for_image(images[0]) == label
+
+
+def test_compute_map_test_requires_test_split(tmp_path: Path):
+    from oriented_det.train.config import DatasetConfig, EvaluationConfig, TrainingExperimentConfig
+
+    with pytest.raises(ValueError, match="test_map"):
+        TrainingExperimentConfig(
+            dataset=DatasetConfig(data_root=tmp_path),
+            evaluation=EvaluationConfig(test_map=True),
+        )
+
+
 def test_collect_split_images_test_no_labels(tmp_path: Path):
     test_root = tmp_path / "DOTA" / "test"
     _write_png(test_root / "images" / "P0099.png")

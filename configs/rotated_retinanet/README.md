@@ -62,7 +62,7 @@ make train CONFIG=configs/rotated_retinanet/dota_le90_1x_rr.json
 python tools/train.py --config configs/rotated_retinanet/dota_le90_3x.json
 ```
 
-Same train-val decode as 1× (`evaluation.train_val_score_threshold: 0.3`, `preds_score_threshold: 0.05`, `model.max_detections_per_image: 2000`). Deploy inherits 1× (**0.25**). Hub: `rotated_retinanet_dota_le90_3x`. HBB 3× is `rotated_retinanet_dota_le90_3x_hbb`.
+Same decode as 1× (`evaluation.val_score_threshold: 0.3`, `test_score_threshold: 0.05`, `model.max_detections_per_image: 2000`). Deploy inherits 1× (**0.25**). Hub: `rotated_retinanet_dota_le90_3x`. HBB 3× is `rotated_retinanet_dota_le90_3x_hbb`.
 
 ```bash
 make train CONFIG=configs/rotated_retinanet/dota_le90_3x_hbb.json
