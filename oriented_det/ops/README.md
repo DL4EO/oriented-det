@@ -215,6 +215,10 @@ The fused-covariance step regularizes `sigma_p + sigma_t` with a small diagonal
 jitter and uses a batched ``pinv`` for the Kalman gain so near-degenerate boxes
 or unstable forward values (LR sweeps) do not trip ``linalg.solve`` on CUDA.
 
+### CIoU (`ciou.py`)
+
+[ciou.py](ciou.py) is horizontal Complete IoU (`1 - CIoU` on `cx, cy, w, h`). YOLO-OBB uses it for the decoded box while `yolo_obb_force_horizontal` is on. Oriented training stays on ProbIoU.
+
 ### ProbIoU (`probiou.py`)
 
 [probiou.py](probiou.py) implements Probabilistic IoU (Gaussian bounding boxes),

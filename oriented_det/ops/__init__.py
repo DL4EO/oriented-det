@@ -19,6 +19,7 @@ from .kfiou import (
     mean_auxiliary_box_reg_loss,
     xy_wh_r_to_xy_sigma,
 )
+from .ciou import ciou_loss_per_box
 from .probiou import probiou_loss, probiou_loss_per_box
 from .gaussian_angle import aspect_gated_angle_loss_per_box
 from .diff_iou_rotated import diff_iou_rotated_2d, riou_loss_per_box
@@ -55,6 +56,7 @@ __all__ = [
     "kfiou_loss_per_box",
     "kfiou_loss",
     "mean_auxiliary_box_reg_loss",
+    "ciou_loss_per_box",
     "probiou_loss_per_box",
     "probiou_loss",
     "aspect_gated_angle_loss_per_box",

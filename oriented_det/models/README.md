@@ -132,3 +132,7 @@ RPN anchor assignment also uses HBB overlap when `use_hbb_for_matching` is true.
 First-batch timing probes are gated by code-only debug flags and are disabled by
 default: `TRACE_FIRST_TRAIN_FORWARD_TIMING` in `oriented_rcnn.py` and
 `TRACE_RPN_LOSS_TIMING` in `oriented_rpn.py`.
+
+## YOLO-OBB box loss
+
+`YoloOBB` (`model_type: yolo_obb`) trains BCE, DFL, and a decoded box loss. Soft targets are normalized per ground-truth object and scaled by that object's best exact IoU. Box and DFL use those targets as weights; classification gain is 0.5; every term divides by the sum of soft targets and is then multiplied by the batch size. With `yolo_obb_force_horizontal` the angle is a constant 0 and the box loss is horizontal CIoU on image-axis width and height. A le90 ground-truth box is converted to that axis-aligned rectangle before assignment, DFL, and CIoU, so a tall box is not trained as its transpose. Otherwise the box loss is ProbIoU, plus a le90 angle L1 that is gated off for square ground truth. Recipes: [`configs/yolo_obb/README.md`](../../configs/yolo_obb/README.md).
