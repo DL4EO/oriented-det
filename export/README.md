@@ -78,6 +78,32 @@ from runtime import detect_image
 dets = detect_image("tile.jpg", "model.onnx")
 ```
 
+## Inference score overrides
+
+The graph is pre-NMS only. It bakes `pre_nms_score_threshold` (0.05 on the current RTMDet export) and has no threshold input. Scores below that floor are already gone; a caller cannot recover them.
+
+`production.score_threshold` and `production.per_class_score_threshold` from the sidecar are applied in Python (`postprocess.py`) before rotated NMS. Class names match case-insensitively.
+
+`--score-threshold` and `detect_image(..., score_threshold=...)` replace only the global floor. They do not clear the per-class map, so a sidecar entry such as `aircraft=1.1` still applies to that class.
+
+`--per-class-score-threshold CLASS=FLOAT` is repeatable. It updates the sidecar map for this call, key by key. Omitted classes keep their sidecar floors. A passed name that matches an existing key case-insensitively replaces that entry and keeps the sidecar spelling (`Drone` updates `drone` instead of adding a second key). The same argument is `per_class_score_threshold` on `detect_image` / `detect_array`. Infer prints the effective map on the `thr` line. `odet export preds` does not take this override.
+
+```bash
+odet export infer --onnx model.onnx --images ./tiles \
+  --per-class-score-threshold drone=0.45 \
+  --per-class-score-threshold shahed=0.35 \
+  --per-class-score-threshold aircraft=1.1 \
+  --per-class-score-threshold helicopter=1.1
+```
+
+```python
+dets = detect_image(
+    "tile.jpg",
+    "model.onnx",
+    per_class_score_threshold={"drone": 0.45},
+)
+```
+
 ## Modes
 
 | `--mode` | Models | Notes |

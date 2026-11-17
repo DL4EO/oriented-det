@@ -86,6 +86,48 @@ def load_export_meta(onnx_path: Union[str, Path], meta_path: Union[str, Path, No
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def merge_per_class_score_threshold(
+    sidecar: Optional[Mapping[str, float]],
+    override: Optional[Mapping[str, float]],
+) -> Optional[Dict[str, float]]:
+    """Merge an inference-time per-class score override into the sidecar map.
+
+    ``override is None`` returns a copy of ``sidecar`` (or ``None`` when that
+    map is missing or empty). A passed map updates one class at a time:
+    omitted classes keep their sidecar floors. A key that matches an existing
+    name case-insensitively replaces that entry and keeps the sidecar spelling
+    (``Drone`` updates ``drone``). Names that are not already present are added.
+    Neither input mapping is mutated.
+    """
+    merged: Dict[str, float] = {}
+    if sidecar:
+        merged = {str(key): float(value) for key, value in sidecar.items()}
+    if override is None:
+        return merged or None
+    for key, value in override.items():
+        name = str(key).strip()
+        if not name:
+            raise ValueError("per_class_score_threshold key must be a non-empty class name")
+        try:
+            score = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"per_class_score_threshold[{name!r}] must be a float, got {value!r}"
+            ) from exc
+        target = name if name in merged else None
+        if target is None:
+            lowered = name.lower()
+            for existing in merged:
+                if existing.lower() == lowered:
+                    target = existing
+                    break
+        if target is None:
+            merged[name] = score
+        else:
+            merged[target] = score
+    return merged or None
+
+
 def detections_to_records(
     padded: np.ndarray,
     count: int,
@@ -121,12 +163,25 @@ def detect_array(
     orig_w: Optional[int] = None,
     orig_h: Optional[int] = None,
     score_threshold: Optional[float] = None,
+    per_class_score_threshold: Optional[Mapping[str, float]] = None,
     nms_backend: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Run pre-NMS ONNX + NMS on an already-normalized NCHW batch (batch=1)."""
+    """Run pre-NMS ONNX + NMS on an already-normalized NCHW batch (batch=1).
+
+    ``score_threshold`` replaces the global production floor only. It does not
+    change ``per_class_score_threshold``. That argument, when passed, updates
+    the sidecar map key by key (see :func:`merge_per_class_score_threshold`).
+    ``None`` leaves the sidecar map in place. Neither override can recover
+    scores the graph already dropped at its baked pre-NMS floor.
+    """
     fk = meta_to_finalize_kwargs(dict(meta))
     if score_threshold is not None:
         fk["score_threshold"] = float(score_threshold)
+    if per_class_score_threshold is not None:
+        fk["per_class_score_threshold"] = merge_per_class_score_threshold(
+            fk.get("per_class_score_threshold"),
+            per_class_score_threshold,
+        )
     if nms_backend is not None:
         fk["nms_backend"] = str(nms_backend)
     names = list(meta.get("output_names") or [])
@@ -147,9 +202,14 @@ def detect_image(
     *,
     bgr: bool = False,
     score_threshold: Optional[float] = None,
+    per_class_score_threshold: Optional[Mapping[str, float]] = None,
     nms_backend: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Preprocess one image, run ONNX, return detections in original pixel coords."""
+    """Preprocess one image, run ONNX, return detections in original pixel coords.
+
+    ``score_threshold`` and ``per_class_score_threshold`` are forwarded to
+    :func:`detect_array`.
+    """
     onnx_file = Path(onnx_path)
     loaded = dict(meta) if meta is not None else load_export_meta(onnx_file)
     if isinstance(image, (str, Path)):
@@ -163,6 +223,7 @@ def detect_image(
         orig_w=orig_w,
         orig_h=orig_h,
         score_threshold=score_threshold,
+        per_class_score_threshold=per_class_score_threshold,
         nms_backend=nms_backend,
     )
 

@@ -89,6 +89,30 @@ from runtime import detect_image
 dets = detect_image("tile.jpg", "model.onnx")
 ```
 
+### Score floors
+
+The ONNX graph bakes `pre_nms_score_threshold` (0.05 on the current RTMDet export) and does not take a threshold input. Boxes below that floor never reach Python.
+
+Class floors come from `production.per_class_score_threshold` in the sidecar and are applied in Python before rotated NMS. Names match case-insensitively. `--score-threshold` replaces only the global floor and leaves the per-class map in place, so a sidecar entry such as `aircraft=1.1` still wins for that class.
+
+`--per-class-score-threshold CLASS=FLOAT` (repeatable) merges into that map for this process. Omitted classes keep their sidecar floors. A name that matches an existing key case-insensitively replaces it and keeps the sidecar spelling (`Drone` updates `drone`). Infer prints the effective map next to the score on the `thr` line. The same override is the `per_class_score_threshold` argument of `detect_image` / `detect_array`. `odet export preds` is the training-eval protocol and does not accept this flag.
+
+```bash
+odet export infer --onnx ./onnx_export/model.onnx --images ./tiles \
+  --per-class-score-threshold drone=0.45 \
+  --per-class-score-threshold shahed=0.35 \
+  --per-class-score-threshold aircraft=1.1 \
+  --per-class-score-threshold helicopter=1.1
+```
+
+```python
+dets = detect_image(
+    "tile.jpg",
+    "onnx_export/model.onnx",
+    per_class_score_threshold={"drone": 0.45},
+)
+```
+
 Val-split predictions in the same JSON shape as `odet preds` (then `make export-metrics` / `odet preds --metrics-from-json`):
 
 ```bash
