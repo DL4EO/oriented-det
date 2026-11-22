@@ -4,12 +4,14 @@ The models module provides **true oriented object detection** models that predic
 
 ## Overview
 
-OrientedDet provides four baseline detectors (see [Configuration](configuration.md#model_type)):
+OrientedDet provides six detectors (see [Configuration](configuration.md#model_type)):
 
 - **`OrientedRCNN`** — Two-stage ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html)): horizontal RPN with midpoint-offset (6-param) proposals + oriented RoIAlign + oriented ROI head. Reference: MMRotate `oriented_rcnn_r50_fpn_1x_dota_le90`.
 - **`RotatedFasterRCNN`** — Two-stage (Ren et al., NeurIPS 2015 baseline via [MMRotate](https://github.com/open-mmlab/mmrotate), Zhou et al., ACM MM 2022): horizontal RPN + horizontal RoIAlign + rotated ROI head. Reference: `rotated_faster_rcnn_r50_fpn_1x_dota_le90`.
 - **`RotatedRetinaNet`** — Single-stage ([Lin et al., ICCV 2017](https://openaccess.thecvf.com/content_ICCV_2017/papers/Lin_Focal_Loss_for_ICCV_2017_paper.pdf) focal loss): separate cls/reg subnets, oriented anchors. Reference: `rotated_retinanet_obb_r50_fpn_1x_dota_le90`.
 - **`RotatedFCOS`** — Anchor-free single-stage: distance-angle coder, centerness, L1 / KFIoU / decoded rIoU box loss, optional KFIoU aux. Reference: `rotated_fcos_r50_fpn_1x_dota_le90`.
+- **`RotatedRTMDet`** — CSPNeXt + PAFPN speed tier: SepBN head, dynamic soft-label assigner, Quality Focal Loss + decoded rIoU. Hub `rotated_rtmdet_dota_le90_3x` (**77.60%** Task 1).
+- **`YoloOBB`** — C2f CSP + PAFPN speed tier: DFL box head, task-aligned assigner, ProbIoU. Hub `yolo_obb_dota_le90_12x` (**77.80%** Task 1; top of the DOTA zoo).
 
 All detectors:
 
@@ -17,7 +19,7 @@ All detectors:
 - Preserve angle information through training and inference
 - Use oriented IoU for matching and oriented NMS for post-processing
 
-Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `oriented_rcnn_dota_le90_1x` (**76.73%** official Task 1; advertised / finetune init) / `oriented_rcnn_dota_le90_3x` (**74.88%** official Task 1, AP75 51.23; leaky eval-val 82.92%), `rotated_faster_rcnn_dota_le90_1x` (**74.42%** official Task 1) / `rotated_faster_rcnn_dota_le90_3x` (**74.48%** official Task 1, AP75 45.39), `rotated_fcos_dota_le90_1x` (**73.07%** official Task 1) / `rotated_fcos_dota_le90_3x` (**72.91%** official Task 1; leaky eval-val 82.32%), and `rotated_retinanet_dota_le90_1x` (**71.72%** official Task 1, **OBB**) / `rotated_retinanet_dota_le90_3x` (**73.89%** official Task 1, **OBB**; leaky eval-val 78.56%) / `rotated_retinanet_dota_le90_1x_hbb` (**67.87%** official Task 1, circum-HBB) / `rotated_retinanet_dota_le90_3x_hbb` (**70.70%** official Task 1, circum-HBB; leaky eval-val 76.51%). DOTA eval-val is leaky (val tiles in train); the real DOTA test is Task 1. Finetune two-stage DOTA inits from **1×**, not 3×. HRSC2016 held-out ImageSets test (not in train): `oriented_rcnn_hrsc2016_le90_3x` (90.41%), `rotated_faster_rcnn_hrsc2016_le90_3x` (88.77%), `rotated_fcos_hrsc2016_le90_3x` (88.34%). SSDD and HRSID 1× recipes finetune those DOTA Hub slugs locally (no SAR zoo). See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
+Load **OrientedDet checkpoints** from `pretrained/` or Hugging Face Hub (`odet pretrained download <slug>`). Recommended DOTA slugs: `yolo_obb_dota_le90_12x` (**77.80%** official Task 1; top of the zoo) / COCO trunk `yolo_obb_coco_300e`, `rotated_rtmdet_dota_le90_3x` (**77.60%**), `oriented_rcnn_dota_le90_1x` (**76.73%**; advertised / finetune init) / `oriented_rcnn_dota_le90_3x` (**74.88%**, AP75 51.23; leaky eval-val 82.92%), `rotated_faster_rcnn_dota_le90_1x` (**74.42%**) / `rotated_faster_rcnn_dota_le90_3x` (**74.48%**, AP75 45.39), `rotated_fcos_dota_le90_1x` (**73.07%**) / `rotated_fcos_dota_le90_3x` (**72.91%**; leaky eval-val 82.32%), and `rotated_retinanet_dota_le90_1x` (**71.72%**, **OBB**) / `rotated_retinanet_dota_le90_3x` (**73.89%**, **OBB**; leaky eval-val 78.56%) / `rotated_retinanet_dota_le90_1x_hbb` (**67.87%**, circum-HBB) / `rotated_retinanet_dota_le90_3x_hbb` (**70.70%**, circum-HBB; leaky eval-val 76.51%). DOTA eval-val is leaky (val tiles in train); the real DOTA test is Task 1. Finetune two-stage DOTA inits from **1×**, not 3×. HRSC2016 held-out ImageSets test (not in train): `oriented_rcnn_hrsc2016_le90_3x` (90.41%), `rotated_faster_rcnn_hrsc2016_le90_3x` (88.77%), `rotated_fcos_hrsc2016_le90_3x` (88.34%). SSDD and HRSID 1× recipes finetune those DOTA Hub slugs locally (no SAR zoo). See [pretrained/README.md](https://github.com/DL4EO/oriented-det/blob/main/pretrained/README.md).
 
 ## Training vs inference paths (two-stage models)
 

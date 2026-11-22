@@ -31,7 +31,8 @@ DEFAULT_PALETTE = [
     (23, 190, 207),
 ]
 
-# Outline width for prediction boxes (`odet image-demo`, Gradio viewer, eval overlays).
+# Outline width for prediction boxes (`odet image-demo`, eval overlays).
+# The Gradio viewer uses its own screen-pixel width (`--line-width`); see tools/app.py.
 DEFAULT_LINE_WIDTH = 4
 
 

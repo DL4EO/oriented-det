@@ -47,9 +47,6 @@ EXPORT_CKPT ?= pretrained/rotated_fcos_r50_fpn_dota_le90_1x-a87b6dba.pth
 EXPORT_MODE ?= rotated_fcos_pre_nms
 EXPORT_ARTIFACTS ?= onnx_export
 
-# Learning rate finder default batch size (lr-finder target also accepts BATCH_SIZE=).
-LR_FINDER_BATCH_SIZE ?= 8
-
 # Hugging Face Hub pretrained weights (see oriented_det/pretrained/manifest.json)
 HF_REPO_ID ?= dl4eo/oriented-det-pretrained
 HF_REVISION ?= main
@@ -87,7 +84,7 @@ help:
 	@echo "  make train-multi-gpu NPROC=4  - Use 4 GPUs (omit NPROC for all available)"
 	@echo "  make wizard                 - Dataset/config diagnostics (no training, no run directory)"
 	@echo "  make stats                  - Dataset stats + normalization for CONFIG [MAX_SAMPLES=] [SPLIT=train|val]"
-	@echo "  make lr-finder              - LR sweep / suggested base LR for CONFIG [OUTPUT=] [BATCH_SIZE=]"
+	@echo "  make lr-finder              - LR sweep at CONFIG's batch size [CONFIG=] [OUTPUT=]"
 	@echo "  make train-help             - Raw python training command examples (fine-tuning, overrides)"
 	@echo ""
 	@echo "=== Tiled val: predictions & offline metrics ==="
@@ -220,11 +217,12 @@ wizard: check-install
 	@echo "Running wizard diagnostics with config: $(CONFIG)"
 	@$(TRAIN_ENV) odet train --config $(CONFIG) --wizard
 
-# Learning rate finder: sweep LR and suggest base learning rate for config (default LR_FINDER_BATCH_SIZE=8; override BATCH_SIZE=)
-# Usage: make lr-finder [CONFIG=<path>] [OUTPUT=lr_finder.png] [BATCH_SIZE=8]
+# Learning rate finder. Uses CONFIG (default configs/oriented_rcnn/dota_le90_1x.json).
+# Batch size stays the one in that config.
+# Usage: make lr-finder [CONFIG=<path>] [OUTPUT=lr_finder.png]
 lr-finder: check-install
 	@echo "Running LR finder with config: $(CONFIG)"
-	@$(TRAIN_ENV) odet lr-finder --config $(CONFIG) $(if $(OUTPUT),--output $(OUTPUT),) --batch-size $(or $(BATCH_SIZE),$(LR_FINDER_BATCH_SIZE))
+	@$(TRAIN_ENV) odet lr-finder --config $(CONFIG) $(if $(OUTPUT),--output $(OUTPUT),)
 
 # Backward compatibility
 train-wizard: wizard

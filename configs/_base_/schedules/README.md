@@ -7,6 +7,7 @@ This folder holds base schedule configs that set `training.num_epochs` and LR sc
 - **1x.json** — 12 epochs, StepLR/MultiStepLR milestones `[8, 11]`
 - **3x.json** — 36 epochs, milestones `[24, 33]`
 - **6x.json** — 72 epochs, milestones `[48, 66]`.
+- **12x.json** — 144 epochs, milestones `[96, 132]`.
 
 Keep this folder limited to generic schedule bases. Dataset-specific settings belong in `configs/_base_/datasets/`, and AMP is composed separately with `configs/_base_/fp16.json`.
 
@@ -23,6 +24,7 @@ You can override the scheduler by setting `training.lr_scheduler_type` in your c
 | `one_cycle` / `onecycle` | **OneCycleLR**. LR is updated every optimizer step (warmup then decay). Uses `lr_scheduler_one_cycle_pct_start`, `lr_scheduler_one_cycle_div_factor`, `lr_scheduler_one_cycle_final_div_factor`. No warmup (built-in). |
 | `cosine_annealing` / `cosine` | **PyTorch CosineAnnealingLR**. `T_max` from `lr_scheduler_cosine_epochs` (else `num_epochs`). If `num_epochs` > `T_max`, LR **restarts** after each minimum (SGDR-style). Tail keys are ignored. Legacy `lr_scheduler_cosine_t_max` remaps to `cosine_epochs`. |
 | `cosine_annealing_with_tail` / `cosine_with_tail` | **CosineAnnealingWithFixedTailLR**: cosine for `cosine_epochs`, then constant `tail_lr` for `tail_epochs` (`cosine + tail` must equal `num_epochs`). |
+| `linear` / `linear_decay` | **LambdaLR** linear decay from `learning_rate` to `learning_rate * lr_scheduler_linear_end_factor` (default `0.01`, so lr `0.01` ends at `1e-4`). Warmup still ramps from 0 to `learning_rate`; the decay epoch index keeps moving during those steps. |
 
 ### Example: cosine 20 epochs + fixed tail 4 epochs
 
@@ -64,6 +66,22 @@ You can override the scheduler by setting `training.lr_scheduler_type` in your c
   "lr_scheduler_one_cycle_final_div_factor": 1e4
 }
 ```
+
+### Example: linear decay
+
+```json
+"training": {
+  "num_epochs": 500,
+  "learning_rate": 0.01,
+  "lr_scheduler_type": "linear",
+  "lr_scheduler_linear_end_factor": 0.01,
+  "lr_warmup_steps": 22179,
+  "momentum": 0.937,
+  "nesterov": true
+}
+```
+
+`training.nesterov` (default `false`) turns on SGD Nesterov momentum. It applies only when `optimizer` is `sgd` and `momentum` is greater than 0. `warmup_momentum` (default null) ramps that momentum from the given start value across `lr_warmup_steps`.
 
 ### Example: Cosine annealing
 

@@ -124,6 +124,22 @@
       "eval_map50": 0.8275,
       "eval_task1_map50": 0.7760,
       "eval_report": "docs/eval-reports/rotated_rtmdet_dota_le90_3x/model_analysis.md"
+    },
+    "yolo_obb_coco_300e": {
+      "filename": "yolo_obb_s_coco_300e-62358604.pth",
+      "sha256": "62358604ecd90c2bc5dc754777fe46eb8ebdef87b13d9029e47f0ebf58efed75",
+      "source_recipe": "configs/yolo_obb/coco_300e_s.json",
+      "experiment_dir": "runs/yolo_obb/20261102-000543",
+      "eval_map50": 0.41
+    },
+    "yolo_obb_dota_le90_12x": {
+      "filename": "yolo_obb_s_dota_le90_12x-fb2a43bd.pth",
+      "sha256": "fb2a43bd712558a1824d73003413588657a385dffd03e841654f2ddd0c243e47",
+      "source_recipe": "configs/yolo_obb/dota_le90_12x_s_coco.json",
+      "experiment_dir": "runs/yolo_obb/20261118-135903",
+      "eval_map50": 0.8442,
+      "eval_task1_map50": 0.7780,
+      "eval_report": "docs/eval-reports/yolo_obb_dota_le90_12x/model_analysis.md"
     }
   }
 }

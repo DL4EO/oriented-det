@@ -132,3 +132,20 @@ RPN anchor assignment also uses HBB overlap when `use_hbb_for_matching` is true.
 First-batch timing probes are gated by code-only debug flags and are disabled by
 default: `TRACE_FIRST_TRAIN_FORWARD_TIMING` in `oriented_rcnn.py` and
 `TRACE_RPN_LOSS_TIMING` in `oriented_rpn.py`.
+
+## Rotated RTMDet don't-care points
+
+`RotatedRTMDet` does not switch on `dataset.difficult_strategy`. The reader and collate already apply it: `drop` removes difficult boxes, `keep` leaves them in `rboxes`, and `ignore` routes them to `rboxes_ignore`. Training passes those tensors, plus lookalikes, from `prepare_targets()` into the same point rules as FCOS.
+
+- A background point inside an ignore OBB gets label `-1`. Positives are not overwritten. Quality focal loss sums only `labels >= 0`, so a detection on a don't-care box is not punished and a miss adds no positive loss.
+- A lookalike point is forced back to background and wins over ignore, so it trains as a negative.
+- `drop` and `keep` leave the ignore and lookalike tensors empty, and assignment is unchanged.
+- When every point is ignore, classification returns `pred.sum() * 0` so the graph stays connected.
+
+Eval still records `rboxes_ignore` as `difficult=1` in the training engine.
+
+## YOLO-OBB box loss
+
+`YoloOBB` (`model_type: yolo_obb`) trains BCE, DFL, and a decoded box loss. Soft targets are normalized per ground-truth object and scaled by that object's best exact IoU. Box and DFL use those targets as weights; classification gain is 0.5; every term divides by the sum of soft targets and is then multiplied by the batch size. With `yolo_obb_force_horizontal` the angle is a constant 0 and the box loss is horizontal CIoU on image-axis width and height. A le90 ground-truth box is converted to that axis-aligned rectangle before assignment, DFL, and CIoU, so a tall box is not trained as its transpose. Otherwise the box loss is ProbIoU, or `1 -` rotated IoU when `box_reg_loss_type` is `riou`, plus a le90 angle L1 that is gated off for square ground truth. `yolo_obb_cls_loss_type: "qfl"` (default `"bce"`) swaps BCE for the Rotated RTMDet `quality_focal_loss` on the same soft targets, with beta 2 and gain 3 instead of 0.5. `yolo_obb_assigner: "dynamic_soft"` (default `"tal"`) uses the Rotated RTMDet assigner: inside the box and within 3 strides of the center, ranked by classification cost plus 3 × (−log IoU), with that IoU as the soft target.
+
+The classifier bias is `log(0.01 / 0.99)` on every level. `yolo_obb_stride_cls_prior` (default false) replaces that with `log(5 / num_classes / (640 / stride) ** 2)` on the last conv of each level. For 80 classes that is about −11.5, −10.2, and −8.8 at strides 8, 16, and 32. `yolo_obb_min_gt_side` (default 0) clamps width and height to at least that many pixels for the anchor-center test only. IoU, the soft target, and the encoded regression target keep the real box, so a 4 px object expanded to a 16 px floor is still regressed at width 4. 16 matches Ultralytics `select_candidates_in_gts` with a 16 px floor. Recipes: [`configs/yolo_obb/README.md`](../../configs/yolo_obb/README.md).

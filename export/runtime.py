@@ -14,17 +14,33 @@ try:
     from .postprocess import meta_to_finalize_kwargs, ort_pre_nms_to_detections
     from .preprocess import (
         canvas_size_from_meta,
+        crop_or_pad,
+        mean_std_from_meta,
+        overlap_pixels_from_meta,
         preprocess_from_meta,
         preprocess_path,
+        preprocess_rgb,
         scale_obb_to_original,
+        slice_size_from_meta,
+        sliding_window_grid,
+        to_rgb_uint8,
+        uses_sliding_window,
     )
 except ImportError:  # copied next to model.onnx as top-level modules
     from postprocess import meta_to_finalize_kwargs, ort_pre_nms_to_detections
     from preprocess import (
         canvas_size_from_meta,
+        crop_or_pad,
+        mean_std_from_meta,
+        overlap_pixels_from_meta,
         preprocess_from_meta,
         preprocess_path,
+        preprocess_rgb,
         scale_obb_to_original,
+        slice_size_from_meta,
+        sliding_window_grid,
+        to_rgb_uint8,
+        uses_sliding_window,
     )
 
 _IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -195,6 +211,147 @@ def detect_array(
     return detections_to_records(padded, count, list(meta.get("class_names") or []))
 
 
+def _probe_hw(image: Union[str, Path, Image.Image, np.ndarray]) -> Optional[tuple]:
+    """Return ``(height, width)``, or None when a path is not a readable image."""
+    if isinstance(image, (str, Path)):
+        try:
+            with Image.open(image) as im:
+                width, height = im.size
+            return int(height), int(width)
+        except OSError:
+            return None
+    if isinstance(image, Image.Image):
+        width, height = image.size
+        return int(height), int(width)
+    arr = np.asarray(image)
+    if arr.ndim == 3 and arr.shape[2] in (3, 4) and arr.shape[0] > 0 and arr.shape[1] > 0:
+        return int(arr.shape[0]), int(arr.shape[1])
+    return None
+
+
+def _load_rgb(image: Union[str, Path, Image.Image, np.ndarray], *, bgr: bool) -> np.ndarray:
+    if isinstance(image, (str, Path)):
+        return np.asarray(Image.open(image).convert("RGB"), dtype=np.uint8)
+    return to_rgb_uint8(image, bgr=bgr)
+
+
+def nms_detection_records(
+    records: List[Dict[str, Any]],
+    meta: Mapping[str, Any],
+    *,
+    nms_backend: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Rotated NMS across windows. No extra per-image cap beyond the IoU filter."""
+    if len(records) <= 1:
+        return list(records)
+    try:
+        from .nms import rotated_nms
+    except ImportError:
+        from nms import rotated_nms
+
+    fk = meta_to_finalize_kwargs(dict(meta))
+    backend = str(nms_backend) if nms_backend is not None else fk.get("nms_backend")
+    boxes = np.array(
+        [[d["cx"], d["cy"], d["w"], d["h"], d["angle_rad"]] for d in records],
+        dtype=np.float32,
+    )
+    scores = np.array([d["score"] for d in records], dtype=np.float32)
+    labels = np.array([d["label"] for d in records], dtype=np.int64)
+    keep = rotated_nms(
+        boxes,
+        scores,
+        labels,
+        iou_threshold=float(fk["final_nms_iou_threshold"]),
+        max_detections=None,
+        class_agnostic=bool(fk["nms_class_agnostic"]),
+        backend=backend,
+    )
+    return [records[int(i)] for i in keep]
+
+
+def _map_window_detection(
+    det: Dict[str, Any],
+    *,
+    x0: int,
+    y0: int,
+    crop_w: int,
+    crop_h: int,
+    scale_x: float,
+    scale_y: float,
+) -> Optional[Dict[str, Any]]:
+    """Canvas box → source pixels, then add the window origin.
+
+    Centroids that land in the zero-pad band (image smaller than the slice on
+    that side) are dropped. Overlap copies are kept; a later NMS merges them.
+    """
+    eps = 1e-3
+    cx = float(det["cx"]) / scale_x
+    cy = float(det["cy"]) / scale_y
+    if cx < -eps or cy < -eps or cx >= float(crop_w) - eps or cy >= float(crop_h) - eps:
+        return None
+    shifted = dict(det)
+    shifted["cx"] = cx + float(x0)
+    shifted["cy"] = cy + float(y0)
+    shifted["w"] = float(det["w"]) / scale_x
+    shifted["h"] = float(det["h"]) / scale_y
+    return shifted
+
+
+def _detect_sliding_window(
+    rgb: np.ndarray,
+    onnx_path: Union[str, Path],
+    meta: Mapping[str, Any],
+    *,
+    score_threshold: Optional[float] = None,
+    per_class_score_threshold: Optional[Mapping[str, float]] = None,
+    nms_backend: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Tile ``rgb``, run one ONNX forward per window, NMS the stitched boxes."""
+    image_h, image_w = int(rgb.shape[0]), int(rgb.shape[1])
+    canvas_h, canvas_w = canvas_size_from_meta(meta)
+    slice_h, slice_w = slice_size_from_meta(meta)
+    overlap = overlap_pixels_from_meta(meta)
+    mean, std = mean_std_from_meta(meta)
+    scale_x = float(canvas_w) / float(slice_w)
+    scale_y = float(canvas_h) / float(slice_h)
+    positions = sliding_window_grid(
+        image_h, image_w, slice_h, slice_w, overlap_pixels=overlap
+    )
+    merged: List[Dict[str, Any]] = []
+    for x0, y0 in positions:
+        x1 = min(x0 + slice_w, image_w)
+        y1 = min(y0 + slice_h, image_h)
+        src_x0 = max(0, x0)
+        src_y0 = max(0, y0)
+        crop_w = x1 - src_x0
+        crop_h = y1 - src_y0
+        if crop_w <= 0 or crop_h <= 0:
+            continue
+        window = crop_or_pad(rgb, x0, y0, slice_w, slice_h, image_w, image_h)
+        blob, _, _ = preprocess_rgb(window, canvas_h, canvas_w, mean, std)
+        dets = detect_array(
+            blob,
+            onnx_path,
+            meta,
+            score_threshold=score_threshold,
+            per_class_score_threshold=per_class_score_threshold,
+            nms_backend=nms_backend,
+        )
+        for det in dets:
+            shifted = _map_window_detection(
+                det,
+                x0=x0,
+                y0=y0,
+                crop_w=crop_w,
+                crop_h=crop_h,
+                scale_x=scale_x,
+                scale_y=scale_y,
+            )
+            if shifted is not None:
+                merged.append(shifted)
+    return nms_detection_records(merged, meta, nms_backend=nms_backend)
+
+
 def detect_image(
     image: Union[str, Path, Image.Image, np.ndarray],
     onnx_path: Union[str, Path],
@@ -207,11 +364,28 @@ def detect_image(
 ) -> List[Dict[str, Any]]:
     """Preprocess one image, run ONNX, return detections in original pixel coords.
 
+    When ``resize_mode`` is ``fixed`` or ``crop`` and the image is larger than
+    the slice (``window_size``, otherwise ``target_size``), the image is tiled.
+    Each window is bilinear-resized onto the ONNX canvas. Overlap copies are
+    merged with a second rotated NMS. ``pad`` and ``keep_ratio`` stay one
+    full-image resize.
+
     ``score_threshold`` and ``per_class_score_threshold`` are forwarded to
     :func:`detect_array`.
     """
     onnx_file = Path(onnx_path)
     loaded = dict(meta) if meta is not None else load_export_meta(onnx_file)
+    hw = _probe_hw(image)
+    if hw is not None and uses_sliding_window(hw[0], hw[1], loaded):
+        rgb = _load_rgb(image, bgr=bgr)
+        return _detect_sliding_window(
+            rgb,
+            onnx_file,
+            loaded,
+            score_threshold=score_threshold,
+            per_class_score_threshold=per_class_score_threshold,
+            nms_backend=nms_backend,
+        )
     if isinstance(image, (str, Path)):
         blob, orig_h, orig_w = preprocess_path(image, loaded)
     else:

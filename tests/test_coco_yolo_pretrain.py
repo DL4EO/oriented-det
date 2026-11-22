@@ -193,30 +193,70 @@ def test_coco_checkpoint_replaces_classifier_and_angle_head(tmp_path: Path):
 def test_committed_coco_and_dota_recipes():
     root = Path(__file__).resolve().parents[1]
     coco = TrainingExperimentConfig.load(root / "configs/yolo_obb/coco_300e_s.json")
-    dota = TrainingExperimentConfig.load(root / "configs/yolo_obb/dota_le90_1x_s.json")
-    finetune = TrainingExperimentConfig.load(root / "configs/yolo_obb/dota_le90_6x_s_coco.json")
+    finetune = TrainingExperimentConfig.load(root / "configs/yolo_obb/dota_le90_12x_s_coco.json")
 
     assert coco.dataset.format == "coco"
-    assert coco.data_loader.batch_size == 16
+    assert coco.data_loader.batch_size == 64
     assert coco.training.num_epochs == 300
     assert coco.training.optimizer == "sgd"
-    assert coco.training.learning_rate == pytest.approx(0.0025)
-    assert coco.training.lr_scheduler_cosine_eta_min == pytest.approx(2.5e-5)
-    assert coco.training.lr_warmup_steps == 22179
+    assert coco.training.learning_rate == pytest.approx(0.01)
+    assert coco.training.momentum == pytest.approx(0.937)
+    assert coco.training.nesterov is True
+    assert coco.training.lr_scheduler_type == "linear"
+    assert coco.training.lr_scheduler_linear_end_factor == pytest.approx(0.01)
+    assert coco.evaluation.val_score_threshold == pytest.approx(0.001)
+    assert coco.tensorboard.vis_score_threshold == pytest.approx(0.25)
+    assert coco.evaluation.iou_threshold == pytest.approx(0.5)
+    assert coco.evaluation.final_nms_iou_threshold == pytest.approx(0.7)
+    assert list(coco.evaluation.map_iou_thresholds) == [
+        0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95,
+    ]
+    assert coco.model.inference_pre_nms_score_threshold == pytest.approx(0.001)
+    assert coco.model.final_nms_iou_threshold == pytest.approx(0.7)
+    assert coco.model.max_detections_per_image == 300
+    assert coco.production.score_threshold == pytest.approx(0.2)
+    assert coco.training.lr_warmup_steps == 5547
+    assert coco.training.warmup_momentum == pytest.approx(0.8)
+    assert coco.training.use_ema is True
     assert coco.training.use_amp is True
+    assert coco.enable_albumentation is True
+    assert coco.augmentation.p_hsv == pytest.approx(1.0)
+    assert coco.augmentation.hsv_h == pytest.approx(0.015)
+    assert coco.augmentation.hsv_s == pytest.approx(0.7)
+    assert coco.augmentation.hsv_v == pytest.approx(0.4)
+    assert coco.evaluation.map_ap_interpolation == "coco101"
+    assert coco.preprocessing.mosaic_clip_boxes is True
+    assert coco.preprocessing.mosaic_min_visibility == pytest.approx(0.1)
+    assert coco.preprocessing.mosaic_max_cached_images == 512
+    assert coco.augmentation.p_brightness_contrast == pytest.approx(0.0)
+    assert coco.augmentation.p_gamma == 0
+    assert coco.augmentation.p_noise == 0
+    assert coco.augmentation.p_blur == 0
+    assert coco.augmentation.p_clahe == 0
     assert coco.model.yolo_obb_force_horizontal is True
+    assert coco.preprocessing.resize_mode == "pad"
     assert list(coco.preprocessing.target_size) == [640, 640]
+    assert coco.preprocessing.enable_flip_horizontal is True
+    assert coco.preprocessing.enable_flip_vertical is False
+    assert coco.preprocessing.enable_flip_diagonal is False
     assert coco.preprocessing.enable_mosaic is True
+    assert list(coco.preprocessing.mosaic_ratio_range) == [1, 1]
+    assert coco.preprocessing.random_scale == pytest.approx(0.5)
+    assert coco.preprocessing.random_translate == pytest.approx(0.1)
     assert coco.preprocessing.enable_random_rotate is False
     assert coco.preprocessing.mosaic_disable_last_n_epochs == 10
-    assert coco.evaluation.val_map_every_n_epochs == 50
-    assert list(coco.preprocessing.normalize_mean) == list(dota.preprocessing.normalize_mean)
-    assert list(coco.preprocessing.normalize_std) == list(dota.preprocessing.normalize_std)
+    assert coco.evaluation.val_map_every_n_epochs == 10
 
-    assert finetune.training.num_epochs == 72
+    assert finetune.training.num_epochs == 144
     assert finetune.training.lr_warmup_steps == 1000
     assert finetune.model.yolo_obb_angle_weight == pytest.approx(0.2)
     assert finetune.model.yolo_obb_force_horizontal is False
+    assert finetune.model.yolo_obb_dfl_weight == pytest.approx(0.75)
+    assert finetune.preprocessing.enable_flip_horizontal is True
+    assert finetune.preprocessing.enable_flip_vertical is True
+    assert finetune.preprocessing.enable_flip_diagonal is False
+    assert finetune.preprocessing.enable_mosaic is True
     assert finetune.preprocessing.mosaic_disable_last_n_epochs == 0
     assert list(finetune.preprocessing.target_size) == [1024, 1024]
-    assert finetune.checkpoint.load_from_checkpoint is not None
+    assert str(finetune.checkpoint.load_from_checkpoint) == "hf://yolo_obb_coco_300e"
+

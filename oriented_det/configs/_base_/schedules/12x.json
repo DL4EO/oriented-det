@@ -1,0 +1,8 @@
+{
+  "_base_": ["1x.json"],
+  "training": {
+    "num_epochs": 144,
+    "lr_scheduler_step_epochs": 96,
+    "lr_scheduler_milestones": [96, 132]
+  }
+}

@@ -998,6 +998,7 @@ def run_diagnostics_pipeline(
     output_dir: str,
     tile_metrics_csv: Optional[str],
     use_exact_rotated_iou: bool = True,
+    ap_interpolation: str = "all_point",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Per-image stats, oriented mAP, PR sweep, analysis artifacts (shared inference vs offline-from-json)."""
     total_raw = sum(r.get("stats", {}).get("num_raw", 0) for r in results)
@@ -1113,8 +1114,10 @@ def run_diagnostics_pipeline(
             use_exact_rotated_iou=use_exact_rotated_iou,
             iou_thresholds=map_iou_thresholds,
             iou_ap_out=iou_ap_out,
+            ap_interpolation=ap_interpolation,
         )
         diagnostics['mAP'] = mean_ap
+        diagnostics['ap_interpolation'] = ap_interpolation
         diagnostics['class_aps'] = class_aps
         diagnostics['class_metrics'] = {
             name: {
@@ -2079,6 +2082,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
             output_dir=output_dir,
             tile_metrics_csv=tile_metrics_csv,
             use_exact_rotated_iou=True,
+            ap_interpolation=getattr(config.evaluation, "map_ap_interpolation", "all_point"),
         )
 
     # Prepare metadata
@@ -2521,6 +2525,11 @@ def main():
             output_dir=output_dir,
             tile_metrics_csv=args.tile_metrics_csv,
             use_exact_rotated_iou=use_exact_map,
+            ap_interpolation=(
+                getattr(config.evaluation, "map_ap_interpolation", "all_point")
+                if config is not None
+                else str(diag_prev.get("ap_interpolation", "all_point"))
+            ),
         )
 
         meta['metrics_margin_pixels'] = int(mmargin)

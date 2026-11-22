@@ -23,6 +23,9 @@ Sutherland–Hodgman with a prominent install warning), regardless of
 (``compute_oriented_map(..., use_exact_rotated_iou=True)``). In training, set
 ``evaluation.use_exact_rotated_iou: false`` in JSON (or pass ``use_exact_rotated_iou=False``)
 for faster GPU sampling IoU (approximate). GT-cover / accuracy on mAP epochs use the same flag.
+Evaluation goes through ``eval_oriented_box_iou_gpu``, which returns closed-form axis-aligned
+IoU (``oriented_box_hbb_iou_gpu``) when every angle is a multiple of 90° and falls back to
+``oriented_box_iou_gpu`` sampling otherwise; training assigners call the sampler directly.
 Final detection NMS is unaffected.
 
 Sampling-based GPU IoU/NMS use a regular grid of interior points per box (local
@@ -214,6 +217,10 @@ center Smooth L1), aligned with MMRotate’s `kf_iou_loss`. Optional
 The fused-covariance step regularizes `sigma_p + sigma_t` with a small diagonal
 jitter and uses a batched ``pinv`` for the Kalman gain so near-degenerate boxes
 or unstable forward values (LR sweeps) do not trip ``linalg.solve`` on CUDA.
+
+### CIoU (`ciou.py`)
+
+[ciou.py](ciou.py) is horizontal Complete IoU (`1 - CIoU` on `cx, cy, w, h`). YOLO-OBB uses it for the decoded box while `yolo_obb_force_horizontal` is on. Oriented training stays on ProbIoU.
 
 ### ProbIoU (`probiou.py`)
 

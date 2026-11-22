@@ -6,11 +6,14 @@ Uses oriented-det's config (JSON) and checkpoints. Supports a single image or a 
 
 Inference path (matches ``oriented_det.runtime.inference`` semantics):
 
-- If the image size **equals** the model input from config (``preprocessing.target_size`` as
-  height×width, same as training), runs **one forward pass** on a tensor built with
+- If the image size **equals** the slice and that slice is already the network canvas
+  (``window_size`` unset, or equal to ``target_size``), runs **one forward pass** with
   ToTensor+normalize only (no resize).
-- Otherwise uses **padded-canvas / sliding windows** to that size (zero-pad when smaller, tile
-  when larger), merges boxes in original image coordinates, then NMS.
+- Otherwise uses **padded-canvas / sliding windows** at that slice (``window_size`` in
+  source pixels when set, otherwise ``target_size``). When ``window_size`` differs from
+  ``target_size``, each slice is bilinear-resized onto ``target_size`` and boxes are
+  mapped back. The network still sees ``target_size``. Zero-pad when a side is smaller,
+  tile when larger; then NMS in original image coordinates.
 - With ``--zoom 2`` or ``--zoom 4``, resizes only the inference image, runs the same logic above,
   then maps detections back to the original image size before visualization.
 
@@ -43,6 +46,7 @@ from oriented_det.train.config import (
 )
 from oriented_det.runtime.checkpoint import load_model_from_checkpoint, resolve_inference_config_path
 from oriented_det.runtime.inference import (
+    _window_zoom_scales,
     count_sliding_window_positions,
     get_model_size,
     preprocess_crop,
@@ -428,6 +432,7 @@ def main():
     )
     preprocessing = get_preprocessing_params(config)
     slice_h, slice_w = get_model_size(preprocessing)
+    scale_x, scale_y = _window_zoom_scales(preprocessing, slice_h, slice_w)
     score_thr = (
         args.score_thr
         if args.score_thr is not None
@@ -440,9 +445,16 @@ def main():
         else resolve_inference_sliding_window_overlap_pixels(config)
     )
     window_margin_pixels = _resolve_window_margin_pixels(config, args.ignore_margin_pixels)
+    if scale_x == 1.0 and scale_y == 1.0:
+        canvas_note = f"model canvas {slice_w}×{slice_h}"
+    else:
+        canvas_note = (
+            f"slice {slice_w}×{slice_h} in source pixels, "
+            f"network {preprocessing['target_size']}"
+        )
     print(
         f"Preprocessing: resize_mode={preprocessing['resize_mode']}, "
-        f"target_size={preprocessing['target_size']} (model canvas {slice_w}×{slice_h})"
+        f"target_size={preprocessing['target_size']} ({canvas_note})"
     )
     print(
         f"Inference thresholds: score>={score_thr}, merge NMS IoU<={nms_thr}, "
@@ -490,7 +502,7 @@ def main():
         if args.zoom != 1.0:
             tqdm.write(f"  -> zoom {args.zoom:g}×: original {ow}×{oh}, inference {iw}×{ih}")
 
-        if iw == slice_w and ih == slice_h:
+        if iw == slice_w and ih == slice_h and scale_x == 1.0 and scale_y == 1.0:
             tqdm.write(f"  -> single forward (image {iw}×{ih} matches model canvas)")
             tensor = preprocess_crop(inference_image, preprocessing, slice_h, slice_w)
             detections = run_inference(
@@ -510,8 +522,9 @@ def main():
                 n_windows = count_sliding_window_positions(
                     ih, iw, preprocessing, overlap_pixels=overlap_pixels
                 )
+            size_word = "canvas" if scale_x == 1.0 and scale_y == 1.0 else "slice"
             tqdm.write(
-                f"  -> pad/tile (image {iw}×{ih} vs canvas {slice_w}×{slice_h}, "
+                f"  -> pad/tile (image {iw}×{ih} vs {size_word} {slice_w}×{slice_h}, "
                 f"{omsg}, {n_windows} windows)"
             )
             detections = run_inference_sliding_window(

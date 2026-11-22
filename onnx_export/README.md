@@ -28,6 +28,8 @@ from runtime import detect_image
 dets = detect_image("tile.jpg", "model.onnx")
 ```
 
+`detect_image` tiles images larger than `window_size` (or `target_size` when `window_size` is absent) for `resize_mode` `fixed` and `crop`. Each window is resized to the ONNX canvas. See [`export/README.md`](../export/README.md).
+
 In this repo you can still use the sources:
 
 ```bash

@@ -10,6 +10,8 @@ Training and checkpoint inference are driven by **JSON experiment configs** load
 | Strict dataclasses | `oriented_det/train/config.py` | Unknown keys raise `ValueError` |
 | Saved runs | `runs/<model_type>/<timestamp>/config.json` | Written at train start; used by eval/inference tools |
 
+Saved `config.json` writes the `model` keys that `model_type` reads (`MODEL_SAVE_KEYS_BY_TYPE` in `oriented_det/train/config.py`). A YOLO-OBB run keeps `yolo_obb_*` and the shared backbone/NMS fields, and omits FCOS, RTMDet, anchor, and ROI/RPN knobs. A key stays when that detector reads it, including when the value matches today's default. Load still accepts every `ModelConfig` field, so older verbose run configs open unchanged. Hand-written recipes are unchanged.
+
 ### Inheritance (`_base_`)
 
 Child configs list one or more base paths (relative to the child file):
@@ -63,9 +65,9 @@ Must be one of the values accepted by `tools/train.py` (also sets `runs/<model_t
 | `rotated_retinanet` | `RotatedRetinaNet` | One-stage; focal head; no RPN/ROI |
 | `rotated_fcos` | `RotatedFCOS` | Anchor-free one-stage; centerness; no anchors/RPN/ROI |
 | `rotated_rtmdet` | `RotatedRTMDet` | CSPNeXt + PAFPN one-stage; SepBN head, dynamic soft-label assigner; `rtmdet_*` head knobs |
-| `yolo_obb` | `YoloOBB` | C2f CSP + PAFPN one-stage; DFL box head, task-aligned assigner; `yolo_obb_*` knobs (in progress, no Hub weights) |
+| `yolo_obb` | `YoloOBB` | C2f CSP + PAFPN one-stage; DFL box head, task-aligned assigner; `yolo_obb_*` knobs; Hub `yolo_obb_dota_le90_12x` (**77.80%** Task 1) |
 
-Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`, `rotated_fcos_r50.json`, `rotated_rtmdet_cspnext_s.json` (`rotated_rtmdet_cspnext_tiny.json` has no Hub weights).
+Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`, `rotated_fcos_r50.json`, `rotated_rtmdet_cspnext_s.json` (`rotated_rtmdet_cspnext_tiny.json` has no Hub weights), `yolo_obb_s.json` / `yolo_obb_n.json`.
 
 ## Top-level sections
 
@@ -82,7 +84,7 @@ Base model fragments: `configs/_base_/models/oriented_rcnn_r50.json`, `rotated_f
 | `production` | Deploy/inference overrides (see below) |
 | `checkpoint` | Resume, discover prior run, best-metric selection |
 | `tensorboard` | Debug anchor/proposal images, viz score floor |
-| `enable_albumentation` | Toggle Albumentations pipeline |
+| `enable_albumentation` | Toggle the optional Albumentations extra (`oriented-det[albumentations]`). Default false; no Hub recipe sets it |
 | `enable_profiling` | Training step profiler |
 | `augmentation` | Albumentations limits/probabilities when enabled |
 
@@ -150,7 +152,7 @@ For **ProbIoU (or rIoU/KFIoU) as primary** ROI loss on Rotated Faster R-CNN, set
 
 ### `training`
 
-- **`lr_scheduler_type`**: `multistep`/`step`, `reduce_on_plateau`, `one_cycle`, `cosine_annealing`, `cosine_annealing_with_tail` — see `configs/_base_/schedules/README.md` and [Training — Learning rate scheduling](training.md#learning-rate-scheduling). **`lr_scheduler_gamma`** is a number (same factor every drop) or a list (one factor per milestone). Cosine phase length is **`lr_scheduler_cosine_epochs`** (legacy `lr_scheduler_cosine_t_max` remaps).
+- **`lr_scheduler_type`**: `multistep`/`step`, `reduce_on_plateau`, `one_cycle`, `cosine_annealing`, `cosine_annealing_with_tail`, `linear` — see `configs/_base_/schedules/README.md` and [Training — Learning rate scheduling](training.md#learning-rate-scheduling). **`lr_scheduler_gamma`** is a number (same factor every drop) or a list (one factor per milestone). Cosine phase length is **`lr_scheduler_cosine_epochs`** (legacy `lr_scheduler_cosine_t_max` remaps). Linear decay uses **`lr_scheduler_linear_end_factor`** (default `0.01`). **`nesterov`** is SGD-only (default `false`).
 - **`freeze_backbone_epochs` / `freeze_rpn_epochs`**: Freeze modules for early epochs (ROI still trains).
 - **`early_stop_*`**: Optional stop when metric plateaus.
 
@@ -185,8 +187,7 @@ CLI `--score-threshold` overrides the split being scored. Deploy still uses `pro
 
 DOTA 1× recipes set `production.score_threshold` to the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**). 3× inherits those floors. HRSC 1× recipes use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). On DOTA, that F1 sweep is leaky eval-val; the real test is Task 1. On HRSC, eval-val is held-out ImageSets test.
 
-`production.overlap_pixels` (default 200 when null) and `ignore_margin_pixels` (default `dataset.overlap / 2`) control native sliding-window overlap and the optional **full-image** deploy edge filter for `fixed`/`crop` in `oriented_det.runtime.inference` (`odet preds`, `save_predictions`, deploy). Last tiles flush to the image edge (same as `tile_dota.py`). Per-window stitch margin default is **0** (keep overlap copies, then NMS); pass `--window-margin-pixels` to drop the overlap band. `resize_mode: pad` / `keep_ratio` do not native-tile; they use the training whole-image scale path (`keep_ratio` then `pad_size_divisor`).
-`production.overlap_pixels` (default 200 when null) and `ignore_margin_pixels` (default `dataset.overlap / 2`) control native sliding-window overlap and the optional **full-image** deploy edge filter for `fixed`/`crop` in `oriented_det.runtime.inference` (`odet preds`, `save_predictions`, deploy). Last tiles flush to the image edge (same as `tile_dota.py`). Per-window stitch margin default is **0** (keep overlap copies, then NMS); pass `--window-margin-pixels` to drop the overlap band. `resize_mode: pad` / `keep_ratio` do not native-tile; they use the training whole-image scale path (`keep_ratio` then `pad_size_divisor`).
+`production.overlap_pixels` (default 200 when null) and `ignore_margin_pixels` (default `dataset.overlap / 2`) control native sliding-window overlap and the optional **full-image** deploy edge filter for `fixed`/`crop` in `oriented_det.runtime.inference` (`odet preds`, `save_predictions`, deploy). Last tiles flush to the image edge (same as `tile_dota.py`). Per-window stitch margin default is **0** (keep overlap copies, then NMS); pass `--window-margin-pixels` to drop the overlap band. `resize_mode: pad` / `keep_ratio` do not native-tile; they use the training whole-image scale path (`keep_ratio` then `pad_size_divisor`). Optional `preprocessing.window_size` is the sliding-window slice in source pixels; the network still receives `target_size` (each slice is bilinear-resized onto that canvas; per-axis scale is `target_size / window_size`). Null keeps the slice equal to `target_size` and does not resize crops. `pad` and `keep_ratio` ignore `window_size`.
 
 ### `checkpoint`
 
@@ -220,6 +221,8 @@ Top-level configs (inherit bases under `configs/_base_/`):
 | `configs/rotated_fcos/hrsc2016_le90_3x.json` | Rotated FCOS | 3× HRSC2016 rIoU |
 | `configs/rotated_rtmdet/dota_le90_3x_s.json` | Rotated RTMDet | **Hub** 3× DOTA CSPNeXt-S (AdamW, EMA, rotate ±180°; Task 1 **77.60%**) |
 | `configs/rotated_rtmdet/ossdd_le90_vh_1x_s.json` | Rotated RTMDet | 1× OSSDD VH finetune of the DOTA Hub checkpoint (12 epochs) |
+| `configs/yolo_obb/coco_300e_s.json` | YOLO-OBB | Horizontal COCO 300e trunk; Hub `yolo_obb_coco_300e` |
+| `configs/yolo_obb/dota_le90_12x_s_coco.json` | YOLO-OBB | **Hub** 12× DOTA from COCO (mosaic on, late cosine; Task 1 **77.80%**) |
 | `configs/rotated_fcos/ossdd_le90_vh_1x.json` | Rotated FCOS | 1× OSSDD VH finetune of `hf://rotated_fcos_dota_le90_1x` (512 crop) |
 | `configs/rotated_fcos/ossdd_le90_vh_3x.json` | Rotated FCOS | 3× OSSDD VH finetune (inherits 1×; 36 epochs, milestones 24/33, batch 4) |
 | `configs/rotated_faster_rcnn/ossdd_le90_vh_1x.json` | Rotated Faster R-CNN | 1× OSSDD VH finetune of `hf://rotated_faster_rcnn_dota_le90_1x` (512 crop) |
@@ -232,7 +235,7 @@ Top-level configs (inherit bases under `configs/_base_/`):
 | `configs/rotated_faster_rcnn/hrsid_le90_1x.json` | Rotated Faster R-CNN | 1× HRSID keep-ratio 800, 12 epochs (init `hf://rotated_faster_rcnn_dota_le90_1x`; held-out **78.55%**) |
 | `configs/rotated_fcos/hrsid_le90_1x.json` | Rotated FCOS | 1× HRSID rIoU, 12 epochs (init `hf://rotated_fcos_dota_le90_1x`; not yet run) |
 
-**Bases (not run directly):** `configs/_base_/datasets/`, `configs/_base_/schedules/{1x,3x,6x}.json`, `fp16`, `preprocessing`, `augmentation`.
+**Bases (not run directly):** `configs/_base_/datasets/`, `configs/_base_/schedules/{1x,3x,6x,12x}.json`, `fp16`, `preprocessing`, `augmentation`.
 
 Layout and muted-key examples: see repo `configs/README.md`.
 

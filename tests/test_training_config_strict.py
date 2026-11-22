@@ -19,6 +19,7 @@ from oriented_det.train.config import (
     PreprocessingConfig,
     TensorboardConfig,
     TrainingConfig,
+    MODEL_SAVE_KEYS_BY_TYPE,
     resolve_inference_score_threshold,
     resolve_inference_sliding_window_overlap_pixels,
     resolve_preds_score_threshold,
@@ -450,6 +451,144 @@ def test_deleted_root_compatibility_key_fails(tmp_path: Path):
     )
     with pytest.raises(ValueError, match="Unknown key"):
         TrainingExperimentConfig.load(p)
+
+
+def test_model_save_keys_are_real_model_fields():
+    model_fields = _field_names(ModelConfig)
+    assert set(MODEL_SAVE_KEYS_BY_TYPE) == {
+        "rotated_faster_rcnn",
+        "oriented_rcnn",
+        "rotated_retinanet",
+        "rotated_fcos",
+        "rotated_rtmdet",
+        "yolo_obb",
+    }
+    for model_type, keys in MODEL_SAVE_KEYS_BY_TYPE.items():
+        unknown = keys - model_fields
+        assert not unknown, f"{model_type} allowlist has unknown fields: {sorted(unknown)}"
+        assert keys < model_fields
+
+
+def test_save_keeps_only_model_keys_the_detector_reads(tmp_path: Path):
+    cfg = TrainingExperimentConfig(
+        model_type="yolo_obb",
+        model=ModelConfig(
+            backbone="yolo_obb_s",
+            yolo_obb_reg_max=8,
+            fcos_stacked_convs=9,
+            roi_box_reg_main_loss_type="probiou",
+        ),
+    )
+    saved = cfg.to_dict()["model"]
+    assert set(saved) == MODEL_SAVE_KEYS_BY_TYPE["yolo_obb"]
+    assert saved["yolo_obb_reg_max"] == 8
+    assert saved["yolo_obb_angle_weight"] == 0.2
+    assert "fcos_stacked_convs" not in saved
+    assert "roi_box_reg_main_loss_type" not in saved
+
+    path = tmp_path / "yolo.json"
+    cfg.save(path)
+    reloaded = TrainingExperimentConfig.load(path)
+    assert reloaded.model.yolo_obb_reg_max == 8
+    assert reloaded.model.fcos_stacked_convs == 4
+    assert reloaded.model.roi_box_reg_main_loss_type == "smooth_l1"
+
+
+def test_save_keeps_two_stage_and_retinanet_keys(tmp_path: Path):
+    faster = TrainingExperimentConfig(
+        model_type="rotated_faster_rcnn",
+        model=ModelConfig(
+            roi_box_reg_main_loss_type="probiou",
+            roi_box_reg_aux_weight=0.1,
+            roi_box_reg_aux_loss_type="smooth_l1",
+            yolo_obb_reg_max=4,
+            rpn_min_size=3,
+        ),
+    )
+    faster_model = faster.to_dict()["model"]
+    assert set(faster_model) == MODEL_SAVE_KEYS_BY_TYPE["rotated_faster_rcnn"]
+    assert faster_model["roi_box_reg_main_loss_type"] == "probiou"
+    assert faster_model["rpn_min_size"] == 3
+    assert "yolo_obb_reg_max" not in faster_model
+
+    oriented = TrainingExperimentConfig(
+        model_type="oriented_rcnn",
+        model=ModelConfig(rpn_min_size=4, roi_use_hbb_for_matching=True),
+    )
+    oriented_model = oriented.to_dict()["model"]
+    assert set(oriented_model) == MODEL_SAVE_KEYS_BY_TYPE["oriented_rcnn"]
+    assert oriented_model["roi_use_hbb_for_matching"] is True
+    assert "rpn_min_size" not in oriented_model
+    assert "roi_box_reg_main_loss_type" not in oriented_model
+
+    retina = TrainingExperimentConfig(
+        model_type="rotated_retinanet",
+        model=ModelConfig(
+            anchor_angles=[-45, 0, 45],
+            rpn_positive_iou_threshold=0.55,
+            rpn_pre_nms_top_n=100,
+            fcos_stacked_convs=2,
+        ),
+    )
+    retina_model = retina.to_dict()["model"]
+    assert set(retina_model) == MODEL_SAVE_KEYS_BY_TYPE["rotated_retinanet"]
+    assert retina_model["anchor_angles"] == [-45, 0, 45]
+    assert retina_model["rpn_positive_iou_threshold"] == 0.55
+    assert "rpn_pre_nms_top_n" not in retina_model
+    assert "fcos_stacked_convs" not in retina_model
+
+    fcos = TrainingExperimentConfig(
+        model_type="rotated_fcos",
+        model=ModelConfig(fcos_angle_weight=0.4, anchor_scales=[4]),
+    )
+    fcos_model = fcos.to_dict()["model"]
+    assert set(fcos_model) == MODEL_SAVE_KEYS_BY_TYPE["rotated_fcos"]
+    assert fcos_model["fcos_angle_weight"] == 0.4
+    assert "anchor_scales" not in fcos_model
+
+    rtmdet = TrainingExperimentConfig(
+        model_type="rotated_rtmdet",
+        model=ModelConfig(rtmdet_assign_topk=7, box_reg_loss_type="riou"),
+    )
+    rtmdet_model = rtmdet.to_dict()["model"]
+    assert set(rtmdet_model) == MODEL_SAVE_KEYS_BY_TYPE["rotated_rtmdet"]
+    assert rtmdet_model["rtmdet_assign_topk"] == 7
+    assert "box_reg_loss_type" not in rtmdet_model
+
+
+def test_unknown_model_type_saves_every_model_field():
+    cfg = TrainingExperimentConfig(
+        model_type="custom_det",
+        model=ModelConfig(fcos_stacked_convs=9),
+    )
+    saved = cfg.to_dict()["model"]
+    assert set(saved) == _field_names(ModelConfig)
+    assert saved["fcos_stacked_convs"] == 9
+
+
+def test_verbose_saved_model_still_loads(tmp_path: Path):
+    """Older run configs that stored unused ModelConfig fields still open."""
+    path = tmp_path / "verbose.json"
+    path.write_text(
+        json.dumps(
+            {
+                "model_type": "yolo_obb",
+                "model": {
+                    "backbone": "yolo_obb_s",
+                    "yolo_obb_reg_max": 8,
+                    "fcos_stacked_convs": 9,
+                    "roi_box_reg_angle_weight": 3.0,
+                    "anchor_scales": [4, 8],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = TrainingExperimentConfig.load(path)
+    assert loaded.model.yolo_obb_reg_max == 8
+    assert loaded.model.fcos_stacked_convs == 9
+    assert loaded.model.roi_box_reg_angle_weight == 3.0
+    assert loaded.model.anchor_scales == [4, 8]
 
 
 def test_all_repo_json_configs_load():

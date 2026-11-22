@@ -169,11 +169,13 @@ python tools/app.py --predictions-dir predictions/20260602_120000 --data-root /p
 - **F1 score display**: Shows per-class F1 scores if analysis JSON is available
 - **Sorting options**: Sort by F1 score, detection count, or original order
 - **Zoom controls**: Zoom in/out on images for detailed inspection
+- **Line width**: Outline thickness in screen pixels (does not grow when you zoom). Slider in the app, or `--line-width` (default 1)
 - **Real-time filtering**: See how different thresholds affect detections instantly
 
 **Command-line arguments:**
 - `--predictions-dir`: Path to predictions directory (auto-detects latest if not specified)
 - `--data-root`: Path to DOTA dataset root (for loading original images)
+- `--line-width`: Box outline thickness in screen pixels (default: 1)
 - `--port`: Port number for Gradio server (default: 7860)
 - `--share`: Create public Gradio link
 

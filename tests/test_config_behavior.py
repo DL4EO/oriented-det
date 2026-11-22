@@ -89,6 +89,24 @@ def test_get_preprocessing_params_fixed_mode_tuple_target():
     p = get_preprocessing_params(cfg)
     assert p["resize_mode"] == "fixed"
     assert p["target_size"] == (640, 480)
+    assert p["window_size"] is None
+
+
+def test_get_preprocessing_params_window_size_default_and_pair():
+    cfg = TrainingExperimentConfig(preprocessing=PreprocessingConfig())
+    assert cfg.preprocessing.window_size is None
+    assert get_preprocessing_params(cfg)["window_size"] is None
+
+    cfg = TrainingExperimentConfig(
+        preprocessing=PreprocessingConfig(
+            resize_mode="fixed",
+            target_size=[1024, 1024],
+            window_size=[512, 768],
+        ),
+    )
+    p = get_preprocessing_params(cfg)
+    assert p["target_size"] == (1024, 1024)
+    assert p["window_size"] == (512, 768)
 
 
 def test_create_model_oriented_rcnn_passes_inference_pre_nms_score_from_config():

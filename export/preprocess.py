@@ -3,6 +3,11 @@
 The ONNX graph expects ``[1, 3, H, W]`` float32 RGB, already normalized:
 ``(x / 255 - mean) / std``. Resize is bilinear (PIL), matching oriented-det
 ``resize_mode=fixed``.
+
+Images larger than the sliding-window slice are tiled here. The slice is
+``window_size`` in source pixels when set, otherwise ``target_size``. Each
+window is resized onto ``target_size`` before normalization. ``pad`` and
+``keep_ratio`` stay a single full-image resize.
 """
 
 from __future__ import annotations
@@ -128,3 +133,149 @@ def scale_obb_to_original(
     out[:, 2] *= float(orig_w) / float(canvas_w)
     out[:, 3] *= float(orig_h) / float(canvas_h)
     return out
+
+
+def _prep(meta: Mapping[str, Any]) -> Mapping[str, Any]:
+    prep = meta.get("preprocess")
+    return prep if isinstance(prep, Mapping) else {}
+
+
+def resize_mode_from_meta(meta: Mapping[str, Any]) -> str:
+    """Return the sidecar resize mode (default ``fixed``)."""
+    return str(_prep(meta).get("resize_mode") or "fixed").strip().lower()
+
+
+def _size_pair(value: Any) -> tuple[int, int] | None:
+    """Return ``(h, w)`` from a scalar or a 1- or 2-length sequence."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        n = int(value)
+        return (n, n)
+    if isinstance(value, (list, tuple)):
+        if len(value) == 1:
+            n = int(value[0])
+            return (n, n)
+        if len(value) >= 2:
+            return (int(value[0]), int(value[1]))
+    return None
+
+
+def window_size_from_meta(meta: Mapping[str, Any]) -> tuple[int, int] | None:
+    """Source-pixel slice from ``preprocess.window_size``, or None.
+
+    ``pad`` and ``keep_ratio`` ignore ``window_size``.
+    """
+    if resize_mode_from_meta(meta) in {"pad", "keep_ratio"}:
+        return None
+    return _size_pair(_prep(meta).get("window_size"))
+
+
+def slice_size_from_meta(meta: Mapping[str, Any]) -> tuple[int, int]:
+    """Sliding-window slice ``(h, w)`` in source pixels.
+
+    ``window_size`` when set, otherwise the ONNX canvas (``target_size``).
+    """
+    window = window_size_from_meta(meta)
+    if window is not None:
+        return window
+    return canvas_size_from_meta(meta)
+
+
+def overlap_pixels_from_meta(meta: Mapping[str, Any]) -> int:
+    """Per-axis overlap in source pixels (default 200)."""
+    prep = _prep(meta)
+    raw = prep.get("overlap_pixels")
+    if raw is None:
+        prod = meta.get("production")
+        if isinstance(prod, Mapping):
+            raw = prod.get("overlap_pixels")
+    if raw is None:
+        return 200
+    return max(0, int(raw))
+
+
+def uses_sliding_window(image_height: int, image_width: int, meta: Mapping[str, Any]) -> bool:
+    """True when ``fixed`` / ``crop`` should tile an image larger than the slice.
+
+    The slice is ``window_size`` when set, otherwise ``target_size``. An image
+    that fits in the slice is one forward. ``pad`` and ``keep_ratio`` never tile.
+    """
+    if resize_mode_from_meta(meta) in {"pad", "keep_ratio"}:
+        return False
+    slice_h, slice_w = slice_size_from_meta(meta)
+    return int(image_height) > int(slice_h) or int(image_width) > int(slice_w)
+
+
+def _sliding_window_axis_origins(length: int, slice_size: int, stride: int) -> list[int]:
+    """Top-left origins along one axis. The last window flushes to the image edge."""
+    if length <= slice_size:
+        return [0]
+    origins: list[int] = []
+    pos = 0
+    while pos < length:
+        origins.append(pos)
+        pos += stride
+        if pos >= length:
+            break
+    origins[-1] = max(0, length - slice_size)
+    out: list[int] = []
+    seen: set[int] = set()
+    for origin in origins:
+        if origin not in seen:
+            out.append(origin)
+            seen.add(origin)
+    return out
+
+
+def sliding_window_grid(
+    image_height: int,
+    image_width: int,
+    slice_h: int,
+    slice_w: int,
+    overlap_pixels: int | None = None,
+) -> list[tuple[int, int]]:
+    """``(x0, y0)`` windows. Stride is ``slice - overlap``. Default overlap is 200 px.
+
+    The last row and column flush to the image edge so that window is a full
+    slice of real pixels. Images that fit in one slice return ``[(0, 0)]``.
+    """
+    if image_height <= slice_h and image_width <= slice_w:
+        return [(0, 0)]
+    op = 200 if overlap_pixels is None else int(overlap_pixels)
+    if op < 0:
+        raise ValueError("overlap_pixels must be >= 0")
+    oh = min(op, max(0, int(slice_h) - 1))
+    ow = min(op, max(0, int(slice_w) - 1))
+    stride_y = max(1, int(round(slice_h - oh)))
+    stride_x = max(1, int(round(slice_w - ow)))
+    xs = _sliding_window_axis_origins(int(image_width), int(slice_w), stride_x)
+    ys = _sliding_window_axis_origins(int(image_height), int(slice_h), stride_y)
+    return [(x0, y0) for y0 in ys for x0 in xs]
+
+
+def crop_or_pad(
+    rgb: np.ndarray,
+    x0: int,
+    y0: int,
+    slice_w: int,
+    slice_h: int,
+    image_width: int,
+    image_height: int,
+) -> np.ndarray:
+    """Copy a source window onto a ``slice_h × slice_w`` uint8 canvas.
+
+    Regions past the image border stay zero. ``rgb`` is HWC RGB.
+    """
+    x1 = min(int(x0) + int(slice_w), int(image_width))
+    y1 = min(int(y0) + int(slice_h), int(image_height))
+    src_x0 = max(0, int(x0))
+    src_y0 = max(0, int(y0))
+    crop_w = x1 - src_x0
+    crop_h = y1 - src_y0
+    canvas = np.zeros((int(slice_h), int(slice_w), 3), dtype=np.uint8)
+    if crop_w > 0 and crop_h > 0:
+        dx = src_x0 - int(x0)
+        dy = src_y0 - int(y0)
+        canvas[dy : dy + crop_h, dx : dx + crop_w, :] = rgb[src_y0:y1, src_x0:x1]
+    return canvas

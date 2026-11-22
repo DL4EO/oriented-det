@@ -20,8 +20,7 @@
   "evaluation": {
     "iou_threshold": 0.5,
     "val_score_threshold": 0.3,
-    "val_map_at_end": false,
-    "test_map": true
+    "val_map_at_end": false
   },
   "data_loader": {
     "batch_size": 50,

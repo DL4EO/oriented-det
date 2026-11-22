@@ -2,7 +2,7 @@
 
 Export a trained OrientedDet checkpoint to a **pre-NMS ONNX** graph plus Python preprocess / rotated NMS. Consumers run ONNX Runtime only — no PyTorch and no oriented-det.
 
-The producer CLI is **`odet export`** (ONNX only; same as `python -m export`). Folder README: [`export/README.md`](https://github.com/DL4EO/oriented-det/blob/main/export/README.md). Sliding-window tiling and the Tile Geo Process HTTP service stay on the [Docker deploy](deploy.md) path in this release.
+The producer CLI is **`odet export`** (ONNX only; same as `python -m export`). Folder README: [`export/README.md`](https://github.com/DL4EO/oriented-det/blob/main/export/README.md). The Tile Geo Process HTTP service stays on the [Docker deploy](deploy.md) path. Sliding-window tiling for images larger than `window_size` runs in `detect_image`.
 
 ## Install
 
@@ -121,7 +121,7 @@ odet export preds \
   --onnx /path/to/oriented-det/onnx_export/model.onnx
 ```
 
-Sliding-window tiling is out of scope for the ONNX path — use pre-tiled images (same as PyTorch `odet preds` on DOTA tiles). Preprocess is bilinear resize to a **fixed** canvas (default 1024×1024). That matches DOTA tiles, not `keep_ratio` + pad (HRSC / SSDD / HRSID).
+`detect_image` tiles an image when `resize_mode` is `fixed` or `crop` and the image is larger than the slice. The slice is `window_size` in source pixels when set, and `target_size` otherwise (default canvas 1024×1024). Each window is bilinear-resized onto that canvas. Overlap defaults to 200 px (`production.overlap_pixels`). `pad` and `keep_ratio` stay one full-image resize, which matches HRSC / SSDD / HRSID training. Pre-tiled DOTA images that already fit the slice are still one forward.
 
 ## Modes
 

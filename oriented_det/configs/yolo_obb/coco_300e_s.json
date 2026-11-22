@@ -4,7 +4,7 @@
     "../_base_/preprocessing.json"
   ],
   "data_loader": {
-    "batch_size": 16,
+    "batch_size": 64,
     "num_workers": 4,
     "shuffle": true,
     "pin_memory": true
@@ -23,15 +23,24 @@
   "training": {
     "num_epochs": 300,
     "optimizer": "sgd",
-    "learning_rate": 0.0025,
-    "momentum": 0.9,
-    "weight_decay": 0.0001,
+    "learning_rate": 0.01,
+    "momentum": 0.937,
+    "nesterov": true,
+    "weight_decay": 0.0005,
+    "weight_decay_norm_mult": 0,
+    "weight_decay_bias_mult": 0,
+    "norm_bias_in_bias_group": true,
+    "use_ema": true,
+    "ema_momentum": 0.0001,
+    "ema_gamma": 2000.0,
     "use_amp": true,
     "gradient_accumulation_steps": 1,
-    "max_grad_norm": 35.0,
-    "lr_scheduler_type": "cosine_annealing",
-    "lr_scheduler_cosine_eta_min": 2.5e-5,
-    "lr_warmup_steps": 22179,
+    "max_grad_norm": 10.0,
+    "lr_scheduler_type": "linear",
+    "lr_scheduler_linear_end_factor": 0.01,
+    "lr_warmup_steps": 5547,
+    "warmup_momentum": 0.8,
+    "warmup_bias_lr": 0.1,
     "lr_scaling_with_accumulation": "linear",
     "lr_scale_with_world_size": false,
     "use_lr_param_groups": false
@@ -41,8 +50,26 @@
     "focal_alpha": 0.25,
     "focal_gamma": 2.0
   },
+  "enable_albumentation": true,
+  "augmentation": {
+    "p_brightness_contrast": 0,
+    "p_gamma": 0,
+    "p_noise": 0,
+    "p_blur": 0,
+    "p_clahe": 0,
+    "p_hsv": 1.0,
+    "hsv_h": 0.015,
+    "hsv_s": 0.7,
+    "hsv_v": 0.4
+  },
   "model": {
-    "yolo_obb_force_horizontal": true
+    "yolo_obb_force_horizontal": true,
+    "yolo_obb_tal_topk": 10,
+    "yolo_obb_stride_cls_prior": true,
+    "yolo_obb_min_gt_side": 16,
+    "inference_pre_nms_score_threshold": 0.001,
+    "final_nms_iou_threshold": 0.7,
+    "max_detections_per_image": 300
   },
   "dataset": {
     "format": "coco",
@@ -50,22 +77,36 @@
     "filter_empty_gt": false
   },
   "preprocessing": {
+    "resize_mode": "pad",
     "target_size": [640, 640],
+    "enable_flip_horizontal": true,
+    "enable_flip_vertical": false,
+    "enable_flip_diagonal": false,
     "enable_mosaic": true,
     "mosaic_img_scale": [640, 640],
-    "mosaic_ratio_range": [0.5, 1.5],
+    "mosaic_ratio_range": [1, 1],
+    "mosaic_max_cached_images": 512,
+    "mosaic_min_visibility": 0.1,
+    "mosaic_clip_boxes": true,
     "mosaic_disable_last_n_epochs": 10,
+    "random_scale": 0.5,
+    "random_translate": 0.1,
     "enable_random_rotate": false,
-    "normalize_mean": [0.307941, 0.311986, 0.297761],
-    "normalize_std": [0.192315, 0.187769, 0.181551]
+    "normalize_mean": [0.470113, 0.446900, 0.407686],
+    "normalize_std": [0.276232, 0.271676, 0.286569]
   },
   "evaluation": {
     "iou_threshold": 0.5,
-    "final_nms_iou_threshold": 0.1,
-    "val_score_threshold": 0.3,
-    "val_map_every_n_epochs": 50,
+    "map_iou_thresholds": [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95],
+    "map_ap_interpolation": "coco101",
+    "final_nms_iou_threshold": 0.7,
+    "val_score_threshold": 0.001,
+    "val_map_every_n_epochs": 10,
     "val_exact_rotated_iou": false,
     "val_map_at_end": true
+  },
+  "tensorboard": {
+    "vis_score_threshold": 0.25
   },
   "production": {
     "score_threshold": 0.2,

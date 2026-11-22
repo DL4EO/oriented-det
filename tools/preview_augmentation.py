@@ -130,7 +130,9 @@ def build_dataset_from_config(config: TrainingExperimentConfig, split: str):
     return build_split_dataset(config.dataset, split, filter_empty_gt=filter_empty)
 
 
-def get_resize_and_flips(config: TrainingExperimentConfig) -> tuple[str, tuple[int, int], bool, bool, bool, int]:
+def get_resize_and_flips(
+    config: TrainingExperimentConfig,
+) -> tuple[str, tuple[int, int], bool, bool, bool, float, int]:
     from oriented_det.data.preprocessing import parse_canvas_size
 
     prep = getattr(config, "preprocessing", None)
@@ -144,8 +146,9 @@ def get_resize_and_flips(config: TrainingExperimentConfig) -> tuple[str, tuple[i
     flip_h = getattr(prep, "enable_flip_horizontal", True) if prep is not None else True
     flip_v = getattr(prep, "enable_flip_vertical", True) if prep is not None else True
     flip_d = getattr(prep, "enable_flip_diagonal", False) if prep is not None else False
+    flip_p = float(getattr(prep, "flip_prob", 0.5) if prep is not None else 0.5)
     pad_div = getattr(prep, "pad_size_divisor", 32) if prep is not None else 32
-    return resize_mode, resize_to, flip_h, flip_v, flip_d, pad_div
+    return resize_mode, resize_to, flip_h, flip_v, flip_d, flip_p, pad_div
 
 
 def build_train_augmentation_from_config(config: TrainingExperimentConfig):
@@ -164,6 +167,10 @@ def build_train_augmentation_from_config(config: TrainingExperimentConfig):
         p_noise=aug.p_noise,
         p_blur=aug.p_blur,
         p_clahe=aug.p_clahe,
+        hsv_h=aug.hsv_h,
+        hsv_s=aug.hsv_s,
+        hsv_v=aug.hsv_v,
+        p_hsv=aug.p_hsv,
     )
 
 
@@ -176,7 +183,7 @@ def make_collate_fn(
     enable_flip_diagonal: bool,
     enable_random_rotate: bool = False,
 ):
-    resize_mode, resize_to, _, _, _, pad_div = get_resize_and_flips(config)
+    resize_mode, resize_to, _, _, _, flip_p, pad_div = get_resize_and_flips(config)
     prep = getattr(config, "preprocessing", None)
     norm_mean = getattr(prep, "normalize_mean", None) if prep is not None else None
     norm_std = getattr(prep, "normalize_std", None) if prep is not None else None
@@ -192,6 +199,7 @@ def make_collate_fn(
         enable_flip_horizontal=enable_flip_horizontal,
         enable_flip_vertical=enable_flip_vertical,
         enable_flip_diagonal=enable_flip_diagonal,
+        flip_prob=flip_p,
         enable_random_rotate=enable_random_rotate,
         random_rotate_prob=rotate_prob,
         random_rotate_angle_range=rotate_range,
@@ -285,11 +293,11 @@ def stitch_grid(rows: list[Image.Image], gap: int = 12) -> Image.Image:
 
 def print_augmentation_summary(config: TrainingExperimentConfig, resize_to: tuple[int, int]) -> None:
     prep = getattr(config, "preprocessing", None)
-    resize_mode, _, flip_h, flip_v, flip_d, _ = get_resize_and_flips(config)
+    resize_mode, _, flip_h, flip_v, flip_d, flip_p, _ = get_resize_and_flips(config)
     print(f"  enable_albumentation: {config.enable_albumentation}")
     print(f"  resize_mode: {resize_mode}")
     print(f"  resize_to (H×W): {resize_to[0]}×{resize_to[1]}")
-    print(f"  flips: horizontal={flip_h}, vertical={flip_v}, diagonal={flip_d}")
+    print(f"  flips: horizontal={flip_h}, vertical={flip_v}, diagonal={flip_d} (p={flip_p:g})")
     rotate_on = getattr(prep, "enable_random_rotate", False) if prep is not None else False
     rotate_prob = getattr(prep, "random_rotate_prob", 0.5) if prep is not None else 0.5
     rotate_range = getattr(prep, "random_rotate_angle_range", 180.0) if prep is not None else 180.0
@@ -377,7 +385,7 @@ def main() -> None:
         print("Dataset is empty.", file=sys.stderr)
         sys.exit(1)
 
-    resize_mode, resize_to, flip_h, flip_v, flip_d, _ = get_resize_and_flips(config)
+    resize_mode, resize_to, flip_h, flip_v, flip_d, _, _ = get_resize_and_flips(config)
     print(f"Building {args.split} dataset ({len(dataset)} samples)")
     print_augmentation_summary(config, resize_to)
 

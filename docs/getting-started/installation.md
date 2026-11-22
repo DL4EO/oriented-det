@@ -81,6 +81,14 @@ odet export --help
 
 See [ONNX export](../examples/export.md).
 
+Photometric Albumentations is optional. No Hub recipe sets `enable_albumentation`. The extra is the last MIT release (`albumentations<=2.0.8`); AlbumentationsX is AGPL-3.0:
+
+```bash
+uv pip install -e ".[albumentations]"
+```
+
+Without the extra, training still runs. Turning `enable_albumentation` on raises an import error until the extra is installed.
+
 ## Verify Installation
 
 ```bash

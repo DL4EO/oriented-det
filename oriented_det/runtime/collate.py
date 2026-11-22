@@ -13,11 +13,14 @@ from oriented_det.data.lookalike import resolve_lookalike_label_set
 from oriented_det.data.mosaic import (
     MosaicCache,
     MosaicSample,
+    affine_mosaic_to_canvas,
     apply_cached_mosaic,
-    apply_mosaic_resize_crop,
+    center_pad,
+    resize_long_side,
 )
 from oriented_det.data.rotates import apply_random_train_rotate
 from oriented_det.data.preprocessing import apply_spatial_preprocess
+from oriented_det.data.scale_translate import sample_scale_translate, warp_boxes, warp_image
 from oriented_det.geometry.rbox import normalize_le90
 
 # ImageNet normalization constants (for pretrained models)
@@ -91,6 +94,7 @@ class _CollateFn:
         enable_flip_horizontal: Optional[bool],
         enable_flip_vertical: Optional[bool],
         enable_flip_diagonal: Optional[bool],
+        flip_prob: float,
         enable_random_rotate: bool,
         random_rotate_prob: float,
         random_rotate_angle_range: float,
@@ -107,8 +111,12 @@ class _CollateFn:
         mosaic_pad_val: int = 114,
         mosaic_max_cached_images: int = 40,
         mosaic_ratio_range: tuple[float, float] = (0.5, 1.5),
+        mosaic_min_visibility: float = 0.2,
+        mosaic_clip_boxes: bool = False,
         mosaic_disable_last_n_epochs: int = 0,
         mosaic_total_epochs: int = 0,
+        random_scale: float = 0.0,
+        random_translate: float = 0.0,
     ):
         self.class_map = class_map
         self.augmentation = augmentation
@@ -120,6 +128,7 @@ class _CollateFn:
         self.enable_flip_horizontal = enable_flip_horizontal
         self.enable_flip_vertical = enable_flip_vertical
         self.enable_flip_diagonal = enable_flip_diagonal
+        self.flip_prob = float(flip_prob)
         self.enable_random_rotate = enable_random_rotate
         self.random_rotate_prob = random_rotate_prob
         self.random_rotate_angle_range = random_rotate_angle_range
@@ -133,8 +142,12 @@ class _CollateFn:
         )
         self.mosaic_pad_val = int(mosaic_pad_val)
         self.mosaic_ratio_range = (float(mosaic_ratio_range[0]), float(mosaic_ratio_range[1]))
+        self.mosaic_min_visibility = float(mosaic_min_visibility)
+        self.mosaic_clip_boxes = bool(mosaic_clip_boxes)
         self.mosaic_disable_last_n_epochs = int(mosaic_disable_last_n_epochs)
         self.mosaic_total_epochs = int(mosaic_total_epochs)
+        self.random_scale = float(random_scale)
+        self.random_translate = float(random_translate)
         self._mosaic_runtime_enabled = self.enable_mosaic
         self._mosaic_cache = (
             MosaicCache(max_cached_images=int(mosaic_max_cached_images))
@@ -183,15 +196,26 @@ class _CollateFn:
                     pil_image = self.augmentation(pil_image)
                 target_h, target_w = self.resize_to
                 raw_rboxes = [ann.rbox for ann in sample.annotations]
-                spatial = apply_spatial_preprocess(
-                    pil_image,
-                    raw_rboxes,
-                    self.resize_mode,
-                    self.resize_to,
-                    random_crop=self.random_crop and self.resize_mode == "crop",
-                )
-                pil_image = spatial.image
-                scaled_rbox_list = spatial.rboxes
+                # Mosaic tiles keep their aspect ratio. Letterbox is the
+                # non-mosaic path (validation and the last epochs).
+                use_long_side = self.mosaic_is_enabled() and self._mosaic_cache is not None
+                spatial = None
+                if use_long_side:
+                    pil_image, scaled_rbox_list = resize_long_side(
+                        pil_image,
+                        raw_rboxes,
+                        max(int(target_h), int(target_w)),
+                    )
+                else:
+                    spatial = apply_spatial_preprocess(
+                        pil_image,
+                        raw_rboxes,
+                        self.resize_mode,
+                        self.resize_to,
+                        random_crop=self.random_crop and self.resize_mode == "crop",
+                    )
+                    pil_image = spatial.image
+                    scaled_rbox_list = spatial.rboxes
 
                 rboxes = []
                 labels = []
@@ -234,7 +258,12 @@ class _CollateFn:
                         enable_horizontal=bool(flip_h),
                         enable_vertical=bool(flip_v),
                         enable_diagonal=bool(flip_d),
+                        flip_prob=self.flip_prob,
                     )
+                    # Mosaic caches this sample. Keep the three box groups on the flipped image.
+                    rboxes = all_rboxes[:n_real]
+                    rboxes_ignore = all_rboxes[n_real : n_real + n_ign]
+                    rboxes_lookalike = all_rboxes[n_real + n_ign :]
 
                 mosaic_applied = False
                 if self.mosaic_is_enabled() and self._mosaic_cache is not None:
@@ -257,13 +286,19 @@ class _CollateFn:
                         rotate_prob=float(self.random_rotate_prob) if self.enable_random_rotate else 0.0,
                         rotate_angle_range=float(self.random_rotate_angle_range),
                         rotate_rect_label_ids=self._rect_label_ids or None,
+                        min_visible=self.mosaic_min_visibility,
+                        clip_boxes=self.mosaic_clip_boxes,
                     )
                     mosaic_applied = mixed is not current
                     if mosaic_applied:
-                        mixed = apply_mosaic_resize_crop(
+                        mixed = affine_mosaic_to_canvas(
                             mixed,
                             (int(target_h), int(target_w)),
-                            ratio_range=self.mosaic_ratio_range,
+                            scale_gain=self.random_scale,
+                            translate_gain=self.random_translate,
+                            pad_val=self.mosaic_pad_val,
+                            min_visible=self.mosaic_min_visibility,
+                            clip_boxes=self.mosaic_clip_boxes,
                         )
                         pil_image = mixed.image
                         rboxes = list(mixed.rboxes)
@@ -274,6 +309,15 @@ class _CollateFn:
                         n_real = len(rboxes)
                         n_ign = len(rboxes_ignore)
                         all_rboxes = rboxes + rboxes_ignore + rboxes_lookalike
+
+                if use_long_side and not mosaic_applied:
+                    pil_image, all_rboxes = center_pad(
+                        pil_image,
+                        all_rboxes,
+                        int(target_w),
+                        int(target_h),
+                        self.mosaic_pad_val,
+                    )
 
                 if self.enable_random_rotate and not mosaic_applied:
                     rot_w, rot_h_px = pil_image.size
@@ -292,9 +336,54 @@ class _CollateFn:
                 rboxes_ignore = all_rboxes[n_real : n_real + n_ign]
                 rboxes_lookalike = all_rboxes[n_real + n_ign :]
 
+                if (self.random_scale > 0.0 or self.random_translate > 0.0) and not mosaic_applied:
+                    canvas_w, canvas_h = pil_image.size
+                    scale, dx, dy = sample_scale_translate(
+                        canvas_w,
+                        canvas_h,
+                        self.random_scale,
+                        self.random_translate,
+                    )
+                    pil_image = warp_image(
+                        pil_image, scale, dx, dy, pad_val=self.mosaic_pad_val
+                    )
+                    rboxes, labels = warp_boxes(
+                        rboxes,
+                        canvas_w,
+                        canvas_h,
+                        scale,
+                        dx,
+                        dy,
+                        self.mosaic_min_visibility,
+                        labels,
+                        clip_axis_aligned=self.mosaic_clip_boxes,
+                    )
+                    rboxes_ignore, labels_ignore = warp_boxes(
+                        rboxes_ignore,
+                        canvas_w,
+                        canvas_h,
+                        scale,
+                        dx,
+                        dy,
+                        self.mosaic_min_visibility,
+                        labels_ignore,
+                        clip_axis_aligned=self.mosaic_clip_boxes,
+                    )
+                    rboxes_lookalike, _ = warp_boxes(
+                        rboxes_lookalike,
+                        canvas_w,
+                        canvas_h,
+                        scale,
+                        dx,
+                        dy,
+                        self.mosaic_min_visibility,
+                        None,
+                        clip_axis_aligned=self.mosaic_clip_boxes,
+                    )
+
                 image_tensor = self._to_tensor(pil_image)
-                if mosaic_applied:
-                    content_size = (int(pil_image.size[1]), int(pil_image.size[0]))
+                if spatial is None:
+                    content_size = (int(target_h), int(target_w))
                 else:
                     content_size = spatial.meta.content_size
                 if self.pad_size_divisor > 1:
@@ -362,6 +451,7 @@ def create_collate_fn(
     enable_flip_horizontal: Optional[bool] = None,
     enable_flip_vertical: Optional[bool] = None,
     enable_flip_diagonal: Optional[bool] = None,
+    flip_prob: float = 0.5,
     enable_random_rotate: bool = False,
     random_rotate_prob: float = 0.5,
     random_rotate_angle_range: float = 180.0,
@@ -378,8 +468,12 @@ def create_collate_fn(
     mosaic_pad_val: int = 114,
     mosaic_max_cached_images: int = 40,
     mosaic_ratio_range: tuple[float, float] = (0.5, 1.5),
+    mosaic_min_visibility: float = 0.2,
+    mosaic_clip_boxes: bool = False,
     mosaic_disable_last_n_epochs: int = 0,
     mosaic_total_epochs: int = 0,
+    random_scale: float = 0.0,
+    random_translate: float = 0.0,
 ) -> Callable:
     """Create a collate function with consistent class mapping and optional augmentation.
     
@@ -401,6 +495,8 @@ def create_collate_fn(
         enable_flip_horizontal: If True, allow random horizontal flip (training). None = use enable_train_flip.
         enable_flip_vertical: If True, allow random vertical flip (training). None = use enable_train_flip.
         enable_flip_diagonal: If True, allow random diagonal flip (MMRotate ``RRandomFlip``). Default False.
+        flip_prob: Independent probability of each enabled flip (default 0.5).
+            Horizontal and vertical at 0.5 are 25% none, horizontal, vertical, and both.
         enable_random_rotate: If True, apply MMRotate-style ``PolyRandomRotate`` after flips.
         random_rotate_prob: Probability of applying a random rotate (default 0.5).
         random_rotate_angle_range: Half-range in degrees; angle is uniform in
@@ -422,6 +518,7 @@ def create_collate_fn(
         enable_flip_horizontal=enable_flip_horizontal,
         enable_flip_vertical=enable_flip_vertical,
         enable_flip_diagonal=enable_flip_diagonal,
+        flip_prob=flip_prob,
         enable_random_rotate=enable_random_rotate,
         random_rotate_prob=random_rotate_prob,
         random_rotate_angle_range=random_rotate_angle_range,
@@ -438,8 +535,12 @@ def create_collate_fn(
         mosaic_pad_val=mosaic_pad_val,
         mosaic_max_cached_images=mosaic_max_cached_images,
         mosaic_ratio_range=mosaic_ratio_range,
+        mosaic_min_visibility=mosaic_min_visibility,
+        mosaic_clip_boxes=mosaic_clip_boxes,
         mosaic_disable_last_n_epochs=mosaic_disable_last_n_epochs,
         mosaic_total_epochs=mosaic_total_epochs,
+        random_scale=random_scale,
+        random_translate=random_translate,
     )
 
 
@@ -455,6 +556,10 @@ def create_train_augmentation(
     p_noise: float = 0.2,
     p_blur: float = 0.2,
     p_clahe: float = 0.3,
+    hsv_h: float = 0.015,
+    hsv_s: float = 0.7,
+    hsv_v: float = 0.4,
+    p_hsv: float = 0.0,
 ) -> Any:
     """Create albumentations augmentation for training (non-geometric only).
     
@@ -489,6 +594,10 @@ def create_train_augmentation(
         p_noise=p_noise,
         p_blur=p_blur,
         p_clahe=p_clahe,
+        hsv_h=hsv_h,
+        hsv_s=hsv_s,
+        hsv_v=hsv_v,
+        p_hsv=p_hsv,
     )
 
 

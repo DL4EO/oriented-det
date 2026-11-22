@@ -14,7 +14,6 @@ Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 - `oriented_rcnn_dota_le90_3x`
 - `oriented_rcnn_hrsc2016_le90_3x`
 - `rotated_faster_rcnn_dota_le90_1x`
-- `rotated_faster_rcnn_dota_le90_1x`
 - `rotated_faster_rcnn_dota_le90_3x`
 - `rotated_faster_rcnn_hrsc2016_le90_3x`
 - `rotated_retinanet_dota_le90_1x`
@@ -22,13 +21,14 @@ Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 - `rotated_retinanet_dota_le90_1x_hbb`
 - `rotated_retinanet_dota_le90_3x_hbb`
 - `rotated_fcos_dota_le90_1x`
-- `rotated_fcos_dota_le90_1x`
 - `rotated_fcos_dota_le90_3x`
 - `rotated_fcos_hrsc2016_le90_3x`
 - `rotated_rtmdet_dota_le90_3x`
+- `yolo_obb_coco_300e`
+- `yolo_obb_dota_le90_12x`
 
 On-disk / Hub filenames include a **SHA-256[:8]** suffix (see `tools/publish_checkpoint.py`).
-Each published weight can have sidecar artifacts beside it in `pretrained/`: `<weight-stem>.json` for the exact final run config and `<weight-stem>.log` for the training log. DOTA Hub sidecars set `production.score_threshold` to eval-val F1 − **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**, RTMDet **0.45**). HRSC sidecars use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). Recipes and Hub sidecars use **`production.final_nms_iou_threshold: 0.1`**.
+Each published weight can have sidecar artifacts beside it in `pretrained/`: `<weight-stem>.json` for the exact final run config and `<weight-stem>.log` for the training log. DOTA Hub sidecars set `production.score_threshold` to eval-val F1 − **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**, RTMDet **0.45**, YOLO-OBB **0.2**). HRSC sidecars use the same rule (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). Recipes and Hub sidecars use **`production.final_nms_iou_threshold: 0.1`**.
 
 ## Usage
 

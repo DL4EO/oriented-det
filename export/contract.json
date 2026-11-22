@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "description": "ONNX export: pre-NMS graph plus Python preprocess and postprocess.",
   "onnx": {
     "build": "python -m export onnx",
@@ -21,12 +21,12 @@
   },
   "preprocess": {
     "module": "export.preprocess",
-    "steps": "RGB uint8 → bilinear resize to target_size → /255 → subtract mean / divide std → NCHW"
+    "steps": "RGB uint8. If resize_mode is fixed or crop and the image is larger than the slice, tile it (slice is window_size in source pixels when set, otherwise target_size; overlap_pixels default 200; last window flushes to the image edge). Each window is bilinear-resized to target_size. Otherwise bilinear-resize the whole image to target_size. Then /255, subtract mean, divide std, NCHW. pad and keep_ratio are not tiled."
   },
   "postprocess": {
     "module": "export.postprocess",
     "impl": "export.nms (copied to onnx_export/ at export; python clip or shapely)",
-    "steps": "score floor → rotated NMS → max_detections_per_image; then scale boxes to original image size"
+    "steps": "Per window: score floor → rotated NMS → max_detections_per_image. Map boxes from the canvas back onto the source window (divide by target_size/window_size when window_size is set) and add the window origin. Drop centroids in the zero-pad band. Then one more rotated NMS across windows. A single forward scales boxes to the original image size."
   },
   "export_modes": {
     "rotated_fcos_pre_nms": {

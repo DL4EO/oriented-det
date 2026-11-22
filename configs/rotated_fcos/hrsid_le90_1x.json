@@ -58,6 +58,7 @@
     "iou_threshold": 0.5,
     "final_nms_iou_threshold": 0.1,
     "val_map_at_end": false,
+    "test_map": true,
     "val_map_every_n_epochs": 4,
     "val_extended_gt_metrics": true,
     "val_exact_rotated_iou": false,

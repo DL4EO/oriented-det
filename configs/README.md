@@ -18,10 +18,12 @@ OrientedDet publishes **DOTA le90 pretrain** checkpoints on Hugging Face Hub. Se
 
 Do **not** call HRSC, FAIR1M, SSDD, or HRSID `make eval-val` leaky. That word is DOTA-only. Full table: [Data guide — Train / eval splits](../docs/user-guide/data.md#train--eval-splits).
 
-**mAP in README tables** for Faster R-CNN, FCOS, Oriented R-CNN 1× / **3×**, and **RetinaNet 1× / 3×** DOTA is **official Task 1** (the real hidden test). FCOS 3× is also Task 1 (**72.91%**; leaky eval-val 82.32%). Training-time periodic mAP may be higher (non-empty tiles only). Advertised Oriented R-CNN / Faster R-CNN / FCOS zoo is **1×**; 3× is the long-schedule Hub slug (tight boxes / AP75). See [oriented_rcnn/README.md — 1x vs 3x](oriented_rcnn/README.md#1x-vs-3x).
+**mAP in README tables** for DOTA Hub rows is **official Task 1** (the real hidden test). **Top of the zoo:** YOLO-OBB-S 12× **77.80%**, then RTMDet-S 3× **77.60%**. Training-time periodic mAP may be higher (non-empty tiles only). Advertised Oriented R-CNN / Faster R-CNN / FCOS zoo is **1×**; 3× is the long-schedule Hub slug (tight boxes / AP75). See [oriented_rcnn/README.md — 1x vs 3x](oriented_rcnn/README.md#1x-vs-3x).
 
 | Model | Config | Hub slug | mAP50 |
 |-------|--------|----------|----------------|
+| YOLO-OBB-S 12× from COCO | [yolo_obb/dota_le90_12x_s_coco.json](yolo_obb/dota_le90_12x_s_coco.json) | `yolo_obb_dota_le90_12x` | **77.80%** official Task 1 |
+| Rotated RTMDet-S 3× | [rotated_rtmdet/dota_le90_3x_s.json](rotated_rtmdet/dota_le90_3x_s.json) | `rotated_rtmdet_dota_le90_3x` | **77.60%** official Task 1 |
 | Oriented R-CNN 1× | [oriented_rcnn/dota_le90_1x.json](oriented_rcnn/dota_le90_1x.json) | `oriented_rcnn_dota_le90_1x` | **76.73%** official Task 1 |
 | Oriented R-CNN 3× | [oriented_rcnn/dota_le90_3x.json](oriented_rcnn/dota_le90_3x.json) | `oriented_rcnn_dota_le90_3x` | **74.88%** official Task 1 |
 | Rotated RetinaNet 1× (OBB) | [rotated_retinanet/dota_le90_1x.json](rotated_retinanet/dota_le90_1x.json) | `rotated_retinanet_dota_le90_1x` | **71.72%** official Task 1 |
@@ -32,7 +34,8 @@ Do **not** call HRSC, FAIR1M, SSDD, or HRSID `make eval-val` leaky. That word is
 | Rotated Faster R-CNN 3× | [rotated_faster_rcnn/dota_le90_3x.json](rotated_faster_rcnn/dota_le90_3x.json) | `rotated_faster_rcnn_dota_le90_3x` | **74.48%** official Task 1 |
 | Rotated FCOS 1× rIoU | [rotated_fcos/dota_le90_1x.json](rotated_fcos/dota_le90_1x.json) | `rotated_fcos_dota_le90_1x` | **73.07%** official Task 1 |
 | Rotated FCOS 3× rIoU | [rotated_fcos/dota_le90_3x.json](rotated_fcos/dota_le90_3x.json) | `rotated_fcos_dota_le90_3x` | **72.91%** official Task 1 |
-| Rotated RTMDet-S 3× | [rotated_rtmdet/dota_le90_3x_s.json](rotated_rtmdet/dota_le90_3x_s.json) | `rotated_rtmdet_dota_le90_3x` | **77.60%** official Task 1 |
+
+COCO horizontal trunk for YOLO-OBB: [`yolo_obb/coco_300e_s.json`](yolo_obb/coco_300e_s.json) → Hub `yolo_obb_coco_300e` (COCO mAP **0.41**).
 
 ## HRSC2016 pretrained models
 
@@ -99,7 +102,8 @@ Example in an external project that keeps local dataset fragments:
 - **[rotated_faster_rcnn/](rotated_faster_rcnn/)** — Rotated Faster R-CNN. Standard recipe: ProbIoU main ROI loss, Smooth L1 aux 0.1, angle weight 1.0 (`dota_le90_1x.json`; 3× via `dota_le90_3x.json`). See [rotated_faster_rcnn/README.md](rotated_faster_rcnn/README.md).
 - **[rotated_retinanet/](rotated_retinanet/)** — Rotated RetinaNet (one-stage). See [rotated_retinanet/README.md](rotated_retinanet/README.md).
 - **[rotated_fcos/](rotated_fcos/)** — Rotated FCOS (anchor-free one-stage; L1, optional KFIoU aux, or decoded rIoU primary). See [rotated_fcos/README.md](rotated_fcos/README.md).
-- **[rotated_rtmdet/](rotated_rtmdet/)** — Rotated RTMDet (CSPNeXt-S + PAFPN speed tier; Hub 3×). See [rotated_rtmdet/README.md](rotated_rtmdet/README.md).
+- **[rotated_rtmdet/](rotated_rtmdet/)** — Rotated RTMDet (CSPNeXt-S + PAFPN speed tier; Hub 3×, Task 1 **77.60%**). See [rotated_rtmdet/README.md](rotated_rtmdet/README.md).
+- **[yolo_obb/](yolo_obb/)** — YOLO-OBB (C2f CSP + PAFPN speed tier; Hub 12× from COCO, Task 1 **77.80%**). See [yolo_obb/README.md](yolo_obb/README.md).
 
 ## Muted keys
 
@@ -132,7 +136,7 @@ All options, types, and defaults: **[config.schema.json](config.schema.json)** (
 | `production` | Optional **deploy / `image_demo`** overrides: `score_threshold` via `resolve_inference_score_threshold` (does **not** override train-val mAP; `odet preds` ignores it). DOTA 1× recipes set this to eval-val global F1 − **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**); 3× inherits those floors. HRSC 1× recipes do the same (Oriented R-CNN / Faster R-CNN **0.85**, FCOS **0.2**). `per_class_score_threshold` merges on top of `evaluation` for preds/deploy only (`merge_per_class_score_thresholds`; mAP IoU is `evaluation.iou_threshold` only). **Decode (deploy / `image_demo`)** — RPN/NMS/threshold fields patch the loaded model via `apply_inference_config_to_model` (DOTA+HRSC+FAIR1M: final NMS **0.1**). **`odet preds`** prefers `evaluation.final_nms_iou_threshold` when set. Not applied during `tools/train.py` (training uses `model.*`, final NMS **0.1**). **Deploy / tiling** — `overlap_pixels`, `ignore_margin_pixels`, canvas flags (see **config.schema.json**). |
 | `checkpoint` | load_from_checkpoint, load_from_experiment, **discover_previous_run**, resume_from_checkpoint_epoch, load_optimizer_state, load_scheduler_state, load_include_prefixes, load_exclude_prefixes, start_epoch, best_metric, higher_is_better |
 | `loss` | loss_type (`focal_weighted` now also scales FCOS/RetinaNet sigmoid focal per class; `background_weight` is ROI-only), class_weight_method, background_weight, focal_alpha, focal_gamma, label_smoothing, **roi_grouped_ce_*** (coarse-to-fine ROI classifier curriculum in one run) |
-| `preprocessing` | resize_mode, target_size, normalize_mean, normalize_std, pad_size_divisor, enable_flip_horizontal, enable_flip_vertical, enable_flip_diagonal, enable_random_rotate, random_rotate_prob, random_rotate_angle_range |
+| `preprocessing` | resize_mode, target_size, window_size, normalize_mean, normalize_std, pad_size_divisor, enable_flip_horizontal, enable_flip_vertical, enable_flip_diagonal, enable_random_rotate, random_rotate_prob, random_rotate_angle_range |
 | Top-level | **enable_albumentation**, enable_profiling |
 | `augmentation` | Albumentations params (when enable_albumentation is true) |
 | `tensorboard` | log_debug_anchors_proposals, vis_score_threshold |

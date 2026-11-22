@@ -4,7 +4,7 @@ Native **Rotated RTMDet** (`model_type: rotated_rtmdet`) — CSPNeXt-S + PAFPN.
 
 | Recipe | Config | Notes |
 |--------|--------|-------|
-| DOTA le90 3× **S** | [`dota_le90_3x_s.json`](dota_le90_3x_s.json) | **Hub.** Official Task 1 **77.60%** (AP75 52.01, COCO mAP 49.02). Leaky eval-val **82.75%** (gap **5.15**, metrics margin 0). Deploy `production.score_threshold` **0.45** and `production.ignore_margin_pixels` **0**. |
+| DOTA le90 3× **S** | [`dota_le90_3x_s.json`](dota_le90_3x_s.json) | **Hub.** Official Task 1 **77.60%** (AP75 52.01, COCO mAP 49.02), 0.20 under YOLO-OBB-S 12× **77.80%**. Leaky eval-val **82.75%** (gap **5.15**, metrics margin 0). Deploy `production.score_threshold` **0.45** and `production.ignore_margin_pixels` **0**. |
 | OSSDD le90 1× **S** (VH) | [`ossdd_le90_vh_1x_s.json`](ossdd_le90_vh_1x_s.json) | Finetune the DOTA Hub checkpoint on Sentinel-1 GRD ships. Train on official **train**, validate on official **val**. mAP is the mean of area-under-PR over rotated IoU 0.10–0.95 step 0.05 (`evaluation.map_iou_thresholds`). `evaluation.test_map` scores the held-out **test** split once on the best checkpoint at `evaluation.test_score_threshold` (null → 0.05). `make eval-test` uses that same floor. No Hub slug. |
 
 Hub slug: `rotated_rtmdet_dota_le90_3x` (`hf://rotated_rtmdet_dota_le90_3x`). Report: [`docs/eval-reports/rotated_rtmdet_dota_le90_3x/`](../../docs/eval-reports/rotated_rtmdet_dota_le90_3x/model_analysis.md). Run: `runs/rotated_rtmdet/20261002-102116`.
@@ -24,7 +24,10 @@ The DOTA recipe always sees **1024×1024**. Mosaic is off. Random rotate is on (
 
 | | AP50 | AP75 | COCO mAP | leaky eval-val | eval-val − Task 1 |
 |--|-----:|-----:|---------:|---------------:|------------------:|
+| YOLO-OBB-S 12× (`yolo_obb_dota_le90_12x`) | **77.80** | 52.13 | 49.32 | 84.42† | — |
 | RTMDet-S 3× (`runs/rotated_rtmdet/20261002-102116`) | **77.60** | 52.01 | 49.02 | 82.75 | **5.15** |
+
+† YOLO leaky is in-train score ≥ 0.3, not a `make eval-val` at 0.05.
 
 Leaky eval-val is `predictions/20261003_021342` (all 7669 val tiles, score ≥ 0.05, metrics margin **0**, 57,768 objects). Best F1 on that sweep is **0.50**, so deploy uses **0.45**. `production.ignore_margin_pixels` is **0**. Helicopter is 61.6 on Task 1 and 90.0 on leaky eval-val.
 

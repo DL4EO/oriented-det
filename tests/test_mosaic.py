@@ -15,8 +15,11 @@ from oriented_det.data.mosaic import (
     MosaicSample,
     apply_cached_mosaic,
     apply_mosaic,
+    apply_mosaic_affine,
     apply_mosaic_resize_crop,
-    clip_and_filter_centers,
+    filter_by_visible_fraction,
+    resize_long_side,
+    visible_fraction,
     resolve_mosaic_disable_last_n,
 )
 from oriented_det.geometry.rbox import RBox
@@ -66,7 +69,7 @@ def test_mosaic_four_quadrants_and_box_translation():
         assert math.isclose(rb.height, 4.0, abs_tol=1e-4)
 
 
-def test_mosaic_drops_center_outside_without_clip():
+def test_mosaic_drops_center_outside():
     cell = 64
     inside = RBox(32.0, 32.0, 8.0, 4.0, 0.1)
     outside = RBox(-40.0, 32.0, 8.0, 4.0, 0.3)
@@ -84,7 +87,6 @@ def test_mosaic_drops_center_outside_without_clip():
         current,
         mix,
         img_scale=(cell, cell),
-        bbox_clip_border=False,
         center_xy=(cell, cell),
     )
     labels = set(out.labels)
@@ -97,7 +99,7 @@ def test_mosaic_drops_center_outside_without_clip():
     assert math.isclose(hanging_out.width, 40.0, abs_tol=1e-4)
 
 
-def test_mosaic_clip_border_keeps_clamped_center():
+def test_mosaic_does_not_pin_outside_center():
     cell = 64
     outside = RBox(-40.0, 32.0, 8.0, 4.0, 0.3)
     current = _sample(_solid(cell, (10, 10, 10)), outside, label=1)
@@ -109,13 +111,32 @@ def test_mosaic_clip_border_keeps_clamped_center():
         current,
         mix,
         img_scale=(cell, cell),
-        bbox_clip_border=True,
         center_xy=(cell, cell),
     )
-    assert 1 in out.labels
-    kept = next(rb for rb, lab in zip(out.rboxes, out.labels) if lab == 1)
-    assert kept.cx == 0.0
-    assert math.isclose(kept.angle, 0.3, abs_tol=1e-6)
+    assert 1 not in out.labels
+
+
+def test_long_side_resize_does_not_square_pad():
+    image = Image.new("RGB", (200, 100), (10, 20, 30))
+    resized, boxes = resize_long_side(image, [RBox(100.0, 50.0, 40.0, 20.0, 0.0)], 640)
+    assert resized.size == (640, 320)
+    assert boxes[0].width == pytest.approx(128.0)
+    assert boxes[0].height == pytest.approx(64.0)
+    assert resized.getpixel((0, 0)) == (10, 20, 30)
+
+
+def test_affine_center_window_matches_ultralytics_placement():
+    image = Image.new("RGB", (128, 128), (114, 114, 114))
+    image.putpixel((64, 64), (255, 0, 0))
+    sample = MosaicSample(image=image, rboxes=[RBox(64.0, 64.0, 8.0, 4.0, 0.2)], labels=[1])
+    out = apply_mosaic_affine(sample, (64, 64), 1.0, 32.0, 32.0, pad_val=114)
+    assert out.image.size == (64, 64)
+    assert out.image.getpixel((32, 32)) == (255, 0, 0)
+    assert out.rboxes[0].cx == pytest.approx(32.0)
+    assert out.rboxes[0].cy == pytest.approx(32.0)
+    assert out.rboxes[0].width == pytest.approx(8.0)
+    assert out.rboxes[0].height == pytest.approx(4.0)
+    assert out.rboxes[0].angle == pytest.approx(0.2)
 
 
 def test_mosaic_resize_crop_returns_target_size(monkeypatch):
@@ -200,11 +221,57 @@ def test_resolve_mosaic_disable_last_n():
     assert resolve_mosaic_disable_last_n(12, override=2) == 2
 
 
-def test_clip_and_filter_centers_empty_labels():
-    boxes = [RBox(5.0, 5.0, 2.0, 1.0, 0.0), RBox(50.0, 5.0, 2.0, 1.0, 0.0)]
-    kept, labels = clip_and_filter_centers(boxes, None, 10.0, 10.0, clip_border=False)
-    assert len(kept) == 1
-    assert labels == []
+def test_visible_fraction_keeps_half_and_drops_less():
+    # Spans x=[-10, 30] on a 100-wide canvas: 30/40 of the area remains.
+    mostly = RBox(10.0, 50.0, 40.0, 10.0, 0.0)
+    # Spans x=[-30, 10]: 10/40 remains.
+    sliver = RBox(-10.0, 50.0, 40.0, 10.0, 0.0)
+    # Spans x=[-34, 6]: 6/40 remains (85% outside).
+    mostly_out = RBox(-14.0, 50.0, 40.0, 10.0, 0.0)
+    assert visible_fraction(mostly, 100.0, 100.0) == pytest.approx(0.75)
+    assert visible_fraction(sliver, 100.0, 100.0) == pytest.approx(0.25)
+    assert visible_fraction(mostly_out, 100.0, 100.0) == pytest.approx(0.15)
+    kept, labels = filter_by_visible_fraction(
+        [mostly, sliver], [1, 2], 100.0, 100.0, min_visible=0.5
+    )
+    assert labels == [1]
+    assert kept[0].width == pytest.approx(40.0)
+    kept_80, labels_80 = filter_by_visible_fraction(
+        [mostly, sliver, mostly_out], [1, 2, 3], 100.0, 100.0, min_visible=0.2
+    )
+    assert labels_80 == [1, 2]
+
+
+def test_clip_axis_aligned_cuts_box_to_canvas_and_keeps_rotated_whole():
+    # Spans x=[-10, 30], y=[45, 55]: clipped to x=[0, 30].
+    wide = RBox(10.0, 50.0, 40.0, 10.0, 0.0)
+    # Tall box stored le90 as (w=40, h=10, -90°): spans y=[-10, 30] visually.
+    tall = RBox(50.0, 10.0, 40.0, 10.0, -math.pi / 2)
+    # Rotated 45°, partly outside: kept whole, never cut.
+    tilted = RBox(5.0, 50.0, 40.0, 10.0, math.pi / 4)
+    inside = RBox(50.0, 50.0, 20.0, 10.0, 0.0)
+    kept, labels = filter_by_visible_fraction(
+        [wide, tall, tilted, inside], [1, 2, 3, 4], 100.0, 100.0, 0.1, clip_axis_aligned=True
+    )
+    assert labels == [1, 2, 3, 4]
+    assert (kept[0].cx, kept[0].width, kept[0].height) == pytest.approx((15.0, 30.0, 10.0))
+    xs = [p[0] for p in kept[1].corners()]
+    ys = [p[1] for p in kept[1].corners()]
+    assert (min(xs), max(xs), min(ys), max(ys)) == pytest.approx((45.0, 55.0, 0.0, 30.0))
+    assert kept[1].width >= kept[1].height  # le90 like a dataset box
+    assert (kept[2].cx, kept[2].width, kept[2].angle) == (tilted.cx, tilted.width, tilted.angle)
+    assert kept[3] is inside
+    # Default keeps the full extent.
+    whole, _ = filter_by_visible_fraction([wide], [1], 100.0, 100.0, 0.1)
+    assert whole[0] is wide
+    # The Ultralytics 10% rule: 2/40 visible is dropped, 10/40 is kept and cut.
+    sliver = RBox(-10.0, 50.0, 40.0, 10.0, 0.0)
+    mostly_out = RBox(-18.0, 50.0, 40.0, 10.0, 0.0)
+    cut, cut_labels = filter_by_visible_fraction(
+        [sliver, mostly_out], [1, 2], 100.0, 100.0, 0.1, clip_axis_aligned=True
+    )
+    assert cut_labels == [1]
+    assert (cut[0].cx, cut[0].width) == pytest.approx((5.0, 10.0))
 
 
 def _write_color_png(path: Path, color: tuple[int, int, int], size: int = 32) -> None:
@@ -451,3 +518,50 @@ def test_collate_skips_canvas_rotate_after_mosaic(tmp_path, monkeypatch):
     collate([samples[4]])
     assert collate._mosaic_cache.ready()
     assert canvas_rotates["n"] == 0
+
+
+def test_collate_mosaic_caches_flipped_boxes(tmp_path, monkeypatch):
+    """A horizontal flip must move the cached mosaic boxes with the image."""
+    import oriented_det.data.flips as flips_mod
+    import oriented_det.runtime.collate as collate_mod
+
+    monkeypatch.setattr(flips_mod.random, "random", lambda: 0.0)
+    image = Image.new("RGB", (32, 32), (0, 0, 255))
+    for x in range(16):
+        for y in range(32):
+            image.putpixel((x, y), (255, 0, 0))
+    path = tmp_path / "half.png"
+    image.save(path)
+    rbox = RBox(8.0, 16.0, 4.0, 4.0, 0.0)
+    sample = DOTASample(
+        image_path=path,
+        width=32,
+        height=32,
+        annotations=(DOTAAnnotation("ship", 0, rbox.to_polygon(), rbox),),
+    )
+    captured = {}
+
+    def _spy(current, cache, **kwargs):
+        captured["current"] = current
+        return current
+
+    monkeypatch.setattr(collate_mod, "apply_cached_mosaic", _spy)
+    collate = create_collate_fn(
+        {"ship": 1},
+        normalize=False,
+        resize_mode="fixed",
+        resize_to=(32, 32),
+        pad_size_divisor=1,
+        enable_flip_horizontal=True,
+        enable_flip_vertical=False,
+        enable_flip_diagonal=False,
+        enable_mosaic=True,
+        mosaic_prob=1.0,
+        mosaic_img_scale=(32, 32),
+    )
+    collate([sample])
+    current = captured["current"]
+    assert current.image.getpixel((0, 16)) == (0, 0, 255)
+    assert current.image.getpixel((31, 16)) == (255, 0, 0)
+    assert current.rboxes[0].cx == pytest.approx(24.0)
+    assert current.rboxes[0].cy == pytest.approx(16.0)

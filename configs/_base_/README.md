@@ -1,12 +1,12 @@
 # Base configs
 
-These files are **base configs** only. They are not used as top-level training configs; they are included via `_base_` in configs under [oriented_rcnn/](../oriented_rcnn/), [rotated_faster_rcnn/](../rotated_faster_rcnn/), [rotated_retinanet/](../rotated_retinanet/), and [rotated_fcos/](../rotated_fcos/).
+These files are **base configs** only. They are not used as top-level training configs; they are included via `_base_` in configs under [oriented_rcnn/](../oriented_rcnn/), [rotated_faster_rcnn/](../rotated_faster_rcnn/), [rotated_retinanet/](../rotated_retinanet/), [rotated_fcos/](../rotated_fcos/), [rotated_rtmdet/](../rotated_rtmdet/), and [yolo_obb/](../yolo_obb/).
 
 ## Contents
 
 - **datasets/** — Dataset defaults: `dota_le90.json` (tiled DOTA v1.0), `hrsc2016.json` (native XML, single-class ship).
-- **models/** — Model backbones and heads: `oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`.
-- **schedules/** — Training schedules: `1x.json`, `3x.json`, `6x.json` (epochs, LR, warmup, etc.).
+- **models/** — Model backbones and heads: `oriented_rcnn_r50.json`, `rotated_faster_rcnn_r50.json`, `rotated_retinanet_r50.json`, `rotated_fcos_r50.json`, `rotated_rtmdet_cspnext_s.json` / `rotated_rtmdet_cspnext_tiny.json`, `yolo_obb_s.json` / `yolo_obb_n.json`.
+- **schedules/** — Training schedules: `1x.json`, `3x.json`, `6x.json`, `12x.json` (epochs, LR, warmup, etc.).
 - **fp16.json** — Mixed-precision (AMP) settings.
 - **augmentation.json** — Albumentations / data augmentation.
 - **preprocessing.json** — Preprocessing options.

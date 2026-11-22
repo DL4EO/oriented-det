@@ -395,6 +395,7 @@ When using `tools/train.py` with a JSON config, you can choose the LR scheduler 
 | `one_cycle` / `onecycle`| OneCycleLR           | Every optimizer step | Single cycle: warmup then decay over full training. |
 | `cosine_annealing` / `cosine` | PyTorch CosineAnnealingLR | Once per epoch  | Cosine decay; SGDR restarts if `num_epochs` > `T_max`. |
 | `cosine_annealing_with_tail` / `cosine_with_tail` | CosineAnnealingWithFixedTailLR | Once per epoch | Cosine phase then constant `tail_lr`; `cosine_epochs` + `tail_epochs` = `num_epochs`. |
+| `linear` / `linear_decay` | LambdaLR | Once per epoch | Linear decay to `learning_rate * lr_scheduler_linear_end_factor` (default `0.01`). |
 
 ### ReduceLROnPlateau
 
@@ -462,6 +463,20 @@ Cosine for `cosine_epochs`, then constant `lr_scheduler_cosine_tail_lr` for `tai
   "lr_scheduler_cosine_tail_epochs": 4,
   "lr_scheduler_cosine_eta_min": 1e-5,
   "lr_scheduler_cosine_tail_lr": 5e-5
+}
+```
+
+### Linear decay (`linear`)
+
+Ultralytics-style linear decay. After optional warmup, LR goes from `learning_rate` to `learning_rate * lr_scheduler_linear_end_factor` over `num_epochs`. Warmup ramps from 0 to `learning_rate` while the decay epoch index keeps moving, so the last epoch still reaches the floor. Default end factor is `0.01` (lr `0.01` ends at `1e-4`).
+
+```json
+"training": {
+  "num_epochs": 500,
+  "learning_rate": 0.01,
+  "lr_scheduler_type": "linear",
+  "lr_scheduler_linear_end_factor": 0.01,
+  "lr_warmup_steps": 22179
 }
 ```
 

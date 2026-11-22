@@ -9,9 +9,12 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+import bisect
 import math
 import statistics
 import sys
+
+import numpy as np
 
 try:
     from tqdm import tqdm
@@ -101,6 +104,46 @@ def average_precision_area(recalls: Sequence[float], precisions: Sequence[float]
     return ap
 
 
+# pycocotools ``COCOeval``: recall grid and per-image, per-class detection cap.
+COCO_RECALL_THRESHOLDS: Tuple[float, ...] = tuple(float(v) for v in np.linspace(0.0, 1.0, 101))
+COCO_MAX_DETS_PER_IMAGE = 100
+AP_INTERPOLATIONS = ("all_point", "coco101")
+
+
+def average_precision_coco101(recalls: Sequence[float], precisions: Sequence[float]) -> float:
+    """pycocotools AP: precision envelope read at 101 recall points (0.00, 0.01, ..., 1.00).
+
+    Same inputs as ``average_precision_area``. Recall values past the last detection
+    read precision 0, as in ``COCOeval.accumulate``.
+    """
+    if not recalls:
+        return 0.0
+    rec = [float(r) for r in recalls]
+    pre = [float(p) for p in precisions]
+    for i in range(len(pre) - 1, 0, -1):
+        if pre[i - 1] < pre[i]:
+            pre[i - 1] = pre[i]
+    total = 0.0
+    for thr in COCO_RECALL_THRESHOLDS:
+        idx = bisect.bisect_left(rec, thr)
+        if idx < len(pre):
+            total += pre[idx]
+    return total / len(COCO_RECALL_THRESHOLDS)
+
+
+def _cap_detections_per_image(
+    sorted_dets: Sequence[Detection], max_per_image: int
+) -> List[Detection]:
+    """Keep the ``max_per_image`` highest-scoring detections of each image (score order in)."""
+    kept: List[Detection] = []
+    counts: Dict[Optional[str], int] = defaultdict(int)
+    for det in sorted_dets:
+        if counts[det.image_id] < max_per_image:
+            kept.append(det)
+            counts[det.image_id] += 1
+    return kept
+
+
 def _greedy_tp_fp(
     sorted_dets: Sequence[Detection],
     ground_truths: Sequence[GroundTruth],
@@ -170,12 +213,20 @@ class APCalculator:
         device: DeviceType = None,
         *,
         use_exact_rotated_iou: bool = True,
+        ap_interpolation: str = "all_point",
     ):
         if not 0 < iou_threshold <= 1:
             raise ValueError("IoU threshold must be in (0, 1]")
+        if ap_interpolation not in AP_INTERPOLATIONS:
+            raise ValueError(
+                f"ap_interpolation must be one of {AP_INTERPOLATIONS}, got {ap_interpolation!r}"
+            )
         self.iou_threshold = iou_threshold
         self.class_names = class_names or []
         self.class_to_id = {name: i for i, name in enumerate(self.class_names)} if self.class_names else {}
+        # Multi-threshold AP only (compute_ap_over_thresholds). "coco101" also caps
+        # detections at 100 per image and class, as pycocotools maxDets does.
+        self.ap_interpolation = ap_interpolation
         self.use_exact_rotated_iou = bool(use_exact_rotated_iou)
         self.device = None if self.use_exact_rotated_iou else device
         self._exact_iou_backend: Optional[str] = (
@@ -303,15 +354,15 @@ class APCalculator:
                     try:
                         if use_gpu:
                             # Use GPU-accelerated IoU (much faster)
-                            from ..ops.gpu_ops import oriented_box_iou_gpu
+                            from ..ops.gpu_ops import eval_oriented_box_iou_gpu
                             from ..ops.utils import rboxes_to_tensor
                             
                             # Convert RBox objects to tensors
                             chunk_det_tensors = rboxes_to_tensor(chunk_det_rboxes, device=self.device)
                             gt_tensors = rboxes_to_tensor(gt_rboxes, device=self.device)
                             
-                            # Compute IoU matrix on GPU
-                            iou_matrix_gpu = oriented_box_iou_gpu(chunk_det_tensors, gt_tensors)
+                            # Compute IoU matrix on GPU (exact when all boxes are axis-aligned)
+                            iou_matrix_gpu = eval_oriented_box_iou_gpu(chunk_det_tensors, gt_tensors)
                             
                             # Convert to CPU list of lists for compatibility
                             chunk_iou_matrix = iou_matrix_gpu.cpu().tolist()
@@ -516,12 +567,12 @@ class APCalculator:
             and is_gpu_device(self.device)
         )
         if use_gpu:
-            from ..ops.gpu_ops import oriented_box_iou_gpu
+            from ..ops.gpu_ops import eval_oriented_box_iou_gpu
             from ..ops.utils import rboxes_to_tensor
 
             det_tensors = rboxes_to_tensor(list(det_rboxes), device=self.device)
             gt_tensors = rboxes_to_tensor(list(gt_rboxes), device=self.device)
-            return oriented_box_iou_gpu(det_tensors, gt_tensors).detach().cpu().tolist()
+            return eval_oriented_box_iou_gpu(det_tensors, gt_tensors).detach().cpu().tolist()
         from ..ops.iou import batch_rbox_iou
 
         return batch_rbox_iou(
@@ -602,6 +653,10 @@ class APCalculator:
             ), per_thr
 
         sorted_dets = sorted(detections, key=lambda d: d.score, reverse=True)
+        coco_style = self.ap_interpolation == "coco101"
+        if coco_style:
+            sorted_dets = _cap_detections_per_image(sorted_dets, COCO_MAX_DETS_PER_IMAGE)
+        ap_fn = average_precision_coco101 if coco_style else average_precision_area
         candidates = self._iou_candidates(sorted_dets, ground_truths)
         num_positives = sum(1 for gt in ground_truths if gt.difficult == 0)
         per_thr: Dict[float, float] = {}
@@ -614,7 +669,7 @@ class APCalculator:
                 final_recall = 0.0
             else:
                 recalls, precisions, final_recall = _precision_recall_curve(tp, fp, num_positives)
-                ap_thr = average_precision_area(recalls, precisions)
+                ap_thr = ap_fn(recalls, precisions)
             per_thr[thr] = ap_thr
             if thr == ref:
                 recall_at_ref = final_recall
@@ -719,6 +774,11 @@ class APCalculator:
                         class_name=class_name,
                         min_box_size=min_box_size,
                     )
+                    if self.ap_interpolation == "coco101" and metrics.num_gts == 0:
+                        # pycocotools leaves categories without (non-ignored) ground
+                        # truth out of the mean; all_point keeps them as AP 0.
+                        class_metrics[class_name] = metrics
+                        continue
                     for thr, thr_ap in ap_at.items():
                         ap_sums[thr] = ap_sums.get(thr, 0.0) + float(thr_ap)
                 else:
@@ -780,6 +840,7 @@ def compute_oriented_map(
     use_exact_rotated_iou: bool = True,
     iou_thresholds: Optional[Sequence[float]] = None,
     iou_ap_out: Optional[Dict[str, Any]] = None,
+    ap_interpolation: str = "all_point",
 ) -> Tuple[float, Dict[str, float], Dict[str, ClassEvalMetrics]]:
     """Compute mean Average Precision (mAP) for oriented detection.
     
@@ -805,6 +866,11 @@ def compute_oriented_map(
             single-threshold 11-point AP at ``iou_threshold``.
         iou_ap_out: When set with ``iou_thresholds``, receives ``thresholds`` and
             ``per_iou`` (mean AP at each threshold).
+        ap_interpolation: AP integral per IoU threshold when ``iou_thresholds`` is set.
+            ``"all_point"`` is the VOC 2010 area under the precision-recall curve.
+            ``"coco101"`` is pycocotools: the precision envelope read at 101 recall
+            points, at most 100 detections per image and class, and classes with no
+            ground truth left out of the mean instead of counted as AP 0.
     
     Returns:
         Tuple of (mAP, class_ap_dict, class_metrics) where mAP is the mean of all
@@ -816,10 +882,15 @@ def compute_oriented_map(
             backend = (
                 resolve_exact_polygon_iou_backend()
                 if use_exact_rotated_iou
-                else "gpu-sampling"
+                else "gpu-sampling (exact when all boxes are axis-aligned)"
+            )
+            integral = (
+                "101-point AP (pycocotools, 100 dets per image and class)"
+                if ap_interpolation == "coco101"
+                else "area-under-PR"
             )
             print(
-                "mAP: mean of area-under-PR over rotated IoU "
+                f"mAP: mean of {integral} over rotated IoU "
                 f"{format_map_iou_span(thresholds)} "
                 f"(backend={backend!r}; IoU matrix once)",
                 flush=True,
@@ -836,6 +907,7 @@ def compute_oriented_map(
         class_names=class_names,
         device=device,
         use_exact_rotated_iou=use_exact_rotated_iou,
+        ap_interpolation=ap_interpolation,
     )
     class_aps, class_metrics = calculator.compute_map(
         detections,
@@ -981,7 +1053,7 @@ def compute_gt_best_iou_alignment_metrics(
                         gt_rboxes,
                     )
                 else:
-                    from ..ops.gpu_ops import oriented_box_iou_gpu
+                    from ..ops.gpu_ops import eval_oriented_box_iou_gpu
                     from ..ops.utils import rboxes_to_tensor
 
                     dev = device
@@ -989,7 +1061,7 @@ def compute_gt_best_iou_alignment_metrics(
                         dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                     ta = rboxes_to_tensor([d.rbox for d in raw_detections], device=dev)
                     tb = rboxes_to_tensor(gt_rboxes, device=dev)
-                    raw_iou = oriented_box_iou_gpu(ta, tb).detach().cpu().tolist()
+                    raw_iou = eval_oriented_box_iou_gpu(ta, tb).detach().cpu().tolist()
 
         for gt_idx, gt in enumerate(ground_truths):
             if skip_difficult and gt.difficult != 0:

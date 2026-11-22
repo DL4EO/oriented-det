@@ -63,48 +63,33 @@ def apply_random_train_flips(
     enable_horizontal: bool = True,
     enable_vertical: bool = True,
     enable_diagonal: bool = False,
+    flip_prob: float = 0.5,
 ) -> Tuple[any, List[RBox]]:
-    """Pick at most one random flip (MMRotate DOTA-style 25% per enabled mode).
+    """Apply each enabled flip independently with probability ``flip_prob``.
 
-    When horizontal, vertical, and diagonal are all enabled, each has probability
-  0.25 and there is a 0.25 chance of no flip — matching
-  ``RRandomFlip(flip_ratio=[0.25, 0.25, 0.25],
-  direction=['horizontal', 'vertical', 'diagonal'])``.
-
-    With only horizontal and vertical enabled (no diagonal), uses 0.5 per enabled
-  mode and no no-flip bucket (legacy two-flip behavior).
+    With horizontal and vertical enabled and ``flip_prob=0.5``, the four outcomes
+    (none, horizontal, vertical, both) each occur 25% of the time. Applying both
+    is a point reflection, the same geometry as one diagonal flip. Diagonal, when
+    enabled, is a third independent trial at the same probability.
     """
     modes: List[FlipMode] = []
-    if enable_horizontal:
+    if enable_horizontal and random.random() < flip_prob:
         modes.append("horizontal")
-    if enable_vertical:
+    if enable_vertical and random.random() < flip_prob:
         modes.append("vertical")
-    if enable_diagonal:
+    if enable_diagonal and random.random() < flip_prob:
         modes.append("diagonal")
     if not modes:
         return image, list(rboxes)
 
-    rboxes_list = list(rboxes)
-    if len(modes) == 1:
-        if random.random() >= 0.5:
-            return image, rboxes_list
-        mode = modes[0]
-    elif enable_diagonal and enable_horizontal and enable_vertical:
-        # MMRotate: three flip types + implicit no-flip (25% each).
-        bucket = random.random()
-        if bucket >= 0.75:
-            return image, rboxes_list
-        mode = modes[int(bucket / 0.25)]
-    else:
-        # Two modes only (e.g. H+V without diagonal): 50% each.
-        mode = modes[0] if random.random() < 0.5 else modes[1]
-
-    return (
-        apply_flip_to_image(image, mode),
-        apply_flip_to_rboxes(
-            rboxes_list, mode, image_width=image_width, image_height=image_height
-        ),
-    )
+    out_image = image
+    out_boxes = list(rboxes)
+    for mode in modes:
+        out_image = apply_flip_to_image(out_image, mode)
+        out_boxes = apply_flip_to_rboxes(
+            out_boxes, mode, image_width=image_width, image_height=image_height
+        )
+    return out_image, out_boxes
 
 
 __all__ = [

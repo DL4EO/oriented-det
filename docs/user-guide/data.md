@@ -17,7 +17,7 @@ The data module provides dataset loading, image tiling, data augmentation, and e
 
 Do **not** call HRSC, FAIR1M, SSDD, or HRSID `make eval-val` leaky. That word is DOTA-only. For DOTA, quote **Task 1** as the real test; eval-val is a convenience metric on tiles the model already saw.
 
-OSSDD recipes set `evaluation.map_iou_thresholds` to 0.10, 0.15, …, 0.95. The logged mAP (and `best_metric`) is the mean of the area under the precision-recall curve at those rotated-IoU thresholds. `evaluation.iou_threshold` stays 0.5 for GT-cover and the precision-recall operating point. Passing `--iou-threshold` to `odet preds` scores a single IoU instead.
+OSSDD recipes set `evaluation.map_iou_thresholds` to 0.10, 0.15, …, 0.95. The logged mAP (and `best_metric`) is the mean of the area under the precision-recall curve at those rotated-IoU thresholds. `evaluation.iou_threshold` stays 0.5 for GT-cover and the precision-recall operating point. Passing `--iou-threshold` to `odet preds` scores a single IoU instead. The per-threshold integral is `evaluation.map_ap_interpolation`: `"all_point"` (default) is that area; `"coco101"` is the pycocotools 101-point envelope with at most 100 detections per image and class, which the COCO recipe sets so its logged mAP equals `COCOeval`.
 
 ## DOTA Dataset
 
@@ -578,7 +578,7 @@ Official detection set used as a horizontal pretrain for YOLO-OBB S. `dataset.fo
 
 The detection `bbox` (`x, y, w, h`) is stored as le90 `(cx, cy, w, h, 0)`. The segmentation polygon is ignored. `iscrowd` annotations are dropped. The 80 category ids are not contiguous; they map onto labels `1..80` in ascending id order. Images with no objects are kept.
 
-`yolo_obb_force_horizontal` replaces the predicted angle with a constant 0 outside the graph before ProbIoU and DFL, so the angle head stays at init. Setting `yolo_obb_angle_weight` to 0 does not do that. The DOTA finetune ([`configs/yolo_obb/dota_le90_6x_s_coco.json`](../../configs/yolo_obb/dota_le90_6x_s_coco.json)) loads the backbone, neck, and box towers, then restarts the 15-way classifier and the angle head. Download and launch commands: [configs/yolo_obb/README.md](../../configs/yolo_obb/README.md).
+`yolo_obb_force_horizontal` replaces the predicted angle with a constant 0 outside the graph and trains the decoded box with CIoU. DFL is unchanged. The angle head stays at init. Setting `yolo_obb_angle_weight` to 0 does not do that. Oriented runs keep ProbIoU. The DOTA finetune ([`configs/yolo_obb/dota_le90_12x_s_coco.json`](../../configs/yolo_obb/dota_le90_12x_s_coco.json)) loads `hf://yolo_obb_coco_300e`, then restarts the 15-way classifier and the angle head. Download and launch commands: [configs/yolo_obb/README.md](../../configs/yolo_obb/README.md).
 
 ## Image Tiling
 
@@ -629,8 +629,8 @@ visualize_tiles(
 
 ## Data Augmentation
 
-Training collate applies geometric augs after spatial resize: random flips (`preprocessing.enable_flip_*`, MMRotate `RRandomFlip`) then optional random rotate (`enable_random_rotate`, `random_rotate_prob`, `random_rotate_angle_range` in degrees — MMRotate `PolyRandomRotate`, `auto_bound=False`). Val and inference do not flip or rotate. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°; two-stage 1× and DOTA Hub leave rotate off. RetinaNet 1× RR ablation (`configs/rotated_retinanet/dota_le90_1x_rr.json`) uses p=0.5 ±180°.
-Training collate applies geometric augs after spatial resize: random flips (`preprocessing.enable_flip_*`, MMRotate `RRandomFlip`) then optional random rotate (`enable_random_rotate`, `random_rotate_prob`, `random_rotate_angle_range` in degrees — MMRotate `PolyRandomRotate`, `auto_bound=False`). Val and inference do not flip or rotate. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°; two-stage 1× and DOTA Hub leave rotate off. RetinaNet 1× RR ablation (`configs/rotated_retinanet/dota_le90_1x_rr.json`) uses p=0.5 ±180°.
+Training collate applies geometric augs after spatial resize: random flips (`preprocessing.enable_flip_*`, each independent at `flip_prob`, default 0.5) then optional random rotate (`enable_random_rotate`, `random_rotate_prob`, `random_rotate_angle_range` in degrees — MMRotate `PolyRandomRotate`, `auto_bound=False`). Val and inference do not flip or rotate. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°; two-stage 1× and DOTA Hub leave rotate off. RetinaNet 1× RR ablation (`configs/rotated_retinanet/dota_le90_1x_rr.json`) uses p=0.5 ±180°.
+Training collate applies geometric augs after spatial resize: random flips (`preprocessing.enable_flip_*`, each independent at `flip_prob`, default 0.5) then optional random rotate (`enable_random_rotate`, `random_rotate_prob`, `random_rotate_angle_range` in degrees — MMRotate `PolyRandomRotate`, `auto_bound=False`). Val and inference do not flip or rotate. FCOS HRSC 1×/3× and Oriented R-CNN / Faster R-CNN HRSC 3× use p=0.5 ±20°; two-stage 1× and DOTA Hub leave rotate off. RetinaNet 1× RR ablation (`configs/rotated_retinanet/dota_le90_1x_rr.json`) uses p=0.5 ±180°.
 
 ### 1. Geometric Transforms (Oriented Bounding Box Aware)
 
@@ -666,7 +666,7 @@ rboxes = apply_rotate_to_rboxes(rboxes, math.radians(90.0), image_width=512, ima
 
 ### 2. Albumentations (Non-Geometric Only)
 
-For additional augmentation options, you can use albumentations with non-geometric transforms. **Note:** Only non-geometric augmentations (color, contrast, blur, noise, etc.) are supported because albumentations does not support oriented bounding boxes.
+For additional augmentation options, you can use albumentations with non-geometric transforms. **Note:** Only non-geometric augmentations (color, contrast, blur, noise, etc.) are supported because albumentations does not support oriented bounding boxes. It is an optional extra, and no Hub recipe enables it: `pip install "oriented-det[albumentations]"` (last MIT release, `albumentations<=2.0.8`). AlbumentationsX (`albumentationsx`) is AGPL-3.0 and is not a dependency of this package.
 
 ```python
 from oriented_det.data import create_albumentations_augmentation

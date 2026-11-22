@@ -21,7 +21,8 @@ from PIL import Image  # noqa: E402
 from tqdm import tqdm  # noqa: E402
 
 from export.ort_runtime import configure_ort_device, get_ort_device  # noqa: E402
-from export.runtime import detect_image  # noqa: E402
+from export.preprocess import uses_sliding_window  # noqa: E402
+from export.runtime import detect_image, load_export_meta  # noqa: E402
 from export.val_dataset import collect_split_images  # noqa: E402
 from oriented_det.geometry import RBox, normalize_le90  # noqa: E402
 from oriented_det.train.config import (  # noqa: E402
@@ -83,6 +84,29 @@ def _load_gt_entries(
         gt_entries = []
         gt_list = []
     return num_gt, gt_entries, gt_list
+
+
+def _inference_meta(
+    onnx_file: Path,
+    config: TrainingExperimentConfig,
+    overlap_pixels: int,
+) -> Dict[str, Any]:
+    """Sidecar meta with this experiment's slice size and overlap.
+
+    The ONNX canvas stays the exported ``target_size``. ``window_size`` is the
+    source-pixel slice and can differ from that canvas.
+    """
+    meta = load_export_meta(onnx_file)
+    prep = dict(meta.get("preprocess") or {})
+    resize_mode = getattr(config.preprocessing, "resize_mode", None)
+    if resize_mode:
+        prep["resize_mode"] = resize_mode
+    window = getattr(config.preprocessing, "window_size", None)
+    prep["window_size"] = None if window is None else [int(v) for v in list(window)]
+    prep["overlap_pixels"] = int(overlap_pixels)
+    out = dict(meta)
+    out["preprocess"] = prep
+    return out
 
 
 def _det_to_rbox(det: Dict[str, Any]) -> RBox:
@@ -153,6 +177,7 @@ def run_onnx_inference_and_save(
         preprocessing=preprocessing,
     )
 
+    infer_meta = _inference_meta(onnx_file, config, int(overlap_pixels))
     split_images, label_dir, dataset_format = collect_split_images(
         config, data_root, data_split=data_split, val_dir=val_dir
     )
@@ -199,10 +224,12 @@ def run_onnx_inference_and_save(
         num_gt, gt_entries, _gt_list = _load_gt_entries(
             img_path, label_dir, gt_by_image_path, class_map
         )
+        used_sliding = uses_sliding_window(int(img_h), int(img_w), infer_meta)
         try:
             dets = detect_image(
                 pil,
                 onnx_file,
+                infer_meta,
                 score_threshold=float(score_thr),
                 nms_backend=nms_backend,
             )
@@ -233,7 +260,10 @@ def run_onnx_inference_and_save(
                 "num_pred": int(len(pred_rows)),
                 "predictions": pred_rows,
                 "ground_truths": gt_entries,
-                "stats": {"inference_backend": "onnx_export"},
+                "stats": {
+                    "inference_backend": "onnx_export",
+                    "sliding_window": bool(used_sliding),
+                },
             }
         )
 
@@ -264,8 +294,13 @@ def run_onnx_inference_and_save(
         "inference_loop_seconds": float(t_infer),
         "bbox_coordinate_space": "image_pixels",
         "metrics_margin_pixels": int(resolved_metrics_margin_px),
+        "window_size": infer_meta.get("preprocess", {}).get("window_size"),
         "sliding_window_overlap_pixels": int(overlap_pixels) if overlap_pixels is not None else None,
-        "preprocess_note": "export.preprocess + onnx_export NMS (eval-val score floor)",
+        "preprocess_note": (
+            "export.preprocess + onnx_export NMS (eval-val score floor). "
+            "Images larger than window_size (or target_size when window_size is unset) "
+            "are tiled for resize_mode fixed/crop."
+        ),
     }
     json_path = output_dir / "predictions.json"
     json_path.write_text(

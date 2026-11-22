@@ -402,11 +402,16 @@ class AugmentationConfig:
     gauss_noise_var_limit: tuple[float, float] = (10.0, 50.0)
     blur_limit: int = 3
     clahe_clip_limit: float = 4.0
+    # Ultralytics fractions: hue is a fraction of 180°, saturation and value of 255.
+    hsv_h: float = 0.015
+    hsv_s: float = 0.7
+    hsv_v: float = 0.4
     p_brightness_contrast: float = 0.5
     p_gamma: float = 0.3
     p_noise: float = 0.2
     p_blur: float = 0.2
     p_clahe: float = 0.3
+    p_hsv: float = 0.0
 
 
 @dataclass
@@ -496,8 +501,17 @@ class ModelConfig:
     yolo_obb_tal_beta: float = 6.0
     yolo_obb_dfl_weight: float = 1.5
     yolo_obb_angle_weight: float = 0.2
-    # Replace the predicted angle with a constant 0 outside the graph (COCO pretrain).
+    # Hold the angle at 0 and train the decoded box with CIoU (COCO pretrain).
     yolo_obb_force_horizontal: bool = False
+    # Per-level classifier bias log(5 / num_classes / (640 / stride) ** 2).
+    # False keeps log(0.01 / 0.99) on every level.
+    yolo_obb_stride_cls_prior: bool = False
+    # Anchor-center test only. 0 uses the raw box. Regression keeps the real size.
+    yolo_obb_min_gt_side: float = 0.0
+    # "bce" or "qfl" (quality focal loss on the same soft targets).
+    yolo_obb_cls_loss_type: str = "bce"
+    # "tal" or "dynamic_soft" (Rotated RTMDet center prior and IoU soft label).
+    yolo_obb_assigner: str = "tal"
     yolo_obb_nms_pre: int = 2000
     aux_loss_type: Optional[str] = None
     aux_loss_weight: float = 0.0
@@ -572,11 +586,181 @@ class ModelConfig:
             )
 
 
+def _model_keys(*names: str) -> frozenset[str]:
+    return frozenset(names)
+
+
+# Written under ``model`` for each detector. Keep this aligned with
+# ``tools/train.py:create_model_from_config`` and the YOLO / RTMDet builders.
+# A key stays even when it equals the dataclass default, so a later default
+# change cannot rewrite a saved run. Unknown model types keep every field.
+_MODEL_SAVE_SHARED = _model_keys(
+    "backbone",
+    "pretrained_backbone",
+    "frozen_stages",
+    "fpn_strides",
+    "inference_pre_nms_score_threshold",
+    "final_nms_iou_threshold",
+    "final_nms_use_cpu",
+    "final_nms_iou_schedule_epochs",
+    "final_nms_iou_schedule_values",
+    "nms_class_agnostic",
+    "max_detections_per_image",
+)
+_MODEL_SAVE_RESNET_FPN = _model_keys("trainable_layers", "fpn_returned_layers")
+_MODEL_SAVE_ANCHORS = _model_keys("anchor_scales", "anchor_ratios")
+_MODEL_SAVE_TARGETS = _model_keys("target_means", "target_stds")
+_MODEL_SAVE_ROI_CLS = _model_keys("roi_loss_type", "roi_focal_alpha", "roi_focal_gamma")
+_MODEL_SAVE_TWO_STAGE = (
+    _MODEL_SAVE_SHARED
+    | _MODEL_SAVE_RESNET_FPN
+    | _MODEL_SAVE_ANCHORS
+    | _MODEL_SAVE_TARGETS
+    | _MODEL_SAVE_ROI_CLS
+    | _model_keys(
+        "roi_norm_factor",
+        "roi_edge_swap",
+        "roi_proj_xy",
+        "roi_box_reg_angle_weight",
+        "roi_box_reg_angle_schedule_epochs",
+        "roi_box_reg_angle_schedule_values",
+        "roi_box_reg_aux_weight",
+        "roi_box_reg_aux_schedule_epochs",
+        "roi_box_reg_aux_schedule_values",
+        "roi_box_reg_aux_loss_type",
+        "roi_box_reg_kfiou_fun",
+        "roi_box_reg_probiou_mode",
+        "roi_box_reg_norm",
+        "roi_batch_size_per_image",
+        "roi_positive_iou_threshold",
+        "roi_negative_iou_threshold",
+        "roi_match_low_quality",
+        "roi_inference_top_class_only",
+        "rpn_pre_nms_top_n",
+        "rpn_post_nms_top_n",
+        "rpn_nms_threshold",
+        "rpn_batch_size_per_image",
+        "rpn_positive_iou_threshold",
+        "rpn_negative_iou_threshold",
+        "rpn_min_pos_iou",
+        "rpn_match_low_quality",
+        "use_hbb_for_matching",
+        "add_gt_as_proposals",
+    )
+)
+_MODEL_SAVE_DECODED_AUX = _model_keys(
+    "roi_box_reg_aux_weight",
+    "roi_box_reg_aux_schedule_epochs",
+    "roi_box_reg_aux_schedule_values",
+    "roi_box_reg_aux_loss_type",
+    "roi_box_reg_kfiou_fun",
+    "roi_box_reg_probiou_mode",
+    "roi_box_reg_main_loss_type",
+    "box_reg_weight",
+    "roi_batch_size_per_image",
+    "roi_norm_factor",
+    "roi_edge_swap",
+)
+
+MODEL_SAVE_KEYS_BY_TYPE: Dict[str, frozenset[str]] = {
+    "rotated_faster_rcnn": _MODEL_SAVE_TWO_STAGE
+    | _model_keys("rpn_min_size", "roi_min_pos_iou", "roi_box_reg_main_loss_type"),
+    "oriented_rcnn": _MODEL_SAVE_TWO_STAGE | _model_keys("roi_use_hbb_for_matching"),
+    "rotated_retinanet": (
+        _MODEL_SAVE_SHARED
+        | _MODEL_SAVE_RESNET_FPN
+        | _MODEL_SAVE_ANCHORS
+        | _MODEL_SAVE_TARGETS
+        | _MODEL_SAVE_ROI_CLS
+        | _MODEL_SAVE_DECODED_AUX
+        | _model_keys(
+            "fpn_extra_level",
+            "anchor_angles",
+            "anchor_octave_base_scale",
+            "anchor_scales_per_octave",
+            "retinanet_stacked_convs",
+            "box_reg_loss_type",
+            "rpn_positive_iou_threshold",
+            "rpn_negative_iou_threshold",
+            "use_hbb_for_matching",
+        )
+    ),
+    "rotated_fcos": (
+        _MODEL_SAVE_SHARED
+        | _MODEL_SAVE_RESNET_FPN
+        | _MODEL_SAVE_ROI_CLS
+        | _model_keys(
+            "fpn_extra_level",
+            "box_reg_loss_type",
+            "box_reg_weight",
+            "fcos_stacked_convs",
+            "fcos_center_sampling",
+            "fcos_center_sample_radius",
+            "fcos_norm_on_bbox",
+            "fcos_centerness_on_reg",
+            "fcos_scale_angle",
+            "fcos_regress_ranges",
+            "fcos_angle_weight",
+            "fcos_nms_pre",
+            "aux_loss_type",
+            "aux_loss_weight",
+            "aux_angle_weight",
+            "aux_angle_lambda",
+        )
+    ),
+    "rotated_rtmdet": _MODEL_SAVE_SHARED
+    | _model_keys(
+        "box_reg_weight",
+        "rtmdet_stacked_convs",
+        "rtmdet_norm_on_bbox",
+        "rtmdet_scale_angle",
+        "rtmdet_exp_on_reg",
+        "rtmdet_qfl_beta",
+        "rtmdet_angle_weight",
+        "rtmdet_assign_topk",
+        "rtmdet_soft_center_radius",
+        "rtmdet_assign_iou_weight",
+        "rtmdet_nms_pre",
+    ),
+    "yolo_obb": _MODEL_SAVE_SHARED
+    | _model_keys(
+        "box_reg_weight",
+        "yolo_obb_reg_max",
+        "yolo_obb_tal_topk",
+        "yolo_obb_tal_alpha",
+        "yolo_obb_tal_beta",
+        "yolo_obb_dfl_weight",
+        "yolo_obb_angle_weight",
+        "yolo_obb_force_horizontal",
+        "box_reg_loss_type",
+        "yolo_obb_stride_cls_prior",
+        "yolo_obb_min_gt_side",
+        "yolo_obb_cls_loss_type",
+        "yolo_obb_assigner",
+        "yolo_obb_nms_pre",
+    ),
+}
+
+
+def filter_model_dict_for_save(model: Dict[str, Any], model_type: str) -> Dict[str, Any]:
+    """Keep ``model`` keys that ``model_type`` reads.
+
+    Unknown types keep every key. Load still accepts the full ``ModelConfig``,
+    so older verbose run configs open unchanged.
+    """
+    if not isinstance(model, dict):
+        return model
+    allowed = MODEL_SAVE_KEYS_BY_TYPE.get((model_type or "").strip().lower())
+    if allowed is None:
+        return model
+    return {key: value for key, value in model.items() if key in allowed}
+
+
 @dataclass
 class TrainingConfig:
     """Training hyperparameters. Keys ordered: scheduler switch first, then lr_*, then rest."""
     # LR scheduler: switch first, then all lr_* grouped
-    lr_scheduler_type: Optional[str] = None  # None/"multistep"/"step" | "reduce_on_plateau" | "one_cycle" | "cosine_annealing" | "cosine_annealing_with_tail" | "cosine_annealing_late"
+    lr_scheduler_type: Optional[str] = None  # None/"multistep"/"step" | "reduce_on_plateau" | "one_cycle" | "cosine_annealing" | "cosine_annealing_with_tail" | "cosine_annealing_late" | "linear"
     lr_scheduler_step_epochs: int = 8
     lr_scheduler_milestones: Optional[List[int]] = None
     # Scalar: same factor at every MultiStepLR/StepLR drop. List: one factor per milestone.
@@ -597,7 +781,13 @@ class TrainingConfig:
     # cosine_annealing_late: flat base LR until this epoch, then cosine to eta_min by num_epochs.
     # None → num_epochs // 2.
     lr_scheduler_cosine_start_epoch: Optional[int] = None
+    # linear: final_lr = learning_rate * end_factor (Ultralytics lrf; default 0.01 → 1e-4 at lr 0.01).
+    lr_scheduler_linear_end_factor: float = 0.01
     lr_warmup_steps: int = 500
+    # None leaves SGD momentum unchanged. 0.8 ramps up to ``momentum`` over lr_warmup_steps.
+    warmup_momentum: Optional[float] = None
+    # Bias-group LR at warmup progress 0. None ramps every group from 0.
+    warmup_bias_lr: Optional[float] = None
     lr_scaling_with_accumulation: str = "linear"
     lr_scale_with_world_size: bool = False
     use_lr_param_groups: bool = False
@@ -615,11 +805,15 @@ class TrainingConfig:
     # "sgd" (default) or "adamw". Recipes that set adamw also set adamw_betas.
     optimizer: str = "sgd"
     momentum: float = 0.9
+    nesterov: bool = False
     weight_decay: float = 0.0001
     adamw_betas: Optional[List[float]] = None
     # 1 keeps every parameter at weight_decay. 0 drops decay on norm / bias.
     weight_decay_norm_mult: float = 1.0
     weight_decay_bias_mult: float = 1.0
+    # False keeps BatchNorm biases in the norm group. True moves them to the
+    # bias group (Ultralytics, MMYOLO), so warmup_bias_lr and bias_mult apply.
+    norm_bias_in_bias_group: bool = False
     use_ema: bool = False
     ema_momentum: float = 0.0002
     ema_gamma: float = 2000.0
@@ -674,12 +868,23 @@ class EvaluationConfig:
     # (IoU matrix once). Null keeps 11-point AP at iou_threshold. OSSDD recipes
     # set 0.10, 0.15, ..., 0.95. iou_threshold still drives GT-cover and accuracy.
     map_iou_thresholds: Optional[List[float]] = None
+    # AP integral per IoU threshold when map_iou_thresholds is set. "all_point" is the
+    # VOC 2010 area under the precision-recall curve (DOTA / OSSDD recipes). "coco101" is
+    # pycocotools: precision envelope read at 101 recall points, at most 100 detections
+    # per image and class, classes without ground truth left out of the mean. The COCO
+    # recipe sets "coco101" so the logged mAP matches COCOeval.
+    map_ap_interpolation: str = "all_point"
     # Final detection NMS IoU for ``odet preds`` / ``make eval-val`` / ``make eval-test``
     # (MMRotate test parity). When set, overrides ``production.final_nms_iou_threshold``
     # on that path. Deploy / image_demo still use ``production.*``. Training val uses ``model.*``.
     final_nms_iou_threshold: Optional[float] = None
 
     def __post_init__(self) -> None:
+        if self.map_ap_interpolation not in ("all_point", "coco101"):
+            raise ValueError(
+                "evaluation.map_ap_interpolation must be 'all_point' or 'coco101', "
+                f"got {self.map_ap_interpolation!r}"
+            )
         if not self.map_iou_thresholds:
             self.map_iou_thresholds = None
             return
@@ -1007,20 +1212,30 @@ PREPROCESSING_DEFAULT_STD = [58.395 / 255.0, 57.12 / 255.0, 57.375 / 255.0]  # R
 
 @dataclass
 class PreprocessingConfig:
-    """Preprocessing. Keys ordered: resize_mode (switch) first, then target_size, normalize_*, pad_*, enable_flip_*, enable_random_rotate_*.
+    """Preprocessing. Keys ordered: resize_mode (switch) first, then target_size, window_size, normalize_*, pad_*, enable_flip_*, flip_prob, enable_random_rotate_*.
 
     resize_mode: ``fixed`` (stretch to target_size), ``pad`` (scale by large edge + pad to
     target_size), ``keep_ratio`` (scale by large edge; then ``pad_size_divisor``, MMRotate
     style), or ``crop`` (native-res crop/pad to target_size).
+
+    window_size: optional ``[H, W]`` sliding-window slice in source pixels. The network
+    still receives ``target_size``. Null (default) keeps the slice equal to ``target_size``
+    and does not resize crops. ``pad`` and ``keep_ratio`` ignore it. Per-axis scale is
+    ``target_size / window_size``.
     """
     resize_mode: str = "fixed"
     target_size: Any = field(default_factory=lambda: [1024, 1024])
+    # Source-pixel sliding-window slice. Null: slice stays target_size (no crop resize).
+    window_size: Optional[List[int]] = None
     normalize_mean: List[float] = field(default_factory=lambda: list(PREPROCESSING_DEFAULT_MEAN))
     normalize_std: List[float] = field(default_factory=lambda: list(PREPROCESSING_DEFAULT_STD))
     pad_size_divisor: int = 32
     enable_flip_horizontal: bool = True
     enable_flip_vertical: bool = True
     enable_flip_diagonal: bool = False
+    # Independent probability of each enabled flip. H+V at 0.5 is 25% each of
+    # none, horizontal, vertical, and both.
+    flip_prob: float = 0.5
     enable_random_rotate: bool = False
     random_rotate_prob: float = 0.5
     random_rotate_angle_range: float = 180.0
@@ -1033,19 +1248,40 @@ class PreprocessingConfig:
     mosaic_pad_val: int = 114
     mosaic_max_cached_images: int = 40
     mosaic_ratio_range: Optional[List[float]] = None
+    # Fraction of box area that must stay on the canvas. 0.2 drops a box once
+    # more than 80% of it is outside. Scale and translate use the same fraction.
+    mosaic_min_visibility: float = 0.2
+    # Cut axis-aligned boxes to the canvas instead of keeping the full extent
+    # (Ultralytics). Rotated boxes are never cut. Off for DOTA.
+    mosaic_clip_boxes: bool = False
     mosaic_disable_last_n_epochs: int = 0
+    # Train only. 0.5 draws a scale in [0.5, 1.5]; 0.1 shifts by up to 10% of the canvas.
+    # 0 leaves the image alone. Validation does not read these.
+    random_scale: float = 0.0
+    random_translate: float = 0.0
+
+
+def _window_size_pair(value: Any) -> Optional[Tuple[int, int]]:
+    """Return ``window_size`` as ``(h, w)``, or None when unset."""
+    if value is None:
+        return None
+    from oriented_det.data.preprocessing import parse_canvas_size
+
+    return parse_canvas_size("fixed", value)
 
 
 def get_preprocessing_params(config: Any) -> Dict[str, Any]:
     """Extract preprocessing params from an experiment config for use in inference.
-    Returns dict with: resize_mode, target_size ((h, w) tuple), normalize_mean, normalize_std,
-    pad_size_divisor, enable_flip_horizontal, enable_flip_vertical, enable_flip_diagonal.
+    Returns dict with: resize_mode, target_size ((h, w) tuple), window_size ((h, w) or
+    None), normalize_mean, normalize_std, pad_size_divisor, enable_flip_horizontal,
+    enable_flip_vertical, enable_flip_diagonal.
     """
     prep = getattr(config, "preprocessing", None)
     if prep is None:
         return {
             "resize_mode": "fixed",
             "target_size": (1024, 1024),
+            "window_size": None,
             "normalize_mean": list(PREPROCESSING_DEFAULT_MEAN),
             "normalize_std": list(PREPROCESSING_DEFAULT_STD),
             "pad_size_divisor": 32,
@@ -1063,6 +1299,7 @@ def get_preprocessing_params(config: Any) -> Dict[str, Any]:
     return {
         "resize_mode": mode,
         "target_size": target_size,
+        "window_size": _window_size_pair(getattr(prep, "window_size", None)),
         "normalize_mean": mean if mean else list(PREPROCESSING_DEFAULT_MEAN),
         "normalize_std": std if std else list(PREPROCESSING_DEFAULT_STD),
         "pad_size_divisor": getattr(prep, "pad_size_divisor", 32),
@@ -1116,9 +1353,17 @@ class TrainingExperimentConfig:
                 )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert config to dictionary, including class information."""
+        """Convert config to dictionary, including class information.
+
+        The ``model`` section keeps only keys that ``model_type`` reads.
+        """
         config_dict = asdict(self)
         _normalize_legacy_loss_type(config_dict)
+        if isinstance(config_dict.get("model"), dict):
+            config_dict["model"] = filter_model_dict_for_save(
+                config_dict["model"],
+                str(config_dict.get("model_type") or ""),
+            )
         # Convert Path objects to strings
         return self._convert_paths_to_strings(config_dict)
     
@@ -1374,6 +1619,14 @@ class TrainingExperimentConfig:
         
         print("Evaluation:")
         print(f"  val_score_threshold: {self.evaluation.val_score_threshold}")
+        _vis = self.tensorboard.vis_score_threshold
+        if _vis is None:
+            print(
+                "  TensorBoard vis_score_threshold: "
+                f"{self.evaluation.val_score_threshold} (evaluation.val_score_threshold)"
+            )
+        else:
+            print(f"  TensorBoard vis_score_threshold: {_vis}")
         print(
             f"  test_score_threshold (test_map / eval-test): "
             f"{self.evaluation.test_score_threshold!r}"
@@ -1385,10 +1638,15 @@ class TrainingExperimentConfig:
         if self.evaluation.map_iou_thresholds:
             from oriented_det.data.evaluation import format_map_iou_span
 
+            integral = (
+                "101-point AP, pycocotools"
+                if self.evaluation.map_ap_interpolation == "coco101"
+                else "area-under-PR"
+            )
             print(
                 "  mAP IoU thresholds: "
                 f"{format_map_iou_span(self.evaluation.map_iou_thresholds)} "
-                "(mean of area-under-PR; rotated boxes)"
+                f"(mean of {integral}; rotated boxes)"
             )
         print(
             f"  final_nms_iou_threshold (odet preds / eval-val): "

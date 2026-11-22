@@ -45,9 +45,10 @@ OrientedDet supports two types of data augmentation:
 
 1. **Geometric Transforms** (Oriented Bounding Box Aware): `apply_random_train_flips`, `apply_random_train_rotate`, `apply_flip_to_*`, `apply_rotate_to_*`
    - These modify both the image and oriented bounding boxes, then `normalize_le90`
-   - **Training** applies flips then rotate from collate (config `preprocessing.enable_flip_*` / `enable_random_rotate`)
+   - **Training** applies flips then rotate from collate (config `preprocessing.enable_flip_*` / `flip_prob` / `enable_random_rotate`)
 
 2. **Albumentations** (Non-Geometric Only): `create_albumentations_augmentation`, `AlbumentationsTransform`
+   - Optional extra `oriented-det[albumentations]` (last MIT release, `albumentations<=2.0.8`). No Hub recipe sets `enable_albumentation`.
    - Only non-geometric augmentations are supported (color, contrast, blur, noise, etc.)
    - **Note:** Albumentations does not support oriented bounding boxes, so only non-geometric transforms can be used
 

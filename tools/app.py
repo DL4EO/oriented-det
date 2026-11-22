@@ -81,13 +81,47 @@ def _patch_gradio_slider_none_payloads() -> None:
 
 _patch_gradio_slider_none_payloads()
 
+
+def _zoom_rgb(img_array: np.ndarray, scale: float) -> np.ndarray:
+    """Resize an RGB image. ``scale == 1`` returns the same array."""
+    if scale == 1.0:
+        return img_array
+    height, width = img_array.shape[:2]
+    return cv2.resize(
+        img_array,
+        (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+        interpolation=cv2.INTER_LINEAR,
+    )
+
+
+def _draw_outlines(
+    img_rgb: np.ndarray,
+    items: List[Tuple[np.ndarray, Tuple[int, int, int]]],
+    thickness: int,
+    zoom_scale: float,
+) -> np.ndarray:
+    """Stroke polygons in display pixels so the width does not grow with zoom.
+
+    ``items`` are ``(points_xy, color_bgr)`` in the unzoomed image. ``thickness``
+    is the stroke width on the already-zoomed image.
+    """
+    if not items:
+        return img_rgb
+    canvas = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    width = max(1, int(thickness))
+    scale = float(zoom_scale)
+    for points, color_bgr in items:
+        scaled = np.round(points.astype(np.float32) * scale).astype(np.int32)
+        cv2.polylines(canvas, [scaled], isClosed=True, color=color_bgr, thickness=width)
+    return cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+
+
 # Add project root to path
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from oriented_det.geometry import RBox
 from oriented_det.data import DOTAAnnotation
-from oriented_det.utils import viz
 
 
 # Image extensions to scan in dataset mode
@@ -258,6 +292,7 @@ class SimpleViewer:
         results: Optional[List[Dict]] = None,
     ):
         self.current_idx = 0
+        self.line_width = 1
         self.sorted_indices = []
         self.current_sort = "no order"
         self.last_thresh_signature = None
@@ -658,6 +693,10 @@ class SimpleViewer:
 
             gt_boxes, gt_class_names = load_dota_annotations(str(txt_path))
 
+        # Outlines are stroked after zoom so ``line_width`` is in screen pixels.
+        gt_outlines: List[Tuple[np.ndarray, Tuple[int, int, int]]] = []
+        pred_outlines: List[Tuple[np.ndarray, Tuple[int, int, int]]] = []
+
         if view_mode == "image":
             out_rgb = img_rgb
         else:
@@ -702,8 +741,7 @@ class SimpleViewer:
                         )
                         cv2.putText(out_bgr, class_name, (tx, ty), font, font_scale, label_fg_bgr, font_thickness)
                 out_bgr = cv2.addWeighted(gt_overlay, gt_fill_alpha, out_bgr, 1.0 - gt_fill_alpha, 0)
-                for points, color_bgr in gt_draw_items:
-                    cv2.polylines(out_bgr, [points], isClosed=True, color=color_bgr, thickness=2)
+                gt_outlines = gt_draw_items
 
             if draw_preds:
                 pred_draw_items = []
@@ -752,26 +790,15 @@ class SimpleViewer:
                             pred_label_fg_bgr,
                             pred_font_thickness,
                         )
-                for points, color_bgr in pred_draw_items:
-                    cv2.polylines(
-                        out_bgr,
-                        [points],
-                        isClosed=True,
-                        color=color_bgr,
-                        thickness=viz.DEFAULT_LINE_WIDTH,
-                    )
+                pred_outlines = pred_draw_items
 
             out_rgb = cv2.cvtColor(out_bgr, cv2.COLOR_BGR2RGB)
 
-        def apply_zoom(img_array: np.ndarray, scale: float) -> Image.Image:
-            if scale == 1.0:
-                return Image.fromarray(img_array, "RGB")
-            h, w = img_array.shape[:2]
-            new_h, new_w = int(h * scale), int(w * scale)
-            resized = cv2.resize(img_array, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-            return Image.fromarray(resized, "RGB")
-
-        return apply_zoom(out_rgb, zoom_scale)
+        zoomed = _zoom_rgb(out_rgb, zoom_scale)
+        outlines = gt_outlines + pred_outlines
+        if outlines:
+            zoomed = _draw_outlines(zoomed, outlines, self.line_width, zoom_scale)
+        return Image.fromarray(zoomed, "RGB")
 
 
 def create_app(
@@ -780,6 +807,7 @@ def create_app(
     data_root: Optional[str] = None,
     tiles_dir: Optional[str] = None,
     threshold: Optional[float] = None,
+    line_width: int = 1,
 ):
     """Create Gradio app for predictions viewer or dataset explorer.
 
@@ -789,6 +817,7 @@ def create_app(
         data_root: Path to data root (required for dataset mode; optional for predictions)
         tiles_dir: Subpath for dataset (e.g. "train", "train/tiles_1024") when mode is "dataset"
         threshold: Confidence threshold for predictions mode (default: 0.3)
+        line_width: Box outline thickness in screen pixels (does not scale with zoom)
     """
     if mode == "dataset":
         if not data_root:
@@ -803,6 +832,7 @@ def create_app(
         viewer = SimpleViewer(predictions_dir=predictions_dir, data_root=data_root)
         if threshold is not None:
             viewer.conf_threshold = threshold
+    viewer.line_width = max(1, int(line_width))
 
     def _build_per_class_thresholds(values: Tuple[Any, ...]) -> Dict[str, float]:
         if not viewer.class_names:
@@ -1041,6 +1071,13 @@ def create_app(
                 label="Zoom Scale",
                 interactive=True,
             )
+            line_width_slider = gr.Slider(
+                minimum=1,
+                maximum=max(8, int(viewer.line_width)),
+                value=int(viewer.line_width),
+                step=1,
+                label="Line width (px)",
+            )
             if viewer.has_predictions:
                 conf_threshold = gr.Slider(
                     minimum=0.0,
@@ -1174,6 +1211,17 @@ def create_app(
                 outputs=tab_outputs_p,
                 preprocess=False,
             )
+
+            def on_line_width_predictions(width, *args):
+                viewer.line_width = max(1, int(round(float(width))))
+                return refresh_prediction_tabs(*args)
+
+            line_width_slider.change(
+                fn=on_line_width_predictions,
+                inputs=[line_width_slider] + prediction_inputs,
+                outputs=tab_outputs_p,
+                preprocess=False,
+            )
             show_labels.change(
                 fn=refresh_prediction_tabs,
                 inputs=prediction_inputs,
@@ -1273,6 +1321,16 @@ def create_app(
                 inputs=[image_idx_state, zoom_scale, sort_mode],
                 outputs=tab_outputs_d,
             )
+
+            def on_line_width_dataset(width, idx, zoom_str, sort_mode_val):
+                viewer.line_width = max(1, int(round(float(width))))
+                return refresh_dataset_tabs(idx, zoom_str, sort_mode_val)
+
+            line_width_slider.change(
+                fn=on_line_width_dataset,
+                inputs=[line_width_slider, image_idx_state, zoom_scale, sort_mode],
+                outputs=tab_outputs_d,
+            )
             sort_mode.change(
                 fn=update_sorting_dataset,
                 inputs=[zoom_scale, sort_mode],
@@ -1327,6 +1385,16 @@ def main():
         help="Confidence threshold for predictions mode (default: 0.3)",
     )
     parser.add_argument(
+        "--line-width",
+        type=int,
+        default=1,
+        help=(
+            "Box outline thickness in screen pixels for predictions and ground truth. "
+            "Drawn after zoom, so 1x/2x/4x keep the same stroke (default: 1). "
+            "The in-app Line width slider starts at this value."
+        ),
+    )
+    parser.add_argument(
         "--annotations-csv",
         type=str,
         default=None,
@@ -1352,6 +1420,8 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.line_width < 1:
+        parser.error("--line-width must be >= 1")
     if args.mode == "predictions" and not args.predictions_dir:
         parser.error("--predictions-dir is required when --mode predictions")
     if args.mode == "dataset" and not args.data_root:
@@ -1378,6 +1448,7 @@ def main():
             data_root=args.data_root,
             tiles_dir=args.tiles_dir,
             threshold=args.threshold,
+            line_width=args.line_width,
         )
     app.launch(server_port=args.port, server_name="0.0.0.0")
 

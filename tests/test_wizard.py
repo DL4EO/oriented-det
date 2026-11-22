@@ -10,6 +10,7 @@ from tools.train import (
     _fpn_level_name,
     _wizard_fcos_box_reg_lines,
     _wizard_fcos_fpn_recommendation,
+    _wizard_model_uses_anchors,
     print_wizard_recommendations,
 )
 
@@ -111,6 +112,10 @@ def _fcos_config(**model_kw) -> TrainingExperimentConfig:
     )
 
 
+def _model_config(model_type: str) -> TrainingExperimentConfig:
+    return TrainingExperimentConfig(model_type=model_type, model=ModelConfig())
+
+
 def _stats_from_widths(widths: np.ndarray, objects_per_image: float = 2.0) -> dict:
     n_obj = int(widths.size)
     n_img = max(1, int(round(n_obj / objects_per_image)))
@@ -139,3 +144,39 @@ def test_print_wizard_planes_recipe_stdout_is_class_agnostic():
     assert "prefer decoded `kfiou`" in out
     for banned in ("small-vehicle", "Small vehicles", "storage-tank", "ship/small"):
         assert banned not in out
+    assert "anchor_ratios" not in out
+    assert "target_stds" not in out
+
+
+def test_wizard_anchor_advice_follows_architecture():
+    assert _wizard_model_uses_anchors("oriented_rcnn")
+    assert _wizard_model_uses_anchors("rotated_faster_rcnn")
+    assert _wizard_model_uses_anchors("rotated_retinanet")
+    assert not _wizard_model_uses_anchors("rotated_fcos")
+    assert not _wizard_model_uses_anchors("rotated_rtmdet")
+    assert not _wizard_model_uses_anchors("yolo_obb")
+
+    # Elongated GT would otherwise trigger an anchor_ratios nudge.
+    widths = _widths_with_percentiles(20.0, 80.0)
+    stats = _stats_from_widths(widths)
+    stats["aspects"] = np.linspace(1.0, 8.0, int(widths.size), dtype=np.float32)
+
+    def _stdout(config: TrainingExperimentConfig) -> str:
+        buf = StringIO()
+        with redirect_stdout(buf):
+            print_wizard_recommendations(stats, config, world_size=1)
+        return buf.getvalue()
+
+    anchored = _stdout(_model_config("rotated_retinanet"))
+    assert "anchor_ratios" in anchored
+    assert "target_stds" in anchored
+
+    for config in (
+        _model_config("rotated_rtmdet"),
+        _model_config("yolo_obb"),
+        _fcos_config(),
+    ):
+        out = _stdout(config)
+        assert "anchor_ratios" not in out
+        assert "target_stds" not in out
+        assert "anchor" not in out.lower()

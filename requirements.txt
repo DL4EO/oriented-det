@@ -7,12 +7,15 @@ torch>=2.4.0
 torchvision>=0.19.0
 numpy>=1.24
 Pillow>=9.0
-albumentations>=1.3.0
 tqdm>=4.65.0
 tensorboard>=2.10
 matplotlib>=3.5.0
 huggingface_hub>=0.20.0
 shapely>=2.0.0
+
+# Optional photometric augs (no Hub recipe sets enable_albumentation).
+# Last MIT release only; AlbumentationsX is AGPL-3.0:
+#   uv pip install -e ".[albumentations]"
 
 # Viewer dependencies
 gradio==6.8.0

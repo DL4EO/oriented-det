@@ -924,7 +924,7 @@ def _eval_pairwise_rbox_iou(
         return iou_ops.batch_rbox_iou(list(boxes_a), list(boxes_b))
 
     _require_torch()
-    from ..ops.gpu_ops import oriented_box_iou_gpu
+    from ..ops.gpu_ops import eval_oriented_box_iou_gpu
     from ..ops.utils import rboxes_to_tensor
 
     dev = device
@@ -932,7 +932,7 @@ def _eval_pairwise_rbox_iou(
         dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ta = rboxes_to_tensor(boxes_a, device=dev)
     tb = rboxes_to_tensor(boxes_b, device=dev)
-    return oriented_box_iou_gpu(ta, tb).detach().cpu().tolist()
+    return eval_oriented_box_iou_gpu(ta, tb).detach().cpu().tolist()
 
 
 def _per_image_class_agnostic_duplicate_stats(
@@ -1201,6 +1201,7 @@ def evaluate(
     vis_score_threshold: Optional[float] = None,
     iou_threshold: float = 0.5,
     map_iou_thresholds: Optional[Sequence[float]] = None,
+    map_ap_interpolation: str = "all_point",
     extended_gt_metrics: bool = False,
     compute_map: bool = True,
     log_images: bool = True,
@@ -1237,6 +1238,8 @@ def evaluate(
         vis_score_threshold: Min score for boxes drawn in TensorBoard images; None = use score_threshold
         iou_threshold: IoU threshold for single-threshold mAP, and for GT-cover / accuracy
         map_iou_thresholds: When set, mAP is the mean of area-under-PR at these rotated-IoU values
+        map_ap_interpolation: AP integral per IoU threshold, ``"all_point"`` or ``"coco101"``
+            (pycocotools 101-point, 100 detections per image and class)
         compute_map: Whether to compute mAP (can be slow with many detections)
         log_images: Whether to log prediction images to TensorBoard
         max_images_to_log: Maximum number of images to log per epoch (to avoid slowing down training)
@@ -1440,20 +1443,9 @@ def evaluate(
                     if isinstance(rboxes, list) and len(rboxes) > 0:
                         rboxes = [rbox for rbox, keep in zip(rboxes, mask) if keep]
 
-                # When padding was applied, detections are in padded image coords; GTs are in content coords. Clamp detection centers to content rect for correct IoU.
-                def _clamp_rbox_to_content(rb, c_h: float, c_w: float):
-                    cx_c = max(0.0, min(c_w, rb.cx))
-                    cy_c = max(0.0, min(c_h, rb.cy))
-                    return RBox(cx_c, cy_c, rb.width, rb.height, rb.angle)
-
-                clamp_rbox = lambda r: r
-                content_size = target.get("content_size")
-                if content_size is not None and RBox is not None:
-                    content_h, content_w = float(content_size[0]), float(content_size[1])
-                    im_h = float(image_tensor.shape[-2])
-                    im_w = float(image_tensor.shape[-1])
-                    if (content_h, content_w) != (im_h, im_w):
-                        clamp_rbox = lambda r, ch=content_h, cw=content_w: _clamp_rbox_to_content(r, ch, cw)
+                # Detections and ground truth share the padded canvas frame
+                # (preprocessing translates boxes by the pad offset), so no
+                # coordinate correction is applied here.
 
                 # Convert predictions to Detection objects
                 detections = []
@@ -1466,7 +1458,7 @@ def evaluate(
                             label_id_int = int(label_id.item()) if torch.is_tensor(label_id) else int(label_id)
                             class_name = id_to_class.get(label_id_int, f"class_{label_id_int}")
                             raw_detections.append(Detection(
-                                rbox=clamp_rbox(rbox),
+                                rbox=rbox,
                                 score=float(score.item()) if torch.is_tensor(score) else float(score),
                                 class_id=label_id_int,
                                 class_name=class_name,
@@ -1481,7 +1473,7 @@ def evaluate(
                             class_name = id_to_class.get(label_id_int, f"class_{label_id_int}")
                             pred_classes_set.add(class_name)
                             detections.append(Detection(
-                                rbox=clamp_rbox(rbox),
+                                rbox=rbox,
                                 score=float(score.item()) if torch.is_tensor(score) else float(score),
                                 class_id=label_id_int,
                                 class_name=class_name,
@@ -1891,6 +1883,7 @@ def evaluate(
                     use_exact_rotated_iou=eval_use_exact_rotated_iou,
                     iou_thresholds=map_iou_thresholds,
                     iou_ap_out=iou_ap_out,
+                    ap_interpolation=map_ap_interpolation,
                 )
                 _map_elapsed = time.perf_counter() - _map_t0
                 summary["mAP"] = mean_ap
@@ -2119,6 +2112,7 @@ def train(
     eval_vis_score_threshold: Optional[float] = None,
     eval_iou_threshold: float = 0.5,
     eval_map_iou_thresholds: Optional[Sequence[float]] = None,
+    eval_map_ap_interpolation: str = "all_point",
     eval_extended_gt_metrics: bool = False,
     eval_compute_map_final: bool = False,
     eval_compute_map_test: bool = False,
@@ -2175,6 +2169,7 @@ def train(
             ``evaluation.test_score_threshold`` (null → 0.05).
         eval_iou_threshold: IoU threshold for single-threshold mAP and GT-cover / accuracy
         eval_map_iou_thresholds: When set, reported mAP averages area-under-PR over these IoUs
+        eval_map_ap_interpolation: AP integral per IoU threshold (``evaluation.map_ap_interpolation``)
         eval_compute_map_final: If True, after training load the best checkpoint and compute val mAP once
         eval_compute_map_test: If True, after training load that same checkpoint and compute test mAP once.
             The test score does not choose the best checkpoint.
@@ -2398,6 +2393,7 @@ def train(
                 vis_score_threshold=eval_vis_score_threshold,
                 iou_threshold=eval_iou_threshold,
                 map_iou_thresholds=eval_map_iou_thresholds,
+                map_ap_interpolation=eval_map_ap_interpolation,
                 extended_gt_metrics=extended_gt_this_epoch,
                 compute_map=compute_map_this_epoch and (rank is None or rank == 0),  # Only rank 0 computes mAP
                 log_images=log_images and (rank is None or rank == 0),  # Only rank 0 logs images
@@ -2667,6 +2663,7 @@ def train(
                     vis_score_threshold=eval_vis_score_threshold,
                     iou_threshold=eval_iou_threshold,
                     map_iou_thresholds=eval_map_iou_thresholds,
+                    map_ap_interpolation=eval_map_ap_interpolation,
                     extended_gt_metrics=eval_extended_gt_metrics,
                     compute_map=(rank is None or rank == 0),
                     log_images=False,

@@ -27,6 +27,7 @@ def test_pad_preserves_aspect_ratio():
     # Longer edge scaled to 1024 → content is 1024×512, centered vertically.
     assert result.meta.content_size == (512, 1024)
     assert abs(result.meta.scale - 1024 / 2000) < 1e-5
+    assert result.image.getpixel((0, 0)) == (114, 114, 114)
 
 
 def test_crop_keeps_native_resolution():

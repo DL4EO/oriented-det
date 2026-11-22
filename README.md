@@ -15,7 +15,7 @@
 - **Geometry**: Rotated bounding boxes (rbox: cx, cy, w, h, angle), quadrilateral boxes (qbox), polygon ↔ rbox ↔ hbox conversions, angle normalization (le90, 0–180°), flip/rotate/scale transforms, visualization helpers
 - **IoU & NMS**: Rotated IoU and oriented NMS (CPU with optional GPU kernels when available); AABB pre-filtering; `obb_to_xyxy` / HBB conversion
 - **Datasets**: DOTA polygon loader (pattern, split file, or separate folders), **HRSC2016** native XML loader, **FAIR1M** 37-class XML loader (+ convert/tile tutorial), **SSDD** and **HRSID** SAR ship loaders (finetune DOTA 1× Hub locally; no SAR zoo), image tiling, label filtering, ignore masks, oriented mAP evaluation
-- **Models**: **Oriented R-CNN** ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html); horizontal RPN + MidpointOffset → oriented RoIAlign + oriented ROI head), **Rotated Faster R-CNN** (Ren et al., NeurIPS 2015 two-stage baseline with horizontal RPN + horizontal RoIAlign + rotated ROI head; MMRotate reference), **Rotated RetinaNet** ([Lin et al., ICCV 2017](https://openaccess.thecvf.com/content_ICCV_2017/papers/Lin_Focal_Loss_for_ICCV_2017_paper.pdf); oriented anchors, sigmoid focal loss), **Rotated FCOS** (anchor-free single-stage; distance-angle coder, centerness, L1 / KFIoU / decoded rIoU), **Rotated RTMDet** (CSPNeXt + PAFPN single-stage speed tier; SepBN head, dynamic soft-label assigner, decoded rIoU); ResNet + FPN and CSPNeXt backbones; selective loading of external checkpoints where configs wire `checkpoint.load_from_checkpoint`
+- **Models**: **Oriented R-CNN** ([Xie et al., ICCV 2021](https://openaccess.thecvf.com/content/ICCV2021/html/Xie_Oriented_R-CNN_for_Object_Detection_ICCV_2021_paper.html); horizontal RPN + MidpointOffset → oriented RoIAlign + oriented ROI head), **Rotated Faster R-CNN** (Ren et al., NeurIPS 2015 two-stage baseline with horizontal RPN + horizontal RoIAlign + rotated ROI head; MMRotate reference), **Rotated RetinaNet** ([Lin et al., ICCV 2017](https://openaccess.thecvf.com/content_ICCV_2017/papers/Lin_Focal_Loss_for_ICCV_2017_paper.pdf); oriented anchors, sigmoid focal loss), **Rotated FCOS** (anchor-free single-stage; distance-angle coder, centerness, L1 / KFIoU / decoded rIoU), **Rotated RTMDet** (CSPNeXt + PAFPN single-stage speed tier; SepBN head, dynamic soft-label assigner, decoded rIoU), **YOLO-OBB** (C2f CSP + PAFPN; DFL box head, task-aligned assigner; Hub Task 1 **77.80%**); ResNet + FPN and CSPNeXt / C2f backbones; selective loading of external checkpoints where configs wire `checkpoint.load_from_checkpoint`
 - **Training**: JSON configs + **`odet train`**, mixed precision (AMP), gradient accumulation, checkpointing, best-metric tracking, TensorBoard, optional curriculum learning and profiling
 - **ONNX export**: pre-NMS ONNX + Python NMS (`odet export` / `make export-onnx`); consumers run ONNX Runtime only
 
@@ -46,6 +46,7 @@ uv pip install -e .
 - To auto-activate `.venv` when entering this repo, install the [`direnv`](https://direnv.net/) shell hook and run `direnv allow` from the repo root. The local `.envrc` is intentionally gitignored so each developer can opt in on their machine.
 - From PyPI: `pip install oriented-det`
 - For development and tests: `uv pip install -e ".[dev]"`
+- For photometric Albumentations (optional; no Hub recipe enables it): `uv pip install -e ".[albumentations]"` or `pip install "oriented-det[albumentations]"`. The extra is capped at the last MIT release (`albumentations<=2.0.8`). [AlbumentationsX](https://albumentations.ai/docs/license/) is AGPL-3.0.
 - For the Gradio prediction viewer: `uv pip install -e ".[viewer]"` or `pip install "oriented-det[viewer]"`
 - For **ONNX export**: `uv pip install -e ".[export]"` then `odet export --help` (see [ONNX export](docs/examples/export.md))
 - For **macOS Apple Silicon** or **CPU-only**, see [Installation](docs/getting-started/installation.md) and the [macOS walkthrough](https://deeplearning.earth/posts/2026-06-25_oriented_object_detection_on_macos_in_pure_python/) (`odet image-demo` on MPS, no CUDA toolchain).
@@ -158,7 +159,7 @@ DOTA configs: per-model `dota_le90_1x.json` under [configs/](configs/) (3× wher
 
 ## Pretrained weights and evaluation
 
-- Place exported best checkpoints under **`pretrained/`** or use Hub slugs (`odet pretrained download oriented_rcnn_dota_le90_3x`, `rotated_faster_rcnn_dota_le90_1x`, `rotated_faster_rcnn_dota_le90_3x`, `rotated_fcos_dota_le90_1x`, `rotated_rtmdet_dota_le90_3x`, or `oriented_rcnn_hrsc2016_le90_3x` / `rotated_faster_rcnn_hrsc2016_le90_3x` / `rotated_fcos_hrsc2016_le90_3x`). See [pretrained/README.md](pretrained/README.md) and [configs/README.md](configs/README.md#dota-pretrained-models-model-zoo). Zoo write-ups: [v0.1.1](https://deeplearning.earth/posts/2026-07-11_oriented-det_v0_1_1_prob_iou_mmrotate_parity_and_the_updated_zoo/) · [v0.2.0 FCOS](https://deeplearning.earth/posts/2026-08-28_oriented-det_v0_2_0_rotated_fcos_decoded_riou_and_the_updated_zoo/) · [optical satellite demo](https://deeplearning.earth/posts/2026-09-06_oriented_det_optical_satellite_demo/).
+- Place exported best checkpoints under **`pretrained/`** or use Hub slugs (`odet pretrained download yolo_obb_dota_le90_12x`, `rotated_rtmdet_dota_le90_3x`, `oriented_rcnn_dota_le90_1x`, `rotated_faster_rcnn_dota_le90_1x`, `rotated_fcos_dota_le90_1x`, or `oriented_rcnn_hrsc2016_le90_3x` / `rotated_faster_rcnn_hrsc2016_le90_3x` / `rotated_fcos_hrsc2016_le90_3x`). See [pretrained/README.md](pretrained/README.md) and [configs/README.md](configs/README.md#dota-pretrained-models-model-zoo). Zoo write-ups: [v0.1.1](https://deeplearning.earth/posts/2026-07-11_oriented-det_v0_1_1_prob_iou_mmrotate_parity_and_the_updated_zoo/) · [v0.2.0 FCOS](https://deeplearning.earth/posts/2026-08-28_oriented-det_v0_2_0_rotated_fcos_decoded_riou_and_the_updated_zoo/) · [optical satellite demo](https://deeplearning.earth/posts/2026-09-06_oriented_det_optical_satellite_demo/).
 - **Tiled validation:** after training, run `make preds` then `make metrics`. Published mAP reports: [`docs/eval-reports/`](docs/eval-reports/) (git). Raw detections for the viewer: gitignored [`predictions/`](predictions/).
 
 ## Important notes
@@ -177,9 +178,11 @@ See **[docs/roadmap.md](docs/roadmap.md)** for the full public plan. Summary:
 - **v0.3** (shipped): HRSC2016 loader + Hub 3× zoo (Oriented R-CNN 90.41%, Faster R-CNN 88.77%, FCOS 88.34% eval-val); FAIR1M loader + 1× recipes; SSDD + HRSID SAR loaders + 1× recipes (SSDD Faster R-CNN held-out **90.34%**, HRSID **78.55%**; train locally, no SAR Hub)
 - **v0.4.0** (shipped): Rotated RTMDet; Hub `rotated_rtmdet_dota_le90_3x` (**77.60%** official Task 1)
 - **v0.4.1** (shipped): Citation and discoverability (`CITATION.cff`, oriented/rotated + aerial/satellite copy)
-- **v0.4.2**: native YOLO-OBB (already in the tree; COCO pretrain and DOTA training next)
-- **v0.4.3**: Rotated RTMDet-S multi-scale DOTA
-- **v0.5+**: Swin-FPN backbone; optional fused CUDA kernels; hosted docs
+- **v0.4.2** (shipped): native YOLO-OBB; Hub `yolo_obb_dota_le90_12x` (**77.80%** official Task 1; COCO trunk `yolo_obb_coco_300e`)
+- **v0.5–v0.5.2**: Swin-T + FPN — Oriented R-CNN (1× and 3× Hub in one release), then Faster R-CNN (v0.5.1), FCOS if latency allows (v0.5.2). Swin stays off RTMDet and YOLO-OBB
+- **Optional, not a release:** DOTA multi-scale training (patch 1024, overlap 500, resize rates 0.5 / 1.0 / 1.5); recipe work on the six current models judged by AP75 or a weak class on a held-out split at the operating resolution
+- **v1.0**: stable API, hosted docs, complete model zoo
+- **v1.1**: oriented DINO in this repo (DOTA; Hub only if it beats Swin Oriented R-CNN)
 
 ## Contributing
 
@@ -191,7 +194,7 @@ OrientedDet is Apache-2.0 open source. For **consulting, training workshops, or 
 
 ## Publishing to PyPI
 
-Version **0.4.0** — tag releases as **`v0.4.0`** (git) matching `version` in `pyproject.toml`.
+Version **0.4.2** — tag releases as **`v0.4.2`** (git) matching `version` in `pyproject.toml`.
 
 Configs: edit **`configs/`** at the repo root, then **`make sync-configs`** so **`oriented_det/configs/`** stays in sync (see **`oriented_det/configs/vendored_manifest.txt`**). CI runs **`make check-configs`**.
 
@@ -222,7 +225,7 @@ make check-configs
 pytest tests/ -q
 ```
 
-Bump version in `pyproject.toml` and `docs/changelog.md` if needed (currently **0.4.0**).
+Bump version in `pyproject.toml` and `docs/changelog.md` if needed (currently **0.4.2**).
 
 #### 3. Build locally
 

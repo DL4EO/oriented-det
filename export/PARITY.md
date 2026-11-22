@@ -11,7 +11,8 @@ The delivered graph is **ONNX pre-NMS** (`rotated_fcos_pre_nms` for FCOS). Prepr
 | Per-level pre-NMS cap | Always `topk(min(nms_pre, H×W))` then score / size / finite filters. Invalid top-k rows are zeroed (`score=0`, `w=h=0`) and left in the padded tensor. |
 | Pre-NMS output padding | `pad_pre_nms_detections`. Default `P = nms_pre ×` FPN levels. |
 | Final NMS / score floors | `export.postprocess.finalize_detections_numpy` calling `export.nms` (numpy clip, or Shapely if `nms_backend=shapely`). Production `score_threshold` applied **before** NMS. FCOS eval NMS is class-aware; production configs may set `nms_class_agnostic`. Small float drift vs Shapely is possible on the `python` backend. |
-| Sliding-window tiling, margin filter, GeoJSON | Out of scope — same as deploy (`oriented_det.runtime.inference`). |
+| Sliding-window tiling | `detect_image` tiles `fixed` / `crop` images larger than `window_size` (else `target_size`). Same edge-flush grid and `target_size / window_size` box scale as `run_inference_sliding_window`. Overlap default 200 px. Per-window NMS, then a second NMS across windows. Interior overlap margin stays 0. `pad` / `keep_ratio` are a single resize. |
+| GeoJSON | Out of scope — PyTorch deploy path. |
 
 ## `rotated_rtmdet_pre_nms`
 
@@ -36,4 +37,4 @@ Tensor-only subgraphs. Full detections need decode + NMS elsewhere. Prefer `rota
 
 ## Regression tests
 
-Wrapper/ONNX parity: `test_export_wrappers.py`, `test_faster_rcnn_export_parity.py`, `test_oriented_rcnn_export_parity.py`, `test_rotated_fcos_export_parity.py`, `test_rotated_rtmdet_export_parity.py`. Preprocess vs torchvision: `test_preprocess.py`. Numpy NMS: `test_nms.py`, `test_postprocess.py`. Consumer stack without oriented-det: `test_standalone_runtime.py`.
+Wrapper/ONNX parity: `test_export_wrappers.py`, `test_faster_rcnn_export_parity.py`, `test_oriented_rcnn_export_parity.py`, `test_rotated_fcos_export_parity.py`, `test_rotated_rtmdet_export_parity.py`. Preprocess vs torchvision: `test_preprocess.py`. Numpy NMS: `test_export_nms.py`, `test_postprocess.py`. Consumer stack without oriented-det: `test_standalone_runtime.py`.

@@ -121,6 +121,8 @@ def test_build_export_meta_includes_preprocess_postprocess(tmp_path: Path) -> No
         onnx_path=onnx_path,
     )
     assert meta["preprocess"]["normalize_mean"] == [0.1, 0.2, 0.3]
+    assert meta["preprocess"]["window_size"] is None
+    assert meta["preprocess"]["overlap_pixels"] == 200
     assert meta["postprocess"]["score_threshold"] == 0.2
     assert meta["postprocess"]["nms_class_agnostic"] is True
     assert meta["postprocess"]["nms_backend"] == "python"

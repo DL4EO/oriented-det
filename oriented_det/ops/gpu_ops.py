@@ -830,6 +830,33 @@ def oriented_box_hbb_iou_gpu(anchors: Tensor, gt_boxes: Tensor) -> Tensor:
     return hbb_iou_gpu(xyxy_anchors, xyxy_gt)
 
 
+def _all_axis_aligned(boxes: Tensor, tol: float = 1e-4) -> bool:
+    """True when every angle is a multiple of 90° (radians), so the OBB is its own HBB."""
+    return bool((torch.sin(2.0 * boxes[:, 4]).abs() <= tol).all())
+
+
+def eval_oriented_box_iou_gpu(boxes1: Tensor, boxes2: Tensor) -> Tensor:
+    """IoU matrix for evaluation: exact when every box is axis-aligned, sampled otherwise.
+
+    Horizontal recipes (COCO with ``yolo_obb_force_horizontal``) have a closed-form IoU;
+    the sampling grid of ``oriented_box_iou_gpu`` under-reads it by about one mAP point
+    at IoU 0.85–0.95. Rotated boxes keep the sampling approximation. Evaluation only;
+    training assigners call ``oriented_box_iou_gpu`` directly.
+
+    Args:
+        boxes1: [N, 5] (cx, cy, w, h, angle)
+        boxes2: [M, 5] (cx, cy, w, h, angle)
+
+    Returns:
+        [N, M] IoU matrix
+    """
+    if boxes1.shape[0] == 0 or boxes2.shape[0] == 0:
+        return torch.zeros((boxes1.shape[0], boxes2.shape[0]), device=boxes1.device)
+    if _all_axis_aligned(boxes1) and _all_axis_aligned(boxes2):
+        return oriented_box_hbb_iou_gpu(boxes1, boxes2)
+    return oriented_box_iou_gpu(boxes1, boxes2)
+
+
 def match_anchors_to_gt_gpu(
     anchors: Tensor,
     gt_boxes: Tensor,
@@ -1097,6 +1124,7 @@ def hbb_nms_for_oriented_boxes_gpu(
 
 __all__ = [
     "oriented_box_iou_gpu",
+    "eval_oriented_box_iou_gpu",
     "obb_to_xyxy_gpu",
     "hbb_iou_gpu",
     "oriented_box_hbb_iou_gpu",

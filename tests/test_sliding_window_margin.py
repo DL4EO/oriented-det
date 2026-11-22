@@ -1,10 +1,17 @@
 """Per-window centroid margin during sliding-window inference (runtime.inference)."""
 
+import torch
+from PIL import Image
+
+from oriented_det import RBox
 from oriented_det.runtime.inference import (
     _centroid_in_sliding_window_interior,
     _sliding_window_grid,
     count_sliding_window_positions,
+    get_model_size,
+    preprocess_crop,
     resolve_sliding_window_margin_pixels,
+    run_inference_sliding_window,
     uses_native_sliding_window,
 )
 
@@ -84,6 +91,132 @@ def test_pad_mode_never_uses_native_sliding_window():
     keep = {"resize_mode": "keep_ratio", "target_size": [800, 800], "pad_size_divisor": 32}
     assert uses_native_sliding_window(824, 1234, keep) is False
     assert count_sliding_window_positions(824, 1234, keep, overlap_pixels=0) == 1
+
+
+def test_window_size_tiles_at_source_pixels():
+    zoomed = {
+        "resize_mode": "fixed",
+        "target_size": [1024, 1024],
+        "window_size": [512, 512],
+    }
+    assert get_model_size(zoomed) == (512, 512)
+    assert uses_native_sliding_window(512, 512, zoomed) is False
+    assert count_sliding_window_positions(512, 512, zoomed, overlap_pixels=0) == 1
+    assert uses_native_sliding_window(1024, 1024, zoomed) is True
+    assert count_sliding_window_positions(1024, 1024, zoomed, overlap_pixels=0) == 4
+
+    # Rewriting the network canvas must not change the source slice.
+    rewritten = dict(zoomed, target_size=[2048, 2048])
+    assert get_model_size(rewritten) == (512, 512)
+    assert count_sliding_window_positions(1024, 1024, rewritten, overlap_pixels=0) == 4
+
+    legacy = {"resize_mode": "fixed", "target_size": [1024, 1024]}
+    assert legacy.get("window_size") is None
+    assert get_model_size(legacy) == (1024, 1024)
+    assert uses_native_sliding_window(2048, 2048, legacy) is True
+    assert count_sliding_window_positions(2048, 2048, legacy, overlap_pixels=0) == 4
+
+    pad = {"resize_mode": "pad", "target_size": [800, 800], "window_size": [512, 512]}
+    assert get_model_size(pad) == (800, 800)
+    assert uses_native_sliding_window(4096, 4096, pad) is False
+    assert count_sliding_window_positions(4096, 4096, pad, overlap_pixels=0) == 1
+    keep = {
+        "resize_mode": "keep_ratio",
+        "target_size": [800, 800],
+        "window_size": [512, 512],
+        "pad_size_divisor": 32,
+    }
+    assert uses_native_sliding_window(4096, 4096, keep) is False
+    assert count_sliding_window_positions(4096, 4096, keep, overlap_pixels=0) == 1
+
+
+def test_preprocess_crop_resizes_only_when_window_size_set():
+    crop = Image.new("RGB", (512, 512), 0)
+    norm = {"normalize_mean": [0.0, 0.0, 0.0], "normalize_std": [1.0, 1.0, 1.0]}
+    legacy = {"resize_mode": "fixed", "target_size": (1024, 1024), **norm}
+    assert tuple(preprocess_crop(crop, legacy, 512, 512).shape) == (3, 512, 512)
+
+    zoomed = {**legacy, "window_size": (512, 512)}
+    assert tuple(preprocess_crop(crop, zoomed, 512, 512).shape) == (3, 1024, 1024)
+    same = Image.new("RGB", (1024, 1024), 0)
+    assert tuple(preprocess_crop(same, zoomed, 1024, 1024).shape) == (3, 1024, 1024)
+
+
+def test_window_size_maps_network_center_to_source_slice():
+    """A box at the center of the 1024 tensor from slice origin (x0, y0) lands at (x0+256, y0+256)."""
+    seen = []
+
+    def fake(images):
+        for im in images:
+            seen.append(tuple(im.shape))
+        return [
+            {
+                "rboxes": [RBox(512.0, 512.0, 80.0, 40.0, 0.0)],
+                "scores": torch.tensor([0.99]),
+                "labels": torch.tensor([1]),
+            }
+            for _ in images
+        ]
+
+    prep = {
+        "resize_mode": "fixed",
+        "target_size": (1024, 1024),
+        "window_size": (512, 512),
+        "normalize_mean": [0.0, 0.0, 0.0],
+        "normalize_std": [1.0, 1.0, 1.0],
+    }
+    image = Image.new("RGB", (1024, 1024), (8, 8, 8))
+    dets = run_inference_sliding_window(
+        fake,
+        image,
+        "cpu",
+        prep,
+        score_threshold=0.5,
+        nms_threshold=0.5,
+        overlap_pixels=0,
+        window_batch_size=4,
+    )
+    assert seen == [(3, 1024, 1024)] * 4
+    centers = sorted((d["rbox"].cx, d["rbox"].cy) for d in dets)
+    assert centers == [(256.0, 256.0), (256.0, 768.0), (768.0, 256.0), (768.0, 768.0)]
+    assert all(d["rbox"].width == 40.0 and d["rbox"].height == 20.0 for d in dets)
+
+
+def test_window_size_scales_before_centroid_margin():
+    """A network-space cx of 100 is source cx 50, inside a 64px interior margin."""
+
+    def fake(images):
+        return [
+            {
+                "rboxes": [RBox(100.0, 512.0, 20.0, 20.0, 0.0)],
+                "scores": torch.tensor([0.99]),
+                "labels": torch.tensor([1]),
+            }
+            for _ in images
+        ]
+
+    prep = {
+        "resize_mode": "fixed",
+        "target_size": (1024, 1024),
+        "window_size": (512, 512),
+        "normalize_mean": [0.0, 0.0, 0.0],
+        "normalize_std": [1.0, 1.0, 1.0],
+    }
+    image = Image.new("RGB", (2048, 2048), 0)
+    dets = run_inference_sliding_window(
+        fake,
+        image,
+        "cpu",
+        prep,
+        score_threshold=0.5,
+        nms_threshold=0.5,
+        overlap_pixels=0,
+        window_batch_size=16,
+        window_margin_pixels=64,
+    )
+    # Left image border skips the margin, so only x0=0 keeps source cx=50.
+    centers = sorted((d["rbox"].cx, d["rbox"].cy) for d in dets)
+    assert centers == [(50.0, 256.0), (50.0, 768.0), (50.0, 1280.0), (50.0, 1792.0)]
 
 
 def test_fixed_mode_still_tiles_oversized_dota_rasters():

@@ -914,6 +914,53 @@ def create_multistep_lr_scheduler(
     return scheduler, gammas
 
 
+def linear_lr_factor(epoch: int, num_epochs: int, end_factor: float) -> float:
+    """Ultralytics linear decay: ``(1 - epoch / num_epochs) * (1 - lrf) + lrf``."""
+    if int(num_epochs) <= 0:
+        return float(end_factor)
+    progress = min(max(int(epoch), 0) / float(num_epochs), 1.0)
+    return (1.0 - progress) * (1.0 - float(end_factor)) + float(end_factor)
+
+
+def create_linear_lr_scheduler(
+    optimizer: "optim.Optimizer",
+    training: Any,
+    *,
+    last_epoch: int = -1,
+) -> Tuple[Any, int, float]:
+    """Linear decay from the base LR to ``learning_rate * lr_scheduler_linear_end_factor``."""
+    _require_torch()
+    num_epochs = int(training.num_epochs)
+    end_factor = float(getattr(training, "lr_scheduler_linear_end_factor", 0.01))
+    if end_factor < 0:
+        raise ValueError(
+            f"lr_scheduler_linear_end_factor must be >= 0, got {end_factor}"
+        )
+    scheduler = optim.lr_scheduler.LambdaLR(
+        optimizer,
+        lr_lambda=lambda epoch, n=num_epochs, f=end_factor: linear_lr_factor(epoch, n, f),
+        last_epoch=last_epoch,
+    )
+    return scheduler, num_epochs, end_factor
+
+
+def format_linear_scheduler_description(
+    num_epochs: int,
+    end_factor: float,
+    base_lr: float,
+    warmup_steps: int,
+) -> str:
+    """Human-readable line for ``linear``."""
+    final_lr = float(base_lr) * float(end_factor)
+    core = (
+        f"LinearLR (epochs={num_epochs}, end_factor={end_factor:g}, "
+        f"final_lr={final_lr:g})"
+    )
+    if warmup_steps > 0:
+        return f"{core} + warmup {warmup_steps} steps"
+    return core
+
+
 def create_pytorch_cosine_lr_scheduler(
     optimizer: "optim.Optimizer",
     training: Any,
@@ -1058,27 +1105,36 @@ def apply_weight_decay_multipliers(
     weight_decay: float,
     norm_mult: float,
     bias_mult: float,
+    *,
+    force_split: bool = False,
+    norm_bias_in_bias_group: bool = False,
 ) -> List[Dict[str, Any]]:
     """Split param groups so norm and bias can use a different weight decay.
 
-    When both multipliers are 1, groups are returned unchanged. Otherwise each
-    group is split into conv/other weights (``weight_decay``), BatchNorm and
-    GroupNorm parameters (``weight_decay * norm_mult``), and other biases
-    (``weight_decay * bias_mult``).
+    When both multipliers are 1 and ``force_split`` is false, groups are
+    returned unchanged. Otherwise each group is split into conv/other weights
+    (``weight_decay``), BatchNorm and GroupNorm parameters
+    (``weight_decay * norm_mult``), and other biases
+    (``weight_decay * bias_mult``). Each split group is tagged ``name``
+    ``decay``, ``norm``, or ``bias``. BatchNorm biases stay in ``norm``
+    unless ``norm_bias_in_bias_group`` is true, which is how Ultralytics and
+    MMYOLO group them: norm weights in ``norm``, every bias in ``bias``.
     """
-    if float(norm_mult) == 1.0 and float(bias_mult) == 1.0:
+    if not force_split and float(norm_mult) == 1.0 and float(bias_mult) == 1.0:
         return [dict(group) for group in param_groups]
     _require_torch()
     norm_types = _norm_parameter_types()
     norm_ids: set[int] = set()
     bias_ids: set[int] = set()
     for module in model.modules():
-        if isinstance(module, norm_types):
-            for param in module.parameters(recurse=False):
-                norm_ids.add(id(param))
         bias = getattr(module, "bias", None)
         if isinstance(bias, torch.nn.Parameter):
             bias_ids.add(id(bias))
+        if isinstance(module, norm_types):
+            for param in module.parameters(recurse=False):
+                if norm_bias_in_bias_group and id(param) in bias_ids:
+                    continue
+                norm_ids.add(id(param))
     out: List[Dict[str, Any]] = []
     decay_value = float(weight_decay)
     buckets_wd = (
@@ -1101,6 +1157,7 @@ def apply_weight_decay_multipliers(
             new_group = {k: v for k, v in group.items() if k != "params"}
             new_group["params"] = buckets[key]
             new_group["weight_decay"] = wd
+            new_group["name"] = key
             out.append(new_group)
     return out
 
@@ -1118,6 +1175,7 @@ class WarmupScheduler:
     """Learning rate scheduler with warmup that wraps a base scheduler.
     
     During warmup, the learning rate increases linearly from 0 to the base learning rate.
+    Groups tagged ``name == "bias"`` start at ``warmup_bias_lr`` when that value is set.
     After warmup, it uses the base scheduler (stepped per epoch, not per optimizer step).
     
     This is useful for stabilizing training in the early stages, especially when using
@@ -1137,13 +1195,33 @@ class WarmupScheduler:
         >>>     warmup_scheduler.step_epoch()  # Step base scheduler per epoch
     """
     
-    def __init__(self, optimizer: optim.Optimizer, base_scheduler: optim.lr_scheduler._LRScheduler, warmup_steps: int):
+    def __init__(
+        self,
+        optimizer: optim.Optimizer,
+        base_scheduler: optim.lr_scheduler._LRScheduler,
+        warmup_steps: int,
+        *,
+        advance_base_during_warmup: bool = False,
+        warmup_momentum: Optional[float] = None,
+        warmup_bias_lr: Optional[float] = None,
+    ):
         """Initialize warmup scheduler.
         
         Args:
             optimizer: The optimizer whose learning rate will be scheduled
             base_scheduler: The base scheduler (e.g., StepLR) to use after warmup
             warmup_steps: Number of optimizer steps for warmup (not epochs)
+            advance_base_during_warmup: Also step ``base_scheduler`` once per epoch
+                while warmup is running, then put the warmup LR back. Linear decay
+                uses this so the epoch index keeps moving and the last epoch still
+                reaches ``learning_rate * end_factor``. Other schedules leave it false.
+            warmup_momentum: SGD momentum at the start of warmup. ``None`` leaves
+                each group's momentum unchanged. Otherwise it ramps to the momentum
+                the optimizer was built with.
+            warmup_bias_lr: Learning rate at progress 0 for param groups tagged
+                ``name == "bias"``. ``None`` ramps every group from 0. The bias
+                group then ramps to its own base LR. The end-of-warmup hand-off
+                is unchanged.
         """
         _require_torch()
         if optim is None:
@@ -1152,13 +1230,21 @@ class WarmupScheduler:
         self.optimizer = optimizer
         self.base_scheduler = base_scheduler
         self.warmup_steps = warmup_steps
+        self.advance_base_during_warmup = bool(advance_base_during_warmup)
+        self.warmup_momentum = None if warmup_momentum is None else float(warmup_momentum)
+        self.warmup_bias_lr = None if warmup_bias_lr is None else float(warmup_bias_lr)
         self.base_lrs = [float(param_group['lr']) for param_group in optimizer.param_groups]
+        self.target_momentums = [
+            float(param_group["momentum"]) if "momentum" in param_group else None
+            for param_group in optimizer.param_groups
+        ]
         self.current_step = 0
         self.warmup_complete = False
         
-        # Set initial learning rate to 0
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = 0.0
+        # Progress 0. Bias groups may start above 0. Momentum, when requested, starts at the warmup value.
+        self._apply_warmup_lrs(0.0)
+        if self.warmup_momentum is not None:
+            self._apply_warmup_momentum(0.0)
     
     def step(self) -> None:
         """Step the scheduler (called per optimizer step during warmup).
@@ -1173,23 +1259,55 @@ class WarmupScheduler:
             if self.current_step <= self.warmup_steps:
                 # Linear warmup per param group.
                 progress = self.current_step / self.warmup_steps
-                for base_lr, param_group in zip(self.base_lrs, self.optimizer.param_groups):
-                    param_group['lr'] = base_lr * progress
+                self._apply_warmup_lrs(progress)
+                self._apply_warmup_momentum(progress)
             else:
-                # Warmup complete - restore each group's base LR and mark as complete
-                # The base scheduler will handle further updates per epoch
-                for base_lr, param_group in zip(self.base_lrs, self.optimizer.param_groups):
-                    param_group['lr'] = base_lr
+                # Warmup complete. A schedule that already advanced during warmup
+                # keeps that epoch's LR. Others return to the captured base LR.
+                if self.advance_base_during_warmup:
+                    for lr, param_group in zip(
+                        self.base_scheduler.get_last_lr(), self.optimizer.param_groups
+                    ):
+                        param_group['lr'] = float(lr)
+                else:
+                    for base_lr, param_group in zip(self.base_lrs, self.optimizer.param_groups):
+                        param_group['lr'] = base_lr
                 self.warmup_complete = True
     
     def step_epoch(self) -> None:
-        """Step the base scheduler (called per epoch after warmup).
+        """Step the base scheduler once per epoch.
         
-        This should be called once per epoch after warmup completes.
-        During warmup, this method does nothing.
+        Schedulers other than linear wait until warmup finishes. Linear decay
+        steps during warmup too, then this method puts the warmup LR back so
+        the next batch does not train at the decayed rate.
         """
-        if self.warmup_complete:
-            self.base_scheduler.step()
+        if not (self.warmup_complete or self.advance_base_during_warmup):
+            return
+        self.base_scheduler.step()
+        if self.advance_base_during_warmup and not self.warmup_complete:
+            progress = 0.0
+            if self.warmup_steps > 0 and self.current_step > 0:
+                progress = min(self.current_step, self.warmup_steps) / self.warmup_steps
+            self._apply_warmup_lrs(progress)
+            self._apply_warmup_momentum(progress)
+
+    def _apply_warmup_lrs(self, progress: float) -> None:
+        progress = float(progress)
+        for base_lr, param_group in zip(self.base_lrs, self.optimizer.param_groups):
+            if self.warmup_bias_lr is not None and param_group.get("name") == "bias":
+                param_group["lr"] = self.warmup_bias_lr + progress * (base_lr - self.warmup_bias_lr)
+            else:
+                param_group["lr"] = base_lr * progress
+    
+    def _apply_warmup_momentum(self, progress: float) -> None:
+        if self.warmup_momentum is None:
+            return
+        for target, param_group in zip(self.target_momentums, self.optimizer.param_groups):
+            if target is None:
+                continue
+            param_group["momentum"] = self.warmup_momentum + float(progress) * (
+                target - self.warmup_momentum
+            )
     
     def get_last_lr(self) -> List[float]:
         """Get the last learning rate for each parameter group."""
@@ -1308,8 +1426,11 @@ __all__ = [
     "collate_fn_generic",
     "create_cosine_with_tail_lr_scheduler",
     "create_late_cosine_lr_scheduler",
+    "create_linear_lr_scheduler",
     "create_multistep_lr_scheduler",
     "create_pytorch_cosine_lr_scheduler",
+    "format_linear_scheduler_description",
+    "linear_lr_factor",
     "multistep_lr_factor",
     "resolve_multistep_gammas",
     "format_cosine_with_tail_scheduler_description",

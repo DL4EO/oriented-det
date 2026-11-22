@@ -158,6 +158,30 @@ def _production_dict(config: Any) -> dict | None:
     return prod or None
 
 
+def _meta_window_size(prep: dict) -> list[int] | None:
+    """``preprocess.window_size`` as ``[h, w]``, or None when unset."""
+    raw = prep.get("window_size", None)
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        n = int(raw)
+        return [n, n]
+    if isinstance(raw, (list, tuple)):
+        if len(raw) == 1:
+            n = int(raw[0])
+            return [n, n]
+        if len(raw) >= 2:
+            return [int(raw[0]), int(raw[1])]
+    return None
+
+
+def _meta_overlap_pixels(prod: dict) -> int:
+    raw = prod.get("overlap_pixels")
+    if raw is None:
+        return 200
+    return max(0, int(raw))
+
+
 def build_export_meta(
     *,
     mode: str,
@@ -218,6 +242,8 @@ def build_export_meta(
         "preprocess": {
             "resize_mode": prep.get("resize_mode") or "fixed",
             "target_size": [int(height), int(width)],
+            "window_size": _meta_window_size(prep),
+            "overlap_pixels": _meta_overlap_pixels(prod),
             "normalize_mean": mean,
             "normalize_std": std,
             "pad_size_divisor": int(prep.get("pad_size_divisor") or 1),

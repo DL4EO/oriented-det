@@ -4,7 +4,7 @@ Modes (``resize_mode`` in config):
 
 - **fixed** — stretch to ``target_size`` (H, W); aspect ratio may change.
 - **pad** — uniform zoom/dezoom so the **larger** image side equals ``max(H, W)`` of
-  ``target_size``, then zero-pad the remaining canvas; aspect ratio is always preserved.
+  ``target_size``, then gray-pad (114) the remaining canvas; aspect ratio is always preserved.
 - **keep_ratio** — same uniform scale as **pad** (long edge → ``max(H, W)``), but **no**
   square canvas pad; training/inference then apply ``pad_size_divisor`` (MMRotate
   ``RResize`` + ``Pad(size_divisor=…)``). Aspect ratio is preserved.
@@ -12,6 +12,13 @@ Modes (``resize_mode`` in config):
   pad when the image is too small in one or both dimensions, randomly crop the excess
   when it is too large (center crop when ``random_crop=False``); aspect ratio is always
   preserved because pixels are never resampled.
+
+``preprocessing.window_size`` (H, W), when set, is the inference sliding-window slice
+in source pixels for ``fixed`` and ``crop``. The network still sees ``target_size``:
+each slice, including any zero pad already in that slice, is stretched with the same
+bilinear resize as ``fixed``. Per-axis scale is ``target_size / window_size``. Null
+leaves the slice equal to ``target_size`` and does not resize crops. ``pad`` and
+``keep_ratio`` ignore ``window_size`` and keep the whole-image scale path.
 """
 
 from __future__ import annotations
@@ -26,6 +33,10 @@ from ..geometry import transforms as geom_transforms
 from ..geometry.rbox import RBox
 
 TargetSize = Union[int, Tuple[int, int], List[int]]
+
+# Ultralytics letterbox / mosaic fill. Used for pad-mode bars and crop-mode
+# shortfall fill so train and val share the same background as the mosaic path.
+LETTERBOX_PAD_VAL = 114
 
 
 @dataclass(frozen=True)
@@ -83,10 +94,13 @@ def _pad_image(
     canvas_w: int,
     pad_left: int,
     pad_top: int,
+    *,
+    pad_val: int = LETTERBOX_PAD_VAL,
 ) -> Image.Image:
     if image.size == (canvas_w, canvas_h) and pad_left == 0 and pad_top == 0:
         return image
-    canvas = Image.new("RGB", (canvas_w, canvas_h), (0, 0, 0))
+    fill = int(pad_val)
+    canvas = Image.new("RGB", (canvas_w, canvas_h), (fill, fill, fill))
     canvas.paste(image, (pad_left, pad_top))
     return canvas
 

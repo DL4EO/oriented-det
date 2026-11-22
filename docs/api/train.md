@@ -115,6 +115,7 @@ When using **`tools/train.py`** with a JSON config, set `training.lr_scheduler_t
 - **`one_cycle`** — OneCycleLR (stepped every optimizer step); configure `lr_scheduler_one_cycle_*` options.
 - **`cosine_annealing` / `cosine`** — PyTorch CosineAnnealingLR (`lr_scheduler_cosine_epochs`; legacy `lr_scheduler_cosine_t_max` remaps).
 - **`cosine_annealing_with_tail` / `cosine_with_tail`** — Cosine then fixed `lr_scheduler_cosine_tail_lr`.
+- **`linear` / `linear_decay`** — Linear decay to `learning_rate * lr_scheduler_linear_end_factor`.
 
 See the [Training user guide — Learning rate scheduling](../user-guide/training.md#learning-rate-scheduling) for config examples and usage.
 

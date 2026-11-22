@@ -99,11 +99,13 @@ oriented_det/
 
 Aligned with the [Roadmap](roadmap.md):
 
-- **v0.3:** FAIR1M loader + 1× recipes (finetune DOTA 1× Hub; no FAIR1M zoo)
-- **v0.3:** FAIR1M loader + 1× recipes (HRSC2016 Hub zoo already in; FAIR1M has no Hub weights)
+- **v0.3:** HRSC2016 Hub zoo; FAIR1M / SSDD / HRSID loaders + 1× recipes (finetune DOTA 1× Hub; no FAIR1M / SAR zoo)
 - **v0.4.0:** Rotated RTMDet (shipped)
-- **v0.4.2:** native YOLO-OBB (clean-room, no Ultralytics; COCO pretrain and DOTA training next)
-- **v0.5+:** Swin-FPN backbone
+- **v0.4.2:** shipped — native YOLO-OBB Hub `yolo_obb_dota_le90_12x` (**77.80%** Task 1; COCO trunk `yolo_obb_coco_300e`)
+- **v0.5–v0.5.2:** Swin-T + FPN (Oriented R-CNN 1× and 3× Hub in v0.5, Faster R-CNN in v0.5.1, FCOS in v0.5.2 if latency allows). Swin stays off RTMDet and YOLO-OBB
+- **Optional:** DOTA multi-scale training (patch 1024, overlap 500, resize rates 0.5 / 1.0 / 1.5; same tiles for RTMDet-S and YOLO-OBB)
+- **Optional:** recipe improvements on the six current models, kept when AP75 or a weak class moves on a held-out split at the operating resolution
+- **v1.1:** oriented DINO in this repo, after the v1.0 API (DOTA; Hub only if it beats Swin Oriented R-CNN)
 - **Docs:** Tutorials, hosted MkDocs, eval reports
 - **Export:** ONNX head wrappers + postprocess parity for new detectors
 - **Ops:** Fused CUDA rotated IoU/NMS kernels

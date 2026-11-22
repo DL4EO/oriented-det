@@ -80,6 +80,7 @@ def _get_preprocessing_from_config(config: TrainingExperimentConfig):
         flip_h = getattr(prep, "enable_flip_horizontal", True)
         flip_v = getattr(prep, "enable_flip_vertical", True)
         flip_d = getattr(prep, "enable_flip_diagonal", False)
+        flip_p = float(getattr(prep, "flip_prob", 0.5))
         rotate_on = getattr(prep, "enable_random_rotate", False)
         rotate_prob = getattr(prep, "random_rotate_prob", 0.5)
         rotate_range = getattr(prep, "random_rotate_angle_range", 180.0)
@@ -91,6 +92,7 @@ def _get_preprocessing_from_config(config: TrainingExperimentConfig):
         flip_h = True
         flip_v = True
         flip_d = False
+        flip_p = 0.5
         rotate_on = False
         rotate_prob = 0.5
         rotate_range = 180.0
@@ -103,6 +105,7 @@ def _get_preprocessing_from_config(config: TrainingExperimentConfig):
         flip_h,
         flip_v,
         flip_d,
+        flip_p,
         rotate_on,
         rotate_prob,
         rotate_range,
@@ -364,6 +367,7 @@ def run_lr_finder(
         flip_h,
         flip_v,
         flip_d,
+        flip_p,
         rotate_on,
         rotate_prob,
         rotate_range,
@@ -382,6 +386,10 @@ def run_lr_finder(
             p_noise=config.augmentation.p_noise,
             p_blur=config.augmentation.p_blur,
             p_clahe=config.augmentation.p_clahe,
+            hsv_h=config.augmentation.hsv_h,
+            hsv_s=config.augmentation.hsv_s,
+            hsv_v=config.augmentation.hsv_v,
+            p_hsv=config.augmentation.p_hsv,
         )
         collate_fn = create_collate_fn(
             config.class_map,
@@ -393,6 +401,7 @@ def run_lr_finder(
             enable_flip_horizontal=flip_h,
             enable_flip_vertical=flip_v,
             enable_flip_diagonal=flip_d,
+            flip_prob=flip_p,
             enable_random_rotate=rotate_on,
             random_rotate_prob=rotate_prob,
             random_rotate_angle_range=rotate_range,
@@ -412,6 +421,7 @@ def run_lr_finder(
             enable_flip_horizontal=flip_h,
             enable_flip_vertical=flip_v,
             enable_flip_diagonal=flip_d,
+            flip_prob=flip_p,
             enable_random_rotate=rotate_on,
             random_rotate_prob=rotate_prob,
             random_rotate_angle_range=rotate_range,

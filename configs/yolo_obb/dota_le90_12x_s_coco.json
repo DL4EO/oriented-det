@@ -2,7 +2,7 @@
   "_base_": [
     "../_base_/datasets/dota_le90.json",
     "../_base_/models/yolo_obb_s.json",
-    "../_base_/schedules/1x.json",
+    "../_base_/schedules/12x.json",
     "../_base_/preprocessing.json"
   ],
   "data_loader": {
@@ -12,7 +12,7 @@
     "pin_memory": true
   },
   "checkpoint": {
-    "load_from_checkpoint": null,
+    "load_from_checkpoint": "hf://yolo_obb_coco_300e",
     "load_from_experiment": null,
     "discover_previous_run": false,
     "resume_from_checkpoint_epoch": false,
@@ -23,25 +23,44 @@
     "higher_is_better": true
   },
   "training": {
-    "num_epochs": 12,
     "optimizer": "adamw",
-    "learning_rate": 0.00025,
+    "learning_rate": 1.25e-4,
     "weight_decay": 0.05,
     "adamw_betas": [0.9, 0.999],
-    "use_amp": false,
+    "weight_decay_norm_mult": 0,
+    "weight_decay_bias_mult": 0,
+    "use_ema": true,
+    "ema_momentum": 0.0002,
+    "ema_gamma": 2000.0,
+    "use_amp": true,
     "gradient_accumulation_steps": 1,
     "max_grad_norm": 35.0,
-    "lr_scheduler_type": "cosine_annealing",
-    "lr_scheduler_cosine_eta_min": 1e-6,
-    "lr_warmup_steps": 500,
+    "lr_scheduler_type": "cosine_annealing_late",
+    "lr_scheduler_cosine_start_epoch": 72,
+    "lr_scheduler_cosine_eta_min": 1.25e-5,
+    "lr_warmup_steps": 1000,
     "lr_scaling_with_accumulation": "linear",
     "lr_scale_with_world_size": false,
     "use_lr_param_groups": false
   },
-  "loss": {
-    "loss_type": "focal",
-    "focal_alpha": 0.25,
-    "focal_gamma": 2.0
+  "model": {
+    "yolo_obb_cls_loss_type": "bce",
+    "yolo_obb_assigner": "tal",
+    "yolo_obb_dfl_weight": 0.75,
+    "yolo_obb_angle_weight": 0.2,
+    "box_reg_weight": 7.5
+  },
+  "enable_albumentation": true,
+  "augmentation": {
+    "p_brightness_contrast": 0,
+    "p_gamma": 0,
+    "p_noise": 0,
+    "p_blur": 0,
+    "p_clahe": 0,
+    "p_hsv": 1.0,
+    "hsv_h": 0.015,
+    "hsv_s": 0.7,
+    "hsv_v": 0.4
   },
   "dataset": {
     "train_tiles_dirs": [
@@ -61,15 +80,30 @@
     ]
   },
   "preprocessing": {
-    "enable_flip_diagonal": true,
-    "enable_mosaic": false,
-    "enable_random_rotate": false
+    "target_size": [1024, 1024],
+    "enable_flip_horizontal": true,
+    "enable_flip_vertical": true,
+    "enable_flip_diagonal": false,
+    "flip_prob": 0.5,
+    "enable_mosaic": true,
+    "mosaic_img_scale": [1024, 1024],
+    "mosaic_min_visibility": 0.1,
+    "mosaic_disable_last_n_epochs": 0,
+    "random_scale": 0.9,
+    "random_translate": 0.1,
+    "enable_random_rotate": true,
+    "random_rotate_prob": 0.5,
+    "random_rotate_angle_range": 180,
+    "random_rotate_rect_labels": [
+      "storage-tank",
+      "roundabout"
+    ]
   },
   "evaluation": {
     "iou_threshold": 0.5,
     "final_nms_iou_threshold": 0.1,
     "val_score_threshold": 0.3,
-    "val_map_every_n_epochs": 4,
+    "val_map_every_n_epochs": 12,
     "val_extended_gt_metrics": true,
     "val_exact_rotated_iou": false,
     "val_map_at_end": false

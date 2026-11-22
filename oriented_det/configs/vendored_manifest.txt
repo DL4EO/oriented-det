@@ -16,6 +16,7 @@ _base_/models/rotated_retinanet_r50.json
 _base_/models/rotated_fcos_r50.json
 _base_/models/rotated_rtmdet_cspnext_s.json
 _base_/schedules/1x.json
+_base_/schedules/12x.json
 _base_/fp16.json
 _base_/preprocessing.json
 rotated_faster_rcnn/dota_le90_1x.json
@@ -49,7 +50,5 @@ rotated_fcos/dota_le90_1x_l1_kfiou_aux.json
 rotated_rtmdet/dota_le90_3x_s.json
 rotated_rtmdet/ossdd_le90_vh_1x_s.json
 _base_/models/yolo_obb_s.json
-yolo_obb/dota_le90_1x_s.json
-yolo_obb/dota_le90_6x_s.json
 yolo_obb/coco_300e_s.json
-yolo_obb/dota_le90_6x_s_coco.json
+yolo_obb/dota_le90_12x_s_coco.json

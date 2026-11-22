@@ -1,7 +1,13 @@
 """YOLO-OBB: C2f backbone, DFL box head, task-aligned assigner (clean-room).
 
-Boxes stay le90 ``(cx, cy, w, h, θ)``. Losses: BCE on soft targets, ProbIoU,
-distribution focal loss on the four side bins, and a small le90 angle L1.
+Boxes stay le90 ``(cx, cy, w, h, θ)``. Losses: BCE on per-object soft
+targets, a decoded box loss, distribution focal loss on the four side bins,
+and a le90 angle L1 that fades out for square ground truth. The box loss is
+CIoU while the angle is held at 0, rotated IoU when ``box_reg_loss_type`` is
+``riou``, and ProbIoU otherwise. Horizontal CIoU
+trains image-axis width and height: a le90 box whose long side is vertical
+is turned back into that axis-aligned rectangle before assignment, DFL, and
+CIoU. Returned losses are the soft-target means multiplied by the batch size.
 """
 
 from __future__ import annotations
@@ -18,13 +24,15 @@ except Exception:  # pragma: no cover
     nn = None  # type: ignore
     F = None  # type: ignore
 
-from ..ops.diff_iou_rotated import diff_iou_rotated_2d
+from ..ops.ciou import ciou_loss_per_box
+from ..ops.diff_iou_rotated import diff_iou_rotated_2d, riou_loss_per_box
 from ..ops.probiou import probiou_loss_per_box
 from ..ops.rotated_ops import rotated_nms
 from .backbones.yolo_obb import Conv, build_yolo_obb_backbone
 from .bbox_coder import DistanceAnglePointCoder
 from .oriented_rpn import norm_angle_le90
 from .rotated_fcos import Scale, generate_fpn_points
+from .rotated_rtmdet import dynamic_soft_label_assign_single, quality_focal_loss
 from .utils import (
     prepare_targets,
     extract_backbone_features,
@@ -35,8 +43,16 @@ from .utils import (
 )
 
 
-def _points_in_obb(points: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
-    """Boolean [P, G]: point inside oriented box (local frame)."""
+def _points_in_obb(
+    points: torch.Tensor,
+    boxes: torch.Tensor,
+    min_side: float = 0.0,
+) -> torch.Tensor:
+    """Boolean [P, G]: point inside oriented box (local frame).
+
+    ``min_side`` raises width and height to at least that many pixels for this
+    test only. IoU and the encoded regression target keep the real box.
+    """
     if boxes.numel() == 0:
         return points.new_zeros((points.size(0), 0), dtype=torch.bool)
     dx = points[:, None, 0] - boxes[None, :, 0]
@@ -45,8 +61,9 @@ def _points_in_obb(points: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     sin_a = torch.sin(boxes[None, :, 4])
     local_x = dx * cos_a + dy * sin_a
     local_y = -dx * sin_a + dy * cos_a
-    hw = boxes[None, :, 2] * 0.5
-    hh = boxes[None, :, 3] * 0.5
+    floor = float(min_side)
+    hw = boxes[None, :, 2].clamp(min=floor) * 0.5
+    hh = boxes[None, :, 3].clamp(min=floor) * 0.5
     return (local_x.abs() <= hw) & (local_y.abs() <= hh)
 
 
@@ -90,12 +107,14 @@ def task_aligned_assign_single(
     beta: float = 6.0,
     reg_max: int = 16,
     strides: Optional[torch.Tensor] = None,
+    min_gt_side: float = 0.0,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Task-aligned assignment for one image.
 
     Returns:
         labels ``[P]`` in ``{0..K-1}`` foreground or ``K`` background,
-        soft_cls_target ``[P, K]``,
+        soft_cls_target ``[P, K]`` — for each object, alignment divided by
+        that object's best alignment, times that object's best exact IoU,
         bbox_targets ``[P, 5]`` encoded ``(l, t, r, b, θ)`` in pixels,
         pos_mask ``[P]``
     """
@@ -111,7 +130,7 @@ def task_aligned_assign_single(
     if num_gts == 0 or num_points == 0:
         return labels, soft_target, bbox_targets, pos_mask
 
-    inside = _points_in_obb(points, gt_bboxes)
+    inside = _points_in_obb(points, gt_bboxes, min_side=min_gt_side)
     if not inside.any():
         return labels, soft_target, bbox_targets, pos_mask
 
@@ -144,14 +163,20 @@ def task_aligned_assign_single(
         if not pos.any():
             return labels, soft_target, bbox_targets, pos_mask
 
-        pos_inds = pos.nonzero(as_tuple=False).squeeze(1)
+        pos_inds = pos.nonzero(as_tuple=False).flatten()
         gt_inds = best_gt[pos_inds]
         fg = (gt_labels[gt_inds] - 1).clamp(min=0, max=num_classes - 1)
         labels[pos_inds] = fg
         pos_mask[pos_inds] = True
-        pos_align = align[pos_inds, gt_inds]
-        norm = pos_align / pos_align.max().clamp(min=1e-6)
-        soft_target[pos_inds, fg] = norm.to(soft_target.dtype)
+        pos_align = align[pos_inds, gt_inds].reshape(-1).float()
+        pos_iou = iou[pos_inds, gt_inds].reshape(-1).clamp(0, 1).float()
+        gt_flat = gt_inds.reshape(-1).long()
+        max_align = pos_align.new_zeros(num_gts)
+        max_iou = pos_iou.new_zeros(num_gts)
+        max_align.scatter_reduce_(0, gt_flat, pos_align, reduce="amax", include_self=True)
+        max_iou.scatter_reduce_(0, gt_flat, pos_iou, reduce="amax", include_self=True)
+        norm = pos_align / max_align[gt_flat].clamp(min=1e-6) * max_iou[gt_flat]
+        soft_target[pos_inds, fg] = norm.to(dtype=soft_target.dtype)
 
         coder = DistanceAnglePointCoder(angle_version="le90")
         encoded = coder.encode(points[pos_inds], gt_bboxes[gt_inds])
@@ -172,6 +197,7 @@ class YoloOBBHead(nn.Module):
         *,
         reg_max: int = 16,
         strides: Sequence[float] = (8, 16, 32),
+        stride_cls_prior: bool = False,
     ):
         if nn is None:
             raise RuntimeError("PyTorch is required for YoloOBBHead.")
@@ -197,9 +223,15 @@ class YoloOBBHead(nn.Module):
         self.reg_heads = nn.ModuleList(_tower(c, reg_ch, 4 * self.reg_max) for c in channels)
         self.angle_heads = nn.ModuleList(_tower(c, ang_ch, 1) for c in channels)
         self.angle_scales = nn.ModuleList(Scale(1.0) for _ in channels)
-        prior = math.log(0.01 / 0.99)
-        for head in self.cls_heads:
+        self.stride_cls_prior = bool(stride_cls_prior)
+        flat_prior = math.log(0.01 / 0.99)
+        for level, head in enumerate(self.cls_heads):
             last = head[-1]
+            if self.stride_cls_prior:
+                stride = self.strides[level]
+                prior = math.log(5 / self.num_classes / (640 / stride) ** 2)
+            else:
+                prior = flat_prior
             nn.init.constant_(last.bias, prior)
             nn.init.normal_(last.weight, std=0.01)
         for head in list(self.reg_heads) + list(self.angle_heads):
@@ -235,6 +267,82 @@ def _decode_distances(
     return bbox_coder.decode(points, torch.cat([dist, angle], dim=-1))
 
 
+def obb_to_horizontal_xywh(boxes: torch.Tensor) -> torch.Tensor:
+    """Axis-aligned ``(cx, cy, width, height, 0)`` of an oriented box.
+
+    Width and height are the image-axis extents. A le90 box stored as
+    ``(long, short, ±π/2)`` comes back as the tall or wide rectangle it
+    covers, not as that swapped ``(w, h)``.
+    """
+    if boxes.numel() == 0:
+        return boxes
+    cx, cy, width, height, angle = boxes.unbind(dim=-1)
+    cos_a = angle.cos().abs()
+    sin_a = angle.sin().abs()
+    return torch.stack(
+        [
+            cx,
+            cy,
+            width * cos_a + height * sin_a,
+            width * sin_a + height * cos_a,
+            torch.zeros_like(angle),
+        ],
+        dim=-1,
+    )
+
+
+def _ltrb_to_xywh(points: torch.Tensor, ltrb: torch.Tensor) -> torch.Tensor:
+    """Image-axis ``(cx, cy, w, h, 0)`` from pixel distances. No le90 swap."""
+    left, top, right, bottom = ltrb.unbind(dim=-1)
+    return torch.stack(
+        [
+            points[:, 0] + (right - left) * 0.5,
+            points[:, 1] + (bottom - top) * 0.5,
+            left + right,
+            top + bottom,
+            torch.zeros_like(left),
+        ],
+        dim=-1,
+    )
+
+
+def _decode_horizontal(
+    bbox_bins: torch.Tensor,
+    points: torch.Tensor,
+    strides: torch.Tensor,
+    reg_max: int,
+) -> torch.Tensor:
+    """Bin logits → image-axis ``(cx, cy, w, h, 0)``. Angle is not used."""
+    dist = dfl_expectation(bbox_bins, reg_max) * strides.unsqueeze(-1)
+    return _ltrb_to_xywh(points, dist)
+
+
+# Keeps classification on the same scale as quality-weighted box/DFL, whose
+# denominator is the sum of soft targets rather than the positive count.
+_CLS_LOSS_GAIN = 0.5
+# Quality focal loss scales each entry by |target - score|^beta, so it is far
+# smaller than BCE. Gain 3 against box 7.5 and DFL 1.5 is the 1 : 2.5 : 0.5
+# ratio PP-YOLOE and YOLOv6 use for a focal classification loss with this
+# assigner. Beta 2 is the Rotated RTMDet value.
+_QFL_LOSS_GAIN = 3.0
+_QFL_BETA = 2.0
+
+
+def elongated_angle_weight(
+    width: torch.Tensor,
+    height: torch.Tensor,
+    *,
+    lam: float = 1.0,
+    eps: float = 1e-7,
+) -> torch.Tensor:
+    """Detached-ready gate in ``[0, 1)``: 0 for a square, near 1 for a long box.
+
+    ``1 - exp(-log²(w/h) / λ²)``. Callers should pass ground-truth size.
+    """
+    log_ar = torch.log(width.clamp(min=eps) / height.clamp(min=eps))
+    return 1.0 - torch.exp(-(log_ar * log_ar) / (float(lam) * float(lam)))
+
+
 def compute_yolo_obb_loss(
     cls_scores: Sequence[torch.Tensor],
     bbox_preds: Sequence[torch.Tensor],
@@ -253,9 +361,40 @@ def compute_yolo_obb_loss(
     assign_topk: int,
     tal_alpha: float,
     tal_beta: float,
+    min_gt_side: float = 0.0,
     class_weights: Optional[torch.Tensor] = None,
+    use_ciou: bool = False,
+    box_reg_loss_type: str = "probiou",
+    cls_loss_type: str = "bce",
+    assigner: str = "tal",
 ) -> Dict[str, torch.Tensor]:
-    """BCE + ProbIoU + DFL + le90 angle L1, divided by the positive count."""
+    """BCE + decoded box loss + DFL + elongated-only angle L1.
+
+    Box and DFL are weighted by the soft target. All four terms divide by the
+    sum of soft targets, then multiply by the image count so the backward step
+    matches a loss scaled by batch size. Classification is scaled by ``0.5``.
+    ``cls_loss_type`` ``qfl`` replaces BCE with quality focal loss on the same
+    soft targets (beta 2, gain 3). ``assigner`` ``tal`` is task-aligned
+    assignment. ``dynamic_soft`` is the Rotated RTMDet assigner: a point must
+    sit inside the box and within 3 strides of its center, ranked by
+    classification cost plus 3 × (−log IoU), and the soft target is that
+    match's IoU.
+    ``use_ciou`` selects horizontal CIoU on image-axis width and height.
+    Oriented ground truth is converted to that rectangle first, so a le90
+    swap cannot train the transposed box. Otherwise ``box_reg_loss_type``
+    ``riou`` is ``1 -`` rotated IoU and ``probiou`` is ProbIoU.
+    ``min_gt_side`` widens the anchor-center test only; the encoded target
+    stays the real box.
+    """
+    assigner_name = str(assigner).strip().lower()
+    if assigner_name not in ("tal", "dynamic_soft"):
+        raise ValueError(
+            f"yolo_obb_assigner must be 'tal' or 'dynamic_soft', got {assigner!r}."
+        )
+    if assigner_name == "dynamic_soft" and float(min_gt_side) > 0.0:
+        raise ValueError(
+            "yolo_obb_assigner 'dynamic_soft' does not apply yolo_obb_min_gt_side."
+        )
     num_levels = len(points)
     num_imgs = cls_scores[0].size(0)
     num_points_per_lvl = [p.size(0) for p in points]
@@ -264,7 +403,7 @@ def compute_yolo_obb_loss(
     loss_box_sum = cls_scores[0].new_tensor(0.0)
     loss_dfl_sum = cls_scores[0].new_tensor(0.0)
     loss_angle_sum = cls_scores[0].new_tensor(0.0)
-    total_pos = 0
+    soft_sum = cls_scores[0].new_tensor(0.0)
 
     for img_idx in range(num_imgs):
         cls_i = torch.cat(
@@ -295,33 +434,60 @@ def compute_yolo_obb_loss(
             ],
             dim=0,
         )
-        decoded = _decode_distances(bins_i, angle_i, concat_points, stride_t, reg_max, bbox_coder)
-        _labels, soft_tgt, bbox_tgt, pos_mask = task_aligned_assign_single(
-            concat_points,
-            cls_i,
-            decoded,
-            gt_boxes[img_idx],
-            gt_labels[img_idx],
-            num_classes,
-            topk=assign_topk,
-            alpha=tal_alpha,
-            beta=tal_beta,
-            reg_max=reg_max,
-            strides=stride_t,
-        )
-        cls_loss = F.binary_cross_entropy_with_logits(cls_i, soft_tgt, reduction="none")
-        if class_weights is not None:
-            cls_loss = cls_loss * class_weights.view(1, -1).to(device=cls_loss.device, dtype=cls_loss.dtype)
-        loss_cls_sum = loss_cls_sum + cls_loss.sum()
+        gt_i = gt_boxes[img_idx]
+        if use_ciou:
+            gt_i = obb_to_horizontal_xywh(gt_i)
+            decoded = _decode_horizontal(bins_i, concat_points, stride_t, reg_max)
+        else:
+            decoded = _decode_distances(
+                bins_i, angle_i, concat_points, stride_t, reg_max, bbox_coder
+            )
+        if assigner_name == "dynamic_soft":
+            _labels, soft_tgt, bbox_tgt, pos_mask = dynamic_soft_label_assign_single(
+                concat_points,
+                cls_i,
+                decoded,
+                gt_i,
+                gt_labels[img_idx],
+                num_classes,
+                soft_center_radius=3.0,
+                topk=assign_topk,
+                iou_weight=3.0,
+                strides=stride_t,
+            )
+        else:
+            _labels, soft_tgt, bbox_tgt, pos_mask = task_aligned_assign_single(
+                concat_points,
+                cls_i,
+                decoded,
+                gt_i,
+                gt_labels[img_idx],
+                num_classes,
+                topk=assign_topk,
+                alpha=tal_alpha,
+                beta=tal_beta,
+                reg_max=reg_max,
+                strides=stride_t,
+                min_gt_side=min_gt_side,
+            )
+        if cls_loss_type == "qfl":
+            loss_cls_sum = loss_cls_sum + quality_focal_loss(
+                cls_i, soft_tgt, beta=_QFL_BETA, weight=class_weights
+            )
+        else:
+            cls_loss = F.binary_cross_entropy_with_logits(cls_i, soft_tgt, reduction="none")
+            if class_weights is not None:
+                cls_loss = cls_loss * class_weights.view(1, -1).to(device=cls_loss.device, dtype=cls_loss.dtype)
+            loss_cls_sum = loss_cls_sum + cls_loss.sum()
 
-        num_pos = int(pos_mask.sum().item())
-        total_pos += num_pos
-        if num_pos == 0:
+        if not bool(pos_mask.any()):
             loss_box_sum = loss_box_sum + bins_i.sum() * 0.0
             loss_dfl_sum = loss_dfl_sum + bins_i.sum() * 0.0
             loss_angle_sum = loss_angle_sum + angle_i.sum() * 0.0
             continue
 
+        pos_soft = soft_tgt[pos_mask].sum(dim=-1).to(dtype=bins_i.dtype)
+        soft_sum = soft_sum + pos_soft.sum()
         pos_bins = bins_i[pos_mask]
         pos_angle = angle_i[pos_mask]
         pos_pts = concat_points[pos_mask]
@@ -329,23 +495,38 @@ def compute_yolo_obb_loss(
         pos_tgt = bbox_tgt[pos_mask]
         tgt_ltrb = pos_tgt[:, :4]
         tgt_angle = pos_tgt[:, 4:5]
-        pred_boxes = _decode_distances(pos_bins, pos_angle, pos_pts, pos_stride, reg_max, bbox_coder)
         tgt_boxes = bbox_coder.decode(pos_pts, pos_tgt).detach()
-        loss_box_sum = loss_box_sum + probiou_loss_per_box(pred_boxes, tgt_boxes).sum()
+        if use_ciou:
+            # Image-axis (w, h). coder.decode would le90-swap a tall box and
+            # CIoU, which ignores angle, would then accept the transpose.
+            pred_h = _decode_horizontal(pos_bins, pos_pts, pos_stride, reg_max)
+            tgt_h = _ltrb_to_xywh(pos_pts, tgt_ltrb).detach()
+            box_loss = ciou_loss_per_box(pred_h, tgt_h)
+        else:
+            pred_boxes = _decode_distances(
+                pos_bins, pos_angle, pos_pts, pos_stride, reg_max, bbox_coder
+            )
+            if box_reg_loss_type == "riou":
+                box_loss = riou_loss_per_box(pred_boxes, tgt_boxes)
+            else:
+                box_loss = probiou_loss_per_box(pred_boxes, tgt_boxes)
+        loss_box_sum = loss_box_sum + (box_loss * pos_soft).sum()
 
         tgt_bins = (tgt_ltrb / pos_stride.unsqueeze(-1)).clamp(0, float(reg_max) - 1.001)
-        loss_dfl_sum = loss_dfl_sum + distribution_focal_loss(
-            pos_bins.view(-1, 4, reg_max), tgt_bins, reg_max
-        ).sum()
-        ang_err = norm_angle_le90(pos_angle.squeeze(-1) - tgt_angle.squeeze(-1)).abs()
+        dfl_per_box = distribution_focal_loss(pos_bins.view(-1, 4, reg_max), tgt_bins, reg_max)
+        loss_dfl_sum = loss_dfl_sum + (dfl_per_box * pos_soft).sum()
+        gate = elongated_angle_weight(tgt_boxes[:, 2], tgt_boxes[:, 3])
+        ang_err = gate * norm_angle_le90(pos_angle.squeeze(-1) - tgt_angle.squeeze(-1)).abs()
         loss_angle_sum = loss_angle_sum + ang_err.sum()
 
-    denom = max(float(total_pos), 1.0)
+    denom = soft_sum.clamp(min=1.0)
+    batch_scale = float(num_imgs)
+    cls_gain = _QFL_LOSS_GAIN if cls_loss_type == "qfl" else _CLS_LOSS_GAIN
     return {
-        "loss_classifier": loss_cls_sum / denom,
-        "loss_box_reg": float(box_reg_weight) * loss_box_sum / denom,
-        "loss_dfl": float(dfl_weight) * loss_dfl_sum / denom,
-        "loss_angle": float(angle_weight) * loss_angle_sum / denom,
+        "loss_classifier": cls_gain * loss_cls_sum / denom * batch_scale,
+        "loss_box_reg": float(box_reg_weight) * loss_box_sum / denom * batch_scale,
+        "loss_dfl": float(dfl_weight) * loss_dfl_sum / denom * batch_scale,
+        "loss_angle": float(angle_weight) * loss_angle_sum / denom * batch_scale,
     }
 
 
@@ -464,6 +645,26 @@ def _apply_yolo_nms(
     return boxes[keep], scores[keep], labels[keep]
 
 
+def _yolo_box_reg_loss_type(box_reg_loss_type: str, force_horizontal: bool) -> str:
+    """YOLO box term. The shared default ``smooth_l1`` means ProbIoU.
+
+    ``riou`` is ``1 -`` differentiable rotated IoU. Horizontal COCO training
+    keeps CIoU through ``force_horizontal`` and rejects ``riou``.
+    """
+    name = (box_reg_loss_type or "probiou").strip().lower()
+    if name == "smooth_l1":
+        name = "probiou"
+    if name not in ("probiou", "riou"):
+        raise ValueError(
+            f"YOLO-OBB box_reg_loss_type must be 'probiou' or 'riou', got {box_reg_loss_type!r}."
+        )
+    if force_horizontal and name == "riou":
+        raise ValueError(
+            "yolo_obb_force_horizontal trains horizontal CIoU; box_reg_loss_type 'riou' does not apply."
+        )
+    return name
+
+
 class YoloOBB(SigmoidFocalClassWeightsMixin, nn.Module):
     """YOLO-OBB detector (``model_type: yolo_obb``)."""
 
@@ -492,6 +693,11 @@ class YoloOBB(SigmoidFocalClassWeightsMixin, nn.Module):
         final_nms_iou_schedule_values: Optional[List[float]] = None,
         roi_class_weights: Optional[Union[Dict[str, float], torch.Tensor]] = None,
         force_horizontal: bool = False,
+        box_reg_loss_type: str = "probiou",
+        cls_loss_type: str = "bce",
+        assigner: str = "tal",
+        stride_cls_prior: bool = False,
+        min_gt_side: float = 0.0,
         **kwargs: Any,
     ):
         if nn is None:
@@ -507,9 +713,25 @@ class YoloOBB(SigmoidFocalClassWeightsMixin, nn.Module):
         self.dfl_weight = float(dfl_weight)
         self.angle_weight = float(angle_weight)
         self.force_horizontal = bool(force_horizontal)
+        self.box_reg_loss_type = _yolo_box_reg_loss_type(box_reg_loss_type, self.force_horizontal)
+        self.cls_loss_type = str(cls_loss_type).strip().lower()
+        if self.cls_loss_type not in ("bce", "qfl"):
+            raise ValueError(
+                f"yolo_obb_cls_loss_type must be 'bce' or 'qfl', got {cls_loss_type!r}."
+            )
+        self.assigner = str(assigner).strip().lower()
+        if self.assigner not in ("tal", "dynamic_soft"):
+            raise ValueError(
+                f"yolo_obb_assigner must be 'tal' or 'dynamic_soft', got {assigner!r}."
+            )
+        if self.assigner == "dynamic_soft" and float(min_gt_side) > 0.0:
+            raise ValueError(
+                "yolo_obb_assigner 'dynamic_soft' does not apply yolo_obb_min_gt_side."
+            )
         self.assign_topk = int(assign_topk)
         self.tal_alpha = float(tal_alpha)
         self.tal_beta = float(tal_beta)
+        self.min_gt_side = float(min_gt_side)
         self.score_threshold = float(score_threshold)
         self.final_nms_iou_threshold = float(final_nms_iou_threshold)
         self.max_detections_per_image = int(max_detections_per_image)
@@ -530,6 +752,7 @@ class YoloOBB(SigmoidFocalClassWeightsMixin, nn.Module):
             num_classes=self.num_classes,
             reg_max=self.reg_max,
             strides=self.fpn_strides,
+            stride_cls_prior=bool(stride_cls_prior),
         )
         self.bbox_coder = DistanceAnglePointCoder(angle_version="le90")
 
@@ -569,8 +792,8 @@ class YoloOBB(SigmoidFocalClassWeightsMixin, nn.Module):
         device = images[0].device
         cls_scores, bbox_preds, angle_preds = self.head(feature_list)
         if self.force_horizontal:
-            # Constant 0 is outside the graph. ProbIoU and DFL then cannot
-            # train the angle head; angle_weight 0 alone does not do that.
+            # Constant 0 is outside the graph, so the angle head gets no
+            # gradient. The decoded box is then horizontal and trained with CIoU.
             angle_preds = [pred.new_zeros(pred.shape) for pred in angle_preds]
         points = generate_fpn_points(
             feature_map_sizes,
@@ -599,7 +822,12 @@ class YoloOBB(SigmoidFocalClassWeightsMixin, nn.Module):
                 assign_topk=self.assign_topk,
                 tal_alpha=self.tal_alpha,
                 tal_beta=self.tal_beta,
+                min_gt_side=self.min_gt_side,
                 class_weights=self.roi_class_weights_tensor,
+                use_ciou=self.force_horizontal,
+                box_reg_loss_type=self.box_reg_loss_type,
+                cls_loss_type=self.cls_loss_type,
+                assigner=self.assigner,
             )
         return self._inference(cls_scores, bbox_preds, angle_preds, points, fpn_strides_live, device)
 
@@ -675,6 +903,14 @@ def build_yolo_obb(
         dfl_weight=float(getattr(model_cfg, "yolo_obb_dfl_weight", 1.5)),
         angle_weight=float(getattr(model_cfg, "yolo_obb_angle_weight", 0.2)),
         force_horizontal=bool(getattr(model_cfg, "yolo_obb_force_horizontal", False)),
+        box_reg_loss_type=_yolo_box_reg_loss_type(
+            getattr(model_cfg, "box_reg_loss_type", "probiou"),
+            bool(getattr(model_cfg, "yolo_obb_force_horizontal", False)),
+        ),
+        cls_loss_type=str(getattr(model_cfg, "yolo_obb_cls_loss_type", "bce")),
+        assigner=str(getattr(model_cfg, "yolo_obb_assigner", "tal")),
+        stride_cls_prior=bool(getattr(model_cfg, "yolo_obb_stride_cls_prior", False)),
+        min_gt_side=float(getattr(model_cfg, "yolo_obb_min_gt_side", 0.0)),
         assign_topk=int(getattr(model_cfg, "yolo_obb_tal_topk", 13)),
         tal_alpha=float(getattr(model_cfg, "yolo_obb_tal_alpha", 0.5)),
         tal_beta=float(getattr(model_cfg, "yolo_obb_tal_beta", 6.0)),
@@ -751,6 +987,7 @@ __all__ = [
     "build_yolo_obb",
     "dfl_expectation",
     "distribution_focal_loss",
+    "elongated_angle_weight",
     "drop_yolo_obb_class_transfer_keys",
     "task_aligned_assign_single",
     "compute_yolo_obb_loss",

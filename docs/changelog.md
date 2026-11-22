@@ -2,9 +2,29 @@
 
 All notable changes to OrientedDet will be documented in this file.
 
-## [Unreleased]
+## [0.4.2] - 2026-11-22
 
-Toward **v0.4.2** (native YOLO-OBB). The detector is already in the tree (`model_type: yolo_obb`). Next is COCO pretrain and DOTA.
+Native YOLO-OBB Hub. Top of the DOTA zoo: **`yolo_obb_dota_le90_12x`** official Task 1 **77.80%** (AP75 52.13, COCO mAP 49.32); COCO trunk **`yolo_obb_coco_300e`** (mAP 0.50:0.95 **0.41**).
+
+### Added
+
+- **YOLO-OBB Hub** — `yolo_obb_dota_le90_12x` (12× from COCO; mosaic on, late cosine, DFL 0.75, BCE + TAL; Task 1 **77.80%**, ahead of RTMDet-S **77.60%**) and `yolo_obb_coco_300e` (horizontal 300e trunk). Recipe: [`dota_le90_12x_s_coco.json`](../configs/yolo_obb/dota_le90_12x_s_coco.json). Report: [`docs/eval-reports/yolo_obb_dota_le90_12x/`](eval-reports/yolo_obb_dota_le90_12x/model_analysis.md).
+- **`preprocessing.window_size`** — optional sliding-window slice `[H, W]` in source pixels for `fixed` / `crop` inference. The network still receives `target_size`. Each slice is bilinear-resized onto that canvas (per-axis scale is `target_size / window_size`). Null keeps the slice equal to `target_size` and does not resize crops. `pad` and `keep_ratio` ignore it.
+- **YOLO-OBB COCO 300e S** — [`coco_300e_s.json`](../configs/yolo_obb/coco_300e_s.json). Ultralytics-style SGD on COCO: 300 epochs, batch 64, HSV only, linear LR `0.01 → 1e-4`, momentum `0.937` warmed from `0.8`, Nesterov, weight decay `5e-4` on conv weights, EMA mix `0.0001`, 300 detections per image. Replaces the earlier cosine batch-16 300e recipe and the 500e schedule.
+- **`lr_scheduler_type: linear`** — epoch-wise linear decay to `learning_rate * lr_scheduler_linear_end_factor` (default `0.01`). Optional warmup still wraps it.
+- **`training.nesterov`** — SGD Nesterov momentum (default `false`).
+- **`evaluation.map_ap_interpolation`** — per-threshold AP integral when `map_iou_thresholds` is set. `"all_point"` (default, DOTA / OSSDD) is the VOC area under the precision-recall curve; `"coco101"` is pycocotools (101 recall points, 100 detections per image and class, classes without ground truth left out of the mean) and matches `COCOeval` `stats[0]`. The COCO recipe sets `coco101`.
+
+### Changed
+
+- **HSV jitter is a multiplicative gain** — `augmentation.hsv_h / hsv_s / hsv_v` now drive `RandomHSVGain`, the Ultralytics / MMYOLO `1 ± U(0, fraction)` gain per channel through a uint8 LUT. They were fed to the additive Albumentations `HueSaturationValue`, which at the documented defaults `0.7 / 0.4` shifted saturation by ±178 and value by ±102 of 255 and collapsed a COCO run to 17.6% at epoch 10. The COCO recipe returns to `0.015 / 0.7 / 0.4`.
+- **Exact IoU for horizontal boxes in validation** — the GPU sampling IoU path (`val_exact_rotated_iou: false`) now computes closed-form axis-aligned IoU when every box angle is a multiple of 90°. The sampling grid under-read COCO mAP 0.50:0.95 by about 1.3 points at the high IoU thresholds. Rotated boxes are unchanged.
+
+- **Mosaic box keep** — `preprocessing.mosaic_min_visibility` defaults to `0.2`. A box is dropped once more than 80% of its area is outside the crop (previously 50%). Scale and translate use the same fraction.
+- Roadmap: **v0.4.3** and **v0.4.4** are dropped as releases. DOTA multi-scale training (the old tile set: patch 1024, overlap 500, resize rates 0.5 / 1.0 / 1.5) is optional, as are recipe improvements on the six current models (AP75 or a weak class on a held-out split at the operating resolution). Swin-T stays **v0.5–v0.5.2** on the shared FPN and stays off RTMDet and YOLO-OBB. **v1.1** is oriented DINO in this repo, after the stable API.
+- **YOLO-OBB horizontal box loss** — `yolo_obb_force_horizontal` trains the decoded box with CIoU. Oriented runs stay on ProbIoU.
+- **YOLO-OBB assignment and loss** — soft targets are per object and scaled by that object's best exact IoU. Box and DFL follow those weights, classification gain is 0.5, and the angle L1 turns off for square ground truth.
+- **Albumentations is optional** (`oriented-det[albumentations]`). A normal install no longer pulls it in. The extra stays capped at the last MIT release (`albumentations<=2.0.8`). No Hub recipe sets `enable_albumentation`.
 
 ## [0.4.1] - 2026-10-10
 
@@ -21,7 +41,7 @@ Citation and discoverability. No model or API changes.
 
 ## [0.4.0] - 2026-10-10
 
-Rotated RTMDet. `rotated_rtmdet_dota_le90_3x` (CSPNeXt-S + PAFPN) is on the Hub at official Task 1 **77.60%**, the top of the DOTA zoo. Native YOLO-OBB is **0.4.2**.
+Rotated RTMDet. `rotated_rtmdet_dota_le90_3x` (CSPNeXt-S + PAFPN) is on the Hub at official Task 1 **77.60%**. Native YOLO-OBB later leads the zoo at **77.80%** (`yolo_obb_dota_le90_12x`, v0.4.2).
 
 ### Added
 

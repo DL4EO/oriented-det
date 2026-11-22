@@ -3,6 +3,7 @@
     "pad_size_divisor": 32,
     "enable_flip_horizontal": true,
     "enable_flip_vertical": true,
-    "enable_flip_diagonal": false
+    "enable_flip_diagonal": false,
+    "flip_prob": 0.5
   }
 }

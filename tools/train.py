@@ -97,10 +97,12 @@ from oriented_det.train.utils import (
     apply_weight_decay_multipliers,
     create_cosine_with_tail_lr_scheduler,
     create_late_cosine_lr_scheduler,
+    create_linear_lr_scheduler,
     create_multistep_lr_scheduler,
     create_pytorch_cosine_lr_scheduler,
     format_cosine_with_tail_scheduler_description,
     format_late_cosine_scheduler_description,
+    format_linear_scheduler_description,
     format_pytorch_cosine_scheduler_description,
     model_has_rpn_head,
     set_backbone_requires_grad,
@@ -515,6 +517,17 @@ def _round_ratio(value: float) -> float:
 _WIZARD_TINY_CELLS = 2.0
 _WIZARD_SMALL_CELLS = 4.0
 _WIZARD_TINY_SHARE = 0.05
+# RPN and RetinaNet place priors. FCOS, RTMDet, and YOLO-OBB do not.
+_WIZARD_ANCHOR_MODEL_TYPES = frozenset({
+    "oriented_rcnn",
+    "rotated_faster_rcnn",
+    "rotated_retinanet",
+})
+
+
+def _wizard_model_uses_anchors(model_type: str) -> bool:
+    """Whether wizard should suggest anchor ratios and DeltaXYWHA target stds."""
+    return str(model_type).lower() in _WIZARD_ANCHOR_MODEL_TYPES
 
 
 def _fpn_level_name(stride: int) -> str:
@@ -741,12 +754,8 @@ def print_wizard_recommendations(
             aux_angle_lambda=ang_lam,
         ):
             print(line)
-        print(
-            "- anchors / target_stds: skipped (anchor-free DistanceAnglePointCoder; "
-            "not DeltaXYWHA)."
-        )
-        print("- tip: run `make lr-finder` to tune learning_rate.")
-    else:
+        print("- tip: run `make lr-finder CONFIG=<this config>` to tune learning_rate.")
+    elif _wizard_model_uses_anchors(model_type):
         current_ratios = [
             float(r) for r in getattr(config.model, "anchor_ratios", [0.5, 1.0, 2.0]) if float(r) > 0
         ]
@@ -1866,6 +1875,10 @@ def main():
             p_noise=config.augmentation.p_noise,
             p_blur=config.augmentation.p_blur,
             p_clahe=config.augmentation.p_clahe,
+            hsv_h=config.augmentation.hsv_h,
+            hsv_s=config.augmentation.hsv_s,
+            hsv_v=config.augmentation.hsv_v,
+            p_hsv=config.augmentation.p_hsv,
         )
     # Preprocessing from config (resize + normalization); inference will use the same.
     prep = getattr(config, "preprocessing", None)
@@ -1887,6 +1900,7 @@ def main():
     flip_h = getattr(prep, "enable_flip_horizontal", True) if prep is not None else True
     flip_v = getattr(prep, "enable_flip_vertical", True) if prep is not None else True
     flip_d = getattr(prep, "enable_flip_diagonal", False) if prep is not None else False
+    flip_p = float(getattr(prep, "flip_prob", 0.5) if prep is not None else 0.5)
     rotate_on = getattr(prep, "enable_random_rotate", False) if prep is not None else False
     rotate_prob = getattr(prep, "random_rotate_prob", 0.5) if prep is not None else 0.5
     rotate_range = getattr(prep, "random_rotate_angle_range", 180.0) if prep is not None else 180.0
@@ -1910,10 +1924,20 @@ def main():
             getattr(prep, "mosaic_max_cached_images", 40) if prep is not None else 40
         ),
         mosaic_ratio_range=mosaic_ratio,
+        mosaic_min_visibility=float(
+            getattr(prep, "mosaic_min_visibility", 0.2) if prep is not None else 0.2
+        ),
+        mosaic_clip_boxes=bool(
+            getattr(prep, "mosaic_clip_boxes", False) if prep is not None else False
+        ),
         mosaic_disable_last_n_epochs=int(
             getattr(prep, "mosaic_disable_last_n_epochs", 0) if prep is not None else 0
         ),
         mosaic_total_epochs=int(config.training.num_epochs),
+        random_scale=float(getattr(prep, "random_scale", 0.0) if prep is not None else 0.0),
+        random_translate=float(
+            getattr(prep, "random_translate", 0.0) if prep is not None else 0.0
+        ),
     )
 
     if config.enable_albumentation:
@@ -1927,6 +1951,7 @@ def main():
             enable_flip_horizontal=flip_h,
             enable_flip_vertical=flip_v,
             enable_flip_diagonal=flip_d,
+            flip_prob=flip_p,
             enable_random_rotate=rotate_on,
             random_rotate_prob=rotate_prob,
             random_rotate_angle_range=rotate_range,
@@ -1949,6 +1974,7 @@ def main():
             enable_flip_horizontal=flip_h,
             enable_flip_vertical=flip_v,
             enable_flip_diagonal=flip_d,
+            flip_prob=flip_p,
             enable_random_rotate=rotate_on,
             random_rotate_prob=rotate_prob,
             random_rotate_angle_range=rotate_range,
@@ -1971,7 +1997,7 @@ def main():
                 f"rotate p={rotate_prob:g} ±{rotate_range:g}°" if rotate_on else "rotate off"
             )
             print(
-                f"  - Training: no Albumentations augmentation (flips: {flip_msg}; {rotate_msg})"
+                f"  - Training: no Albumentations augmentation (flips: {flip_msg} p={flip_p:g}; {rotate_msg})"
             )
 
     val_collate_fn = create_collate_fn(
@@ -2255,7 +2281,12 @@ def main():
         opt_name = "adamw"
     norm_wd_mult = float(getattr(config.training, "weight_decay_norm_mult", 1.0))
     bias_wd_mult = float(getattr(config.training, "weight_decay_bias_mult", 1.0))
-    split_weight_decay = norm_wd_mult != 1.0 or bias_wd_mult != 1.0
+    warmup_bias_lr = getattr(config.training, "warmup_bias_lr", None)
+    norm_bias_in_bias_group = bool(getattr(config.training, "norm_bias_in_bias_group", False))
+    # Bias LR warmup addresses groups by name, so split even when both multipliers are 1.
+    split_weight_decay = (
+        norm_wd_mult != 1.0 or bias_wd_mult != 1.0 or warmup_bias_lr is not None
+    )
     if use_lr_param_groups:
         optimizer_param_groups, optimizer_group_summary = build_optimizer_param_groups(
             model,
@@ -2271,6 +2302,8 @@ def main():
                 config.training.weight_decay,
                 norm_wd_mult,
                 bias_wd_mult,
+                force_split=warmup_bias_lr is not None,
+                norm_bias_in_bias_group=norm_bias_in_bias_group,
             )
         optimizer_params = optimizer_param_groups
         if rank == 0:
@@ -2292,6 +2325,8 @@ def main():
             config.training.weight_decay,
             norm_wd_mult,
             bias_wd_mult,
+            force_split=warmup_bias_lr is not None,
+            norm_bias_in_bias_group=norm_bias_in_bias_group,
         )
     else:
         optimizer_params = model.parameters()
@@ -2312,6 +2347,7 @@ def main():
             lr=config.training.learning_rate,
             momentum=config.training.momentum,
             weight_decay=config.training.weight_decay,
+            nesterov=bool(getattr(config.training, "nesterov", False)),
         )
     else:
         raise ValueError(
@@ -2322,10 +2358,13 @@ def main():
             "  Weight decay groups: "
             f"conv/other={config.training.weight_decay:g}, "
             f"norm×{norm_wd_mult:g}, bias×{bias_wd_mult:g}"
+            + (" (norm biases in the bias group)" if norm_bias_in_bias_group else "")
         )
     
     # Create LR scheduler (type from config: multistep/step, reduce_on_plateau, one_cycle, cosine_annealing)
     sched_type = (getattr(config.training, "lr_scheduler_type", None) or "").strip().lower()
+    warmup_momentum = getattr(config.training, "warmup_momentum", None)
+    warmup_bias_lr = getattr(config.training, "warmup_bias_lr", None)
     lr_milestones = getattr(config.training, "lr_scheduler_milestones", None)
     plateau_metric = getattr(config.training, "lr_scheduler_plateau_metric", "total_loss")
 
@@ -2358,6 +2397,29 @@ def main():
                 f"\nLR scheduler: OneCycleLR (total_steps={total_steps}, pct_start={pct_start}, "
                 f"div_factor={div_factor}, final_div_factor={final_div_factor})"
             )
+    elif sched_type in ("linear", "linear_decay"):
+        base_lr_scheduler, linear_epochs, end_factor = create_linear_lr_scheduler(
+            optimizer, config.training,
+        )
+        sched_desc = format_linear_scheduler_description(
+            linear_epochs,
+            end_factor,
+            config.training.learning_rate,
+            config.training.lr_warmup_steps,
+        )
+        if config.training.lr_warmup_steps > 0:
+            lr_scheduler = WarmupScheduler(
+                optimizer,
+                base_lr_scheduler,
+                config.training.lr_warmup_steps,
+                advance_base_during_warmup=True,
+                warmup_momentum=warmup_momentum,
+                warmup_bias_lr=warmup_bias_lr,
+            )
+        else:
+            lr_scheduler = base_lr_scheduler
+        if rank == 0:
+            print(f"\nLR scheduler: {sched_desc}")
     elif sched_type in ("cosine_annealing", "cosine"):
         base_lr_scheduler, t_max, eta_min = create_pytorch_cosine_lr_scheduler(
             optimizer, config.training,
@@ -2370,7 +2432,11 @@ def main():
         )
         if config.training.lr_warmup_steps > 0:
             lr_scheduler = WarmupScheduler(
-                optimizer, base_lr_scheduler, config.training.lr_warmup_steps,
+                optimizer,
+                base_lr_scheduler,
+                config.training.lr_warmup_steps,
+                warmup_momentum=warmup_momentum,
+                warmup_bias_lr=warmup_bias_lr,
             )
             if rank == 0:
                 print(f"\nLR scheduler: {sched_desc}")
@@ -2390,7 +2456,11 @@ def main():
         )
         if config.training.lr_warmup_steps > 0:
             lr_scheduler = WarmupScheduler(
-                optimizer, base_lr_scheduler, config.training.lr_warmup_steps,
+                optimizer,
+                base_lr_scheduler,
+                config.training.lr_warmup_steps,
+                warmup_momentum=warmup_momentum,
+                warmup_bias_lr=warmup_bias_lr,
             )
             if rank == 0:
                 print(f"\nLR scheduler: {sched_desc}")
@@ -2408,7 +2478,11 @@ def main():
         )
         if config.training.lr_warmup_steps > 0:
             lr_scheduler = WarmupScheduler(
-                optimizer, base_lr_scheduler, config.training.lr_warmup_steps,
+                optimizer,
+                base_lr_scheduler,
+                config.training.lr_warmup_steps,
+                warmup_momentum=warmup_momentum,
+                warmup_bias_lr=warmup_bias_lr,
             )
             if rank == 0:
                 print(f"\nLR scheduler: {sched_desc}")
@@ -2436,7 +2510,11 @@ def main():
             )
         if config.training.lr_warmup_steps > 0:
             lr_scheduler = WarmupScheduler(
-                optimizer, base_lr_scheduler, config.training.lr_warmup_steps,
+                optimizer,
+                base_lr_scheduler,
+                config.training.lr_warmup_steps,
+                warmup_momentum=warmup_momentum,
+                warmup_bias_lr=warmup_bias_lr,
             )
             if rank == 0:
                 print(f"\nLearning rate warmup enabled: {config.training.lr_warmup_steps} optimizer steps")
@@ -2465,6 +2543,9 @@ def main():
             lr_scheduler = base_lr_scheduler
             if rank == 0:
                 print("\nLearning rate warmup disabled")
+
+    if rank == 0 and warmup_bias_lr is not None and isinstance(lr_scheduler, WarmupScheduler):
+        print(f"  Bias LR warmup from {float(warmup_bias_lr):g}")
     
     # Create checkpoint manager (best checkpoint: config checkpoint.best_metric, e.g. "mAP" or "total_loss")
     best_metric = getattr(config.checkpoint, "best_metric", "total_loss") or "total_loss"
@@ -2690,6 +2771,8 @@ def main():
                 "cosine_with_tail",
                 "cosine_annealing_late",
                 "cosine_late",
+                "linear",
+                "linear_decay",
             )
             and int(getattr(config.training, "lr_warmup_steps", 0) or 0) == 0
         ):
@@ -2712,6 +2795,15 @@ def main():
                 sched_desc = format_late_cosine_scheduler_description(
                     cosine_start, config.training.num_epochs, eta_min_cont, 0,
                 )
+            elif sched_type in ("linear", "linear_decay"):
+                lr_scheduler, linear_epochs, end_factor = create_linear_lr_scheduler(
+                    optimizer,
+                    config.training,
+                    last_epoch=int(checkpoint_epoch),
+                )
+                sched_desc = format_linear_scheduler_description(
+                    linear_epochs, end_factor, config.training.learning_rate, 0,
+                )
             else:
                 lr_scheduler, t_max, eta_min_cont = create_pytorch_cosine_lr_scheduler(
                     optimizer,
@@ -2722,8 +2814,9 @@ def main():
                     t_max, eta_min_cont, 0, config.training.num_epochs,
                 )
             if rank == 0:
+                kind = "linear" if sched_type in ("linear", "linear_decay") else "cosine"
                 print(
-                    f"\nRebuilt cosine schedule for continuation (scheduler state not loaded): "
+                    f"\nRebuilt {kind} schedule for continuation (scheduler state not loaded): "
                     f"{sched_desc}, last_epoch={int(checkpoint_epoch)}"
                 )
 
@@ -2861,6 +2954,7 @@ def main():
                     eval_vis_score_threshold=getattr(getattr(config, "tensorboard", None), "vis_score_threshold", None),
                     eval_iou_threshold=eval_thr_iou,
                     eval_map_iou_thresholds=eval_map_ious,
+                    eval_map_ap_interpolation=config.evaluation.map_ap_interpolation,
                     eval_extended_gt_metrics=config.evaluation.val_extended_gt_metrics,
                     eval_compute_map_final=config.evaluation.val_map_at_end,
                     eval_compute_map_test=config.evaluation.test_map,
@@ -2916,6 +3010,7 @@ def main():
                 eval_vis_score_threshold=getattr(getattr(config, "tensorboard", None), "vis_score_threshold", None),
                 eval_iou_threshold=eval_thr_iou,
                 eval_map_iou_thresholds=eval_map_ious,
+                eval_map_ap_interpolation=config.evaluation.map_ap_interpolation,
                 eval_extended_gt_metrics=config.evaluation.val_extended_gt_metrics,
                 eval_compute_map_final=config.evaluation.val_map_at_end,
                 eval_compute_map_test=config.evaluation.test_map,

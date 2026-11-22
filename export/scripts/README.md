@@ -10,9 +10,9 @@ Default artifact directory is [`../../onnx_export/`](../../onnx_export/README.md
 | Script | `odet export` | Purpose |
 |--------|-------------------|---------|
 | [export_onnx.py](export_onnx.py) | `onnx` | PyTorch → ONNX + sidecar meta (preprocess / postprocess). Default `rotated_fcos_pre_nms`. |
-| [infer_onnx.py](infer_onnx.py) | `infer` | ORT + Python NMS on a folder (or `--smoke`). Repeatable `--per-class-score-threshold CLASS=FLOAT` merges into the sidecar per-class map (case-insensitive; omitted classes stay). `--score-threshold` stays the global floor only. |
+| [infer_onnx.py](infer_onnx.py) | `infer` | ORT + Python NMS on a folder (or `--smoke`). Images larger than `window_size` are tiled (`fixed` / `crop`). Repeatable `--per-class-score-threshold CLASS=FLOAT` merges into the sidecar per-class map (case-insensitive; omitted classes stay). `--score-threshold` stays the global floor only. |
 | [demo.py](demo.py) | `demo` | Bundled plane image + NMS assertions + overlay. |
-| [save_predictions_onnx.py](save_predictions_onnx.py) | `preds` | Val split via ONNX + Python NMS (eval-val JSON). |
+| [save_predictions_onnx.py](save_predictions_onnx.py) | `preds` | Val split via ONNX + Python NMS (eval-val JSON). Uses the experiment `window_size` and overlap for sliding windows. |
 | [zip_bundle.py](zip_bundle.py) | — | Zip `onnx_export/` without `__pycache__` (`make export-zip`). |
 
 See [../README.md](../README.md) for full usage.

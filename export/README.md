@@ -64,6 +64,14 @@ dets = detect_image(Image.open("tile.jpg"), "onnx_export/model.onnx")
 # each det: cx, cy, w, h, angle_rad, score, label, class_name  (original image pixels)
 ```
 
+## Large images
+
+`detect_image` tiles when `resize_mode` is `fixed` or `crop` and the image is larger than the slice. The slice is `preprocess.window_size` in source pixels when the sidecar sets it, and `target_size` otherwise. Each window is bilinear-resized onto the ONNX canvas (`target_size`). Overlap is `preprocess.overlap_pixels` (default 200, from `production.overlap_pixels` at export). The last window on each axis flushes to the image edge. Boxes are mapped back to source pixels, centroids in the zero-pad band are dropped, and a second rotated NMS merges overlap copies.
+
+An image that fits in the slice is one forward: the whole image is resized to `target_size`. `pad` and `keep_ratio` always use that single resize.
+
+Re-export so the sidecar picks up `window_size` and `overlap_pixels`. `odet export preds` also reads those fields from the experiment config.
+
 From the copied bundle only (no repo, no oriented-det):
 
 ```bash

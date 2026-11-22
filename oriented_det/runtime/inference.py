@@ -37,9 +37,12 @@ from oriented_det import OrientedRCNN, RotatedRetinaNet, RBox
 from oriented_det.ops import nms
 from oriented_det.utils import viz
 from oriented_det.data.preprocessing import (
+    LETTERBOX_PAD_VAL,
+    apply_fixed_mode,
     apply_spatial_preprocess,
     build_spatial_meta_from_dims,
     get_model_canvas_size,
+    parse_canvas_size,
     remap_detections_to_original,
 )
 from oriented_det.train.config import TrainingExperimentConfig, get_preprocessing_params
@@ -92,19 +95,70 @@ def load_model(checkpoint_path: Path, model_type: str = "oriented_rcnn", num_cla
     return model
 
 
-def get_model_size(preprocessing: dict = None):
-    """Return (slice_h, slice_w) from preprocessing config for sliding-window slice size."""
-    if preprocessing is None:
+def _resize_mode_name(preprocessing: Optional[dict] = None) -> str:
+    if not isinstance(preprocessing, dict):
+        return "fixed"
+    return str(preprocessing.get("resize_mode", "fixed") or "fixed").strip().lower()
+
+
+def _network_canvas_size(preprocessing: Optional[dict] = None) -> Tuple[int, int]:
+    """Return ``target_size`` as ``(h, w)``: the tensor the network receives."""
+    if not isinstance(preprocessing, dict):
         return (1024, 1024)
     mode = preprocessing.get("resize_mode", "fixed")
     ts = preprocessing.get("target_size", (1024, 1024))
     return get_model_canvas_size(mode, ts)
 
 
-def _resize_mode_name(preprocessing: Optional[dict] = None) -> str:
+def _active_window_size(preprocessing: Optional[dict] = None) -> Optional[Tuple[int, int]]:
+    """Source-pixel slice when ``window_size`` applies, else None.
+
+    ``pad`` and ``keep_ratio`` ignore ``window_size`` and keep the whole-image path.
+    """
     if not isinstance(preprocessing, dict):
-        return "fixed"
-    return str(preprocessing.get("resize_mode", "fixed") or "fixed").strip().lower()
+        return None
+    if _resize_mode_name(preprocessing) in {"pad", "keep_ratio"}:
+        return None
+    raw = preprocessing.get("window_size", None)
+    if raw is None:
+        return None
+    return parse_canvas_size("fixed", raw)
+
+
+def get_model_size(preprocessing: dict = None):
+    """Return ``(slice_h, slice_w)`` in source pixels for the sliding-window slice.
+
+    When ``window_size`` is set (and ``resize_mode`` is not ``pad`` / ``keep_ratio``),
+    that pair is the slice. Otherwise the slice is ``target_size``. The network
+    still receives ``target_size``. Callers that rewrite ``target_size`` must leave
+    ``window_size`` unchanged: the slice is not inferred from ``target_size`` while
+    ``window_size`` is set.
+    """
+    if preprocessing is None:
+        return (1024, 1024)
+    window = _active_window_size(preprocessing)
+    if window is not None:
+        return window
+    return _network_canvas_size(preprocessing)
+
+
+def _window_zoom_scales(
+    preprocessing: Optional[dict],
+    slice_h: int,
+    slice_w: int,
+) -> Tuple[float, float]:
+    """Return ``(scale_x, scale_y) = target_size / slice``.
+
+    ``(1, 1)`` when ``window_size`` is unset or ignored, so crop coordinates are
+    left in source pixels. The slice is ``window_size`` on the normal path.
+    """
+    if _active_window_size(preprocessing) is None:
+        return 1.0, 1.0
+    canvas_h, canvas_w = _network_canvas_size(preprocessing)
+    return (
+        float(canvas_w) / float(slice_w),
+        float(canvas_h) / float(slice_h),
+    )
 
 
 def uses_native_sliding_window(
@@ -116,8 +170,10 @@ def uses_native_sliding_window(
 
     ``resize_mode: pad`` / ``keep_ratio`` always fit the full image
     (uniform scale; pad square or ``pad_size_divisor``), matching training.
-    DOTA ``fixed`` / ``crop`` still use native sliding windows when the image
-    exceeds the model canvas.
+    They ignore ``window_size``.
+    ``fixed`` / ``crop`` tile when the image exceeds the slice: ``window_size``
+    in source pixels when set, otherwise ``target_size``. An image that fits
+    in the slice is one forward. The network still receives ``target_size``.
     """
     if _resize_mode_name(preprocessing) in {"pad", "keep_ratio"}:
         return False
@@ -255,9 +311,10 @@ def count_sliding_window_positions(
 ) -> int:
     """Number of native-resolution windows ``run_inference_sliding_window`` runs for an image.
 
-    Returns 1 when the image fits the canvas, or when ``resize_mode`` is ``pad``
-    / ``keep_ratio`` (whole-image scale, same as training). DOTA ``fixed`` /
-    ``crop`` still tile rasters larger than the canvas.
+    Returns 1 when the image fits the slice, or when ``resize_mode`` is ``pad``
+    / ``keep_ratio`` (whole-image scale, same as training; ``window_size`` is
+    ignored). ``fixed`` / ``crop`` tile rasters larger than the slice
+    (``window_size`` in source pixels when set, otherwise ``target_size``).
     """
     if not uses_native_sliding_window(image_height, image_width, preprocessing):
         return 1
@@ -440,11 +497,22 @@ def _crop_or_pad(image: Image.Image, x0: int, y0: int, slice_w: int, slice_h: in
 
 
 def preprocess_crop(crop_pil: Image.Image, preprocessing: dict, slice_h: int, slice_w: int):
-    """Preprocess a slice_w x slice_h crop (PIL) to tensor with same normalization as training."""
+    """Preprocess a slice canvas to the network tensor.
+
+    When ``window_size`` is set, bilinear-resize the slice (including any zero
+    pad already in it) onto ``target_size``, same as :func:`apply_fixed_mode`.
+    When the slice already equals ``target_size``, that resize is a no-op.
+    When ``window_size`` is null, the slice is the network canvas and is not resized.
+    """
+    image = crop_pil
+    if _active_window_size(preprocessing) is not None:
+        canvas_h, canvas_w = _network_canvas_size(preprocessing)
+        if int(slice_h) != canvas_h or int(slice_w) != canvas_w:
+            image = apply_fixed_mode(image, [], (canvas_h, canvas_w)).image
     mean = preprocessing.get("normalize_mean", MMDET_MEAN)
     std = preprocessing.get("normalize_std", MMDET_STD)
     transform = T.Compose([T.ToTensor(), T.Normalize(mean=mean, std=std)])
-    return transform(crop_pil)
+    return transform(image)
 
 
 def _preprocess_image_tensor_training_style(
@@ -476,7 +544,8 @@ def _preprocess_image_tensor_training_style(
         pad_w = (div - (w % div)) % div
         pad_h = (div - (h % div)) % div
         if pad_w or pad_h:
-            canvas = Image.new("RGB", (w + pad_w, h + pad_h), (0, 0, 0))
+            fill = int(LETTERBOX_PAD_VAL)
+            canvas = Image.new("RGB", (w + pad_w, h + pad_h), (fill, fill, fill))
             canvas.paste(image, (0, 0))
             image = canvas
     transform = T.Compose([T.ToTensor(), T.Normalize(mean=mean, std=std)])
@@ -627,6 +696,13 @@ def run_inference_sliding_window(
     :func:`resolve_sliding_window_margin_pixels`). Default margin is **0** (keep overlap
     copies, then NMS). Pass a positive ``window_margin_pixels`` to drop the band.
     Sides that touch the full-image border skip the margin so edge objects are kept.
+    Margins stay in source pixels.
+
+    When ``window_size`` is set, each slice is resized onto ``target_size`` and model
+    boxes are in that canvas. ``cx`` / width are divided by ``scale_x`` and ``cy`` /
+    height by ``scale_y`` (``target_size / window_size``) before the centroid test
+    and before the window origin is added. When ``window_size`` is null, boxes are
+    already in source pixels.
 
     ``window_batch_size``: if a positive int, use it; if ``None``, use
     :func:`resolve_window_batch_size` (CLI/env, else **8** on GPU / **4** on CPU;
@@ -662,6 +738,10 @@ def run_inference_sliding_window(
         slice_h=slice_h,
         slice_w=slice_w,
     )
+    # Model boxes are in target_size space when window_size is set. Scale them
+    # back to the source-pixel slice before the centroid test and the origin add.
+    scale_x, scale_y = _window_zoom_scales(preprocessing, slice_h, slice_w)
+    zoomed = scale_x != 1.0 or scale_y != 1.0
     all_detections = []
     eps = 1e-3
 
@@ -680,11 +760,18 @@ def run_inference_sliding_window(
             )
             for d in window_detections:
                 r = d["rbox"]
-                if r.cx < -eps or r.cy < -eps or r.cx >= crop_w - eps or r.cy >= crop_h - eps:
+                if zoomed:
+                    cx = r.cx / scale_x
+                    cy = r.cy / scale_y
+                    rw = r.width / scale_x
+                    rh = r.height / scale_y
+                else:
+                    cx, cy, rw, rh = r.cx, r.cy, r.width, r.height
+                if cx < -eps or cy < -eps or cx >= crop_w - eps or cy >= crop_h - eps:
                     continue
                 if not _centroid_in_sliding_window_interior(
-                    float(r.cx),
-                    float(r.cy),
+                    float(cx),
+                    float(cy),
                     crop_w,
                     crop_h,
                     margin_x,
@@ -695,7 +782,7 @@ def run_inference_sliding_window(
                     image_height,
                 ):
                     continue
-                shifted_rbox = RBox(r.cx + x0, r.cy + y0, r.width, r.height, r.angle)
+                shifted_rbox = RBox(cx + x0, cy + y0, rw, rh, r.angle)
                 all_detections.append(
                     {"rbox": shifted_rbox, "score": d["score"], "label": d["label"]}
                 )
@@ -750,8 +837,12 @@ def run_inference_auto(
     ``resize_mode: pad`` / ``keep_ratio`` always use the training path (uniform
     scale so the long edge equals ``max(target_size)``, then square pad or
     ``pad_size_divisor``) even when the native image is larger — HRSC2016 eval
-    matches train. DOTA ``fixed`` / ``crop`` still use
-    ``run_inference_sliding_window`` when height or width exceeds the canvas.
+    matches train. They ignore ``window_size``. DOTA ``fixed`` / ``crop`` still use
+    ``run_inference_sliding_window`` when height or width exceeds the slice
+    (``window_size`` in source pixels when set, otherwise ``target_size``).
+    The network still receives ``target_size``. When ``window_size`` is set, each
+    slice is bilinear-resized onto that canvas and boxes are divided by
+    ``target_size / window_size`` before the window origin is added.
     Small images in every mode use the training-style preprocess.
     Detections are in original image pixel coordinates.
 

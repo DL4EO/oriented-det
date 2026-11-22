@@ -212,11 +212,11 @@ python tools/lr_finder.py --config configs/.../config.json --no-amp --restore
 
 Use the printed **primary** LR (or another heuristic) in your config’s `training.learning_rate`; the tool also prints values scaled to the config batch size when the sweep used a different `--batch-size`. Scale further by world size / gradient accumulation as in `train.py` if needed. The model is updated during the sweep; for clean training, start from scratch or load a checkpoint.
 
-From the repo root you can run: `make lr-finder` or `make lr-finder CONFIG=configs/.../config.json` (optional: `OUTPUT=lr_finder.png`).
+From the repo root: `make lr-finder` or `make lr-finder CONFIG=configs/.../config.json` (optional: `OUTPUT=lr_finder.png`). With no `CONFIG`, it uses the Makefile default. The sweep uses that file's batch size.
 
 ### `train.py` (continued)
 
-**`--wizard`:** `odet train --config … --wizard` (or `make wizard`) scans the training split and prints geometry/density stats plus config nudges. FPN/box-reg advice is **class-agnostic**: it uses pooled GT width vs finest FPN stride (cells on P3/P4/…), not class names. Small boxes (few cells, or a non-trivial share under 2 cells) get “keep finest level + decoded `kfiou`”; larger boxes do not. No run directory is created.
+**`--wizard`:** `odet train --config … --wizard` (or `make wizard`) scans the training split and prints geometry/density stats plus config nudges. FPN/box-reg advice is **class-agnostic**: it uses pooled GT width vs finest FPN stride (cells on P3/P4/…), not class names. Small boxes (few cells, or a non-trivial share under 2 cells) get “keep finest level + decoded `kfiou`”; larger boxes do not. Anchor-ratio and `target_stds` nudges are printed only for Oriented R-CNN, Rotated Faster R-CNN, and Rotated RetinaNet. No run directory is created.
 
 **Features:**
 - Config-based training (all parameters in JSON files)
@@ -378,14 +378,14 @@ Sweep controls:
 
 ### `app.py`
 
-Gradio app to browse **predictions** from `save_predictions.py`, explore a DOTA dataset, or **edit OBB CSV annotations** with an optional read-only reference overlay. Prediction boxes use `oriented_det.utils.viz.DEFAULT_LINE_WIDTH` (4); ground-truth overlays stay thinner (thickness 2).
+Gradio app to browse **predictions** from `save_predictions.py`, explore a DOTA dataset, or **edit OBB CSV annotations** with an optional read-only reference overlay. Prediction and ground-truth outlines in predictions/dataset mode are drawn **after** zoom, so `--line-width` (default **1**) is the stroke in screen pixels and stays the same at 1×, 2×, and 4×. The same control is the **Line width (px)** slider in the app. The CSV editor still uses `oriented_det.utils.viz.DEFAULT_LINE_WIDTH`.
 
 The app includes a small Gradio 6.8 compatibility patch so cleared/null slider payloads fall back to the slider default instead of crashing during slider preprocessing.
 
 Predictions mode (requires a predictions directory from `save_predictions.py`):
 ```bash
 python tools/app.py --mode predictions --predictions-dir predictions/20250101_120000
-# Optional: --data-root /path/to/data/DOTA-v1.0-tiled --threshold 0.3 --port 7860
+# Optional: --data-root /path/to/data/DOTA-v1.0-tiled --threshold 0.3 --line-width 1 --port 7860
 ```
 
 Dataset mode (browse DOTA labels without predictions):
@@ -759,6 +759,24 @@ python tools/measure_sampled_riou_error.py --target-spacing 2 --min-samples 25 -
 **Output columns (CSV):** category, box sizes, exact/sampled IoU, errors, grid size, geometry params.
 
 See [oriented_det/ops/README.md](../oriented_det/ops/README.md#geometry-based-riou-sampling--rationale--metrics) for design rationale and benchmark tables (spacing 2 px, min 25, max 1024).
+
+### `diagnose_coco_gap.py`
+
+CPU-only comparison of a COCO YOLO-OBB checkpoint with Ultralytics v8 small: pycocotools versus the in-train AP, one-image task-aligned assigner terms, letterbox pixels, and parameter count. Writes `runs/coco_gap/report.json` and `runs/coco_gap/pixels.png`. Set `CUDA_VISIBLE_DEVICES=""` so it stays off the GPU.
+
+```bash
+CUDA_VISIBLE_DEVICES="" python tools/diagnose_coco_gap.py
+```
+
+The epoch-60 numbers are in [configs/yolo_obb/README.md](../configs/yolo_obb/README.md#epoch-60-gap-versus-yolov8-s).
+
+### `diagnose_mosaic_gap.py`
+
+CPU-only mosaic comparison for the COCO YOLO-OBB recipe. The same four train photos go through this letterbox-then-mosaic path and through the Ultralytics v8 mosaic. Reports box long side and the fraction of the 640 canvas that is photo, letterbox black, or gray fill. Writes `runs/coco_gap/mosaic_report.json`, `mosaic_matched.png`, and `mosaic_train.png`.
+
+```bash
+CUDA_VISIBLE_DEVICES="" python tools/diagnose_mosaic_gap.py
+```
 
 ## Tips
 

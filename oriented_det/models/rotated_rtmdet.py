@@ -50,6 +50,7 @@ def quality_focal_loss(
     *,
     beta: float = 2.0,
     weight: Optional[torch.Tensor] = None,
+    valid: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Quality Focal Loss (sum reduction).
 
@@ -58,7 +59,14 @@ def quality_focal_loss(
         target: [N, C] continuous quality targets in [0, 1] (IoU for positives)
         beta: focusing parameter
         weight: optional [C] per-class scale (applied to all entries of that column)
+        valid: optional [N] bool. False rows (ignore label -1) are left out of the sum.
+            An all-invalid image returns ``pred.sum() * 0`` so the graph stays connected.
     """
+    if valid is not None and not bool(valid.any()):
+        return pred.sum() * 0
+    if valid is not None:
+        pred = pred[valid]
+        target = target[valid]
     pred_sig = pred.sigmoid()
     scale = (target - pred_sig).abs().pow(float(beta))
     loss = F.binary_cross_entropy_with_logits(pred, target, reduction="none") * scale
@@ -86,6 +94,36 @@ def _points_in_obb(points: torch.Tensor, boxes: torch.Tensor) -> torch.Tensor:
     return (local_x.abs() <= hw) & (local_y.abs() <= hh)
 
 
+def _apply_ignore_lookalike_points(
+    points: torch.Tensor,
+    labels: torch.Tensor,
+    gt_bboxes_ignore: Optional[torch.Tensor],
+    gt_bboxes_lookalike: Optional[torch.Tensor],
+    bg: int,
+) -> torch.Tensor:
+    """FCOS point rules for don't-care and lookalike OBBs.
+
+    Background points inside an ignore box become ``-1``. Positives are not
+    overwritten. Lookalike points are forced back to background and win over
+    ignore. Empty tensors are a no-op (``drop`` / ``keep`` never fill them).
+    """
+    if gt_bboxes_ignore is not None and gt_bboxes_ignore.numel() > 0:
+        ignore_mask = _points_in_obb(points, gt_bboxes_ignore).any(dim=1)
+        labels = torch.where(
+            ignore_mask & (labels == bg),
+            torch.full_like(labels, -1),
+            labels,
+        )
+    if gt_bboxes_lookalike is not None and gt_bboxes_lookalike.numel() > 0:
+        look_mask = _points_in_obb(points, gt_bboxes_lookalike).any(dim=1)
+        labels = torch.where(
+            look_mask & (labels < 0),
+            torch.full_like(labels, bg),
+            labels,
+        )
+    return labels
+
+
 def dynamic_soft_label_assign_single(
     points: torch.Tensor,
     cls_logits: torch.Tensor,
@@ -98,11 +136,16 @@ def dynamic_soft_label_assign_single(
     topk: int = 13,
     iou_weight: float = 3.0,
     strides: Optional[torch.Tensor] = None,
+    gt_bboxes_ignore: Optional[torch.Tensor] = None,
+    gt_bboxes_lookalike: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Assign soft labels for one image.
 
+    Ignore and lookalike labels are applied on every return, including empty GT
+    and no positive prior. ``drop`` / ``keep`` pass empty tensors and stay a no-op.
+
     Returns:
-        labels [P] in {0..K-1 fg, K bg},
+        labels [P] in {0..K-1 fg, K bg, -1 ignore},
         soft_cls_target [P, K] quality targets,
         bbox_targets [P, 5] encoded (l,t,r,b,θ) absolute (caller may stride-norm),
         pos_mask [P] bool
@@ -116,8 +159,14 @@ def dynamic_soft_label_assign_single(
     bbox_targets = points.new_zeros((num_points, 5))
     pos_mask = torch.zeros(num_points, dtype=torch.bool, device=device)
 
+    def _finish() -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        marked = _apply_ignore_lookalike_points(
+            points, labels, gt_bboxes_ignore, gt_bboxes_lookalike, bg
+        )
+        return marked, soft_target, bbox_targets, pos_mask
+
     if num_gts == 0 or num_points == 0:
-        return labels, soft_target, bbox_targets, pos_mask
+        return _finish()
 
     # Prior: points inside GT OBBs (optionally soft center prior via stride)
     inside = _points_in_obb(points, gt_bboxes)  # [P, G]
@@ -133,13 +182,15 @@ def dynamic_soft_label_assign_single(
         prior = inside
 
     if not prior.any():
-        return labels, soft_target, bbox_targets, pos_mask
+        return _finish()
 
     # IoU only on prior pairs. Non-prior costs are discarded, and mosaic makes the
     # full point×GT matrix (plus a Python loop over boxes) the training bottleneck.
     with torch.no_grad():
         point_idx, gt_idx = prior.nonzero(as_tuple=True)
-        iou = points.new_zeros((num_points, num_gts))
+        # diff_iou returns fp32. points follow the head dtype, which is fp16
+        # under AMP, so a zeros tensor taken from points cannot receive pair_iou.
+        iou = torch.zeros((num_points, num_gts), device=device, dtype=torch.float32)
         pair_iou = diff_iou_rotated_2d(
             decoded_boxes.detach()[point_idx],
             gt_bboxes.detach()[gt_idx],
@@ -154,7 +205,9 @@ def dynamic_soft_label_assign_single(
         pair_cls = -(soft_y * torch.log(p) + (1.0 - soft_y) * torch.log(1.0 - p))
         pair_cls = torch.where(valid_cls[gt_idx], pair_cls, torch.zeros_like(pair_cls))
         cls_cost = torch.zeros((num_points, num_gts), device=device, dtype=pred_sig.dtype)
-        cls_cost[point_idx, gt_idx] = pair_cls
+        # iou is fp32 while pred_sig is fp16 under AMP, so pair_cls promotes to
+        # fp32. Indexed writes require the source dtype to match.
+        cls_cost[point_idx, gt_idx] = pair_cls.to(dtype=cls_cost.dtype)
 
         iou_cost = -torch.log(iou.clamp(min=1e-6))
         cost = cls_cost + float(iou_weight) * iou_cost
@@ -170,7 +223,7 @@ def dynamic_soft_label_assign_single(
         best_cost, best_gt = cost_selected.min(dim=1)
         pos = torch.isfinite(best_cost)
         if not pos.any():
-            return labels, soft_target, bbox_targets, pos_mask
+            return _finish()
 
         matched_gt = torch.where(pos, best_gt, torch.full_like(best_gt, -1))
         pos_inds = pos.nonzero(as_tuple=False).squeeze(1)
@@ -184,9 +237,9 @@ def dynamic_soft_label_assign_single(
         # Encoded bbox targets via DistanceAnglePointCoder (absolute ltrb + angle)
         coder = DistanceAnglePointCoder(angle_version="le90")
         encoded = coder.encode(points[pos_inds], gt_bboxes[gt_inds])
-        bbox_targets[pos_inds] = encoded
+        bbox_targets[pos_inds] = encoded.to(dtype=bbox_targets.dtype)
 
-    return labels, soft_target, bbox_targets, pos_mask
+    return _finish()
 
 
 # ---------------------------------------------------------------------------
@@ -334,6 +387,8 @@ def compute_rotated_rtmdet_loss(
     soft_center_radius: float = 3.0,
     iou_weight: float = 3.0,
     class_weights: Optional[torch.Tensor] = None,
+    gt_boxes_ignore: Optional[List[torch.Tensor]] = None,
+    gt_boxes_lookalike: Optional[List[torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """QFL classification + decoded rIoU box reg (+ encoded angle L1)."""
     if bbox_coder is None:
@@ -390,6 +445,12 @@ def compute_rotated_rtmdet_loss(
             concat_points, torch.cat([decode_ltrb, angle_i], dim=-1)
         )
 
+        ignore = None
+        if gt_boxes_ignore is not None and img_idx < len(gt_boxes_ignore):
+            ignore = gt_boxes_ignore[img_idx]
+        lookalike = None
+        if gt_boxes_lookalike is not None and img_idx < len(gt_boxes_lookalike):
+            lookalike = gt_boxes_lookalike[img_idx]
         labels, soft_tgt, bbox_tgt, pos_mask = dynamic_soft_label_assign_single(
             concat_points,
             cls_i,
@@ -401,11 +462,17 @@ def compute_rotated_rtmdet_loss(
             topk=assign_topk,
             iou_weight=iou_weight,
             strides=stride_t,
+            gt_bboxes_ignore=ignore,
+            gt_bboxes_lookalike=lookalike,
         )
 
-        # QFL over all points
+        # Ignore rows (label -1) are left out. An all-ignore image stays connected.
         loss_cls_sum = loss_cls_sum + quality_focal_loss(
-            cls_i, soft_tgt, beta=qfl_beta, weight=class_weights
+            cls_i,
+            soft_tgt,
+            beta=qfl_beta,
+            weight=class_weights,
+            valid=labels >= 0,
         )
 
         num_pos = int(pos_mask.sum().item())
@@ -781,7 +848,12 @@ class RotatedRTMDet(SigmoidFocalClassWeightsMixin, nn.Module):
         if self.training:
             if targets is None:
                 raise ValueError("Targets required during training.")
-            gt_boxes_list, gt_labels_list, _, _ = prepare_targets(targets, device=device)
+            (
+                gt_boxes_list,
+                gt_labels_list,
+                gt_boxes_ignore_list,
+                gt_boxes_lookalike_list,
+            ) = prepare_targets(targets, device=device)
             return compute_rotated_rtmdet_loss(
                 cls_scores=cls_scores,
                 bbox_preds=bbox_preds,
@@ -800,6 +872,8 @@ class RotatedRTMDet(SigmoidFocalClassWeightsMixin, nn.Module):
                 soft_center_radius=self.soft_center_radius,
                 iou_weight=self.assign_iou_weight,
                 class_weights=self.roi_class_weights_tensor,
+                gt_boxes_ignore=gt_boxes_ignore_list,
+                gt_boxes_lookalike=gt_boxes_lookalike_list,
             )
 
         return self._inference(cls_scores, bbox_preds, angle_preds, points, device)

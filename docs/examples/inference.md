@@ -25,7 +25,7 @@ odet preds --experiment-dir runs/oriented_rcnn/<timestamp> --data-split val --no
 ## Behavior
 
 - Thresholds, NMS, and sliding-window overlap come from **`production.*`** in the experiment `config.json`
-- Images larger than the model canvas use **sliding-window** tiling when `resize_mode` is `fixed` or `crop` (DOTA). **`pad`** (HRSC2016) always runs one training-style whole-image forward (scale long edge to the canvas, then pad). Walkthrough: [sliding-window inference on `demo/large.jpg`](https://deeplearning.earth/posts/2026-06-29_announcing_the_final_oriented_det_pretrained_model/).
+- Images larger than the slice use **sliding-window** tiling when `resize_mode` is `fixed` or `crop` (DOTA). Optional `preprocessing.window_size` is that slice in source pixels; the network still sees `target_size`. **`pad`** (HRSC2016) always runs one training-style whole-image forward (scale long edge to the canvas, then pad). Walkthrough: [sliding-window inference on `demo/large.jpg`](https://deeplearning.earth/posts/2026-06-29_announcing_the_final_oriented_det_pretrained_model/).
 
 ## Output artifacts
 

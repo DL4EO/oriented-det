@@ -17,7 +17,12 @@ _BUNDLE = (_HERE / "runtime.py").is_file() and (_HERE / "nms.py").is_file()
 if _BUNDLE:
     if str(_HERE) not in sys.path:
         sys.path.insert(0, str(_HERE))
-    from preprocess import canvas_size_from_meta  # noqa: E402
+    from preprocess import (  # noqa: E402
+        canvas_size_from_meta,
+        overlap_pixels_from_meta,
+        resize_mode_from_meta,
+        slice_size_from_meta,
+    )
     from runtime import (  # noqa: E402
         detect_array,
         detect_image,
@@ -29,7 +34,12 @@ else:
     _REPO_ROOT = _HERE.parents[1]
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
-    from export.preprocess import canvas_size_from_meta  # noqa: E402
+    from export.preprocess import (  # noqa: E402
+        canvas_size_from_meta,
+        overlap_pixels_from_meta,
+        resize_mode_from_meta,
+        slice_size_from_meta,
+    )
     from export.runtime import (  # noqa: E402
         detect_array,
         detect_image,
@@ -122,8 +132,13 @@ def main(argv: list[str] | None = None) -> None:
         if args.score_threshold is not None
         else (meta.get("postprocess") or meta).get("score_threshold")
     )
+    slice_h, slice_w = slice_size_from_meta(meta)
     print(f"ONNX  {args.onnx}")
     print(f"mode  {meta.get('mode')}")
+    print(
+        f"slice {slice_h}x{slice_w} overlap={overlap_pixels_from_meta(meta)} "
+        f"resize={resize_mode_from_meta(meta)}"
+    )
     print(f"thr   score={score_shown} per_class={effective_per_class}")
 
     if args.smoke:

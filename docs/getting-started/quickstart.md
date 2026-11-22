@@ -116,7 +116,7 @@ For a single demo image:
 odet image-demo demo/ runs/<model>/<timestamp>/config.json runs/.../checkpoints/checkpoint_best.pth --out-dir demo/out
 ```
 
-Large images use **sliding-window** inference when `resize_mode` is `fixed` or `crop` (`production.overlap_pixels`). **`pad`** (HRSC2016) always uses one whole-image forward, matching training.
+Large images use **sliding-window** inference when `resize_mode` is `fixed` or `crop` (`production.overlap_pixels`). Optional `preprocessing.window_size` is the slice in source pixels; the network still sees `target_size`. **`pad`** (HRSC2016) always uses one whole-image forward, matching training.
 
 ## Next Steps
 
