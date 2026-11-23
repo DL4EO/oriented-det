@@ -375,6 +375,8 @@ Sweep controls:
 
 **Per-class score thresholds:** For `save_predictions.py`, merged **`evaluation.*`** + **`production.*`** per-class floors come from **`merge_per_class_score_thresholds`**. Global score for preds uses **`resolve_preds_score_threshold`**: val reads `evaluation.val_score_threshold`, test reads `evaluation.test_score_threshold` (null → 0.05). Production is deploy only. `predictions.json` metadata records the applied `score_threshold` and `per_class_score_threshold`.
 
+**`production.output_classes`:** Post-NMS class allowlist (case-insensitive). Same field for `odet preds`, `image_demo`, deploy/Docker, and ONNX export. Excluded classes still compete in NMS; only the returned list is trimmed. Prefer this over impossible per-class score floors (e.g. `1.1`).
+
 **Per-class best threshold analysis:** With `--per-class-threshold-analysis`, the analysis JSON also includes `best_threshold_per_class` (best F1 per class over the same threshold grid). This is expensive on large datasets.
 
 **Per-tile metrics CSV:** Pass `--tile-metrics-csv path.csv` (relative paths are resolved under the run output directory). Writes one row per image (columns match `per_image_metrics` in the analysis JSON), for joining with training oversampling (`dataset.tile_metrics_csv` in config). Tiles with **no ground truth and no predictions** above the chosen global threshold get **precision = recall = F1 = F2 = 1.0** (correct empty image), so they are not treated as low-F1 failures. Training still ignores `tp=fp=fn=0` rows as hard tiles when reusing older CSVs that stored F1=0 for those cases.

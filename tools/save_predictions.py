@@ -59,6 +59,7 @@ from oriented_det.train.config import (
     effective_eval_metric_thresholds,
     resolved_map_iou_thresholds,
     merge_per_class_score_thresholds,
+    resolve_output_classes,
     resolve_preds_score_threshold,
     resolve_preds_final_nms_iou_threshold,
     resolve_inference_sliding_window_overlap_pixels,
@@ -1610,6 +1611,12 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         per_cls_thr = cfg_thr_pc
     if per_cls_thr:
         print(f"Using per-class score thresholds for {len(per_cls_thr)} class(es) (post-NMS filtering)")
+    output_classes = resolve_output_classes(config)
+    if output_classes is not None:
+        print(
+            f"Using production.output_classes={output_classes!r} "
+            "(post-NMS allowlist; excluded classes still compete in NMS)"
+        )
     model_nms = (
         float(model.final_nms_iou_threshold)
         if hasattr(model, "final_nms_iou_threshold")
@@ -1893,6 +1900,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
                 return_raw_output=True,
                 per_class_score_threshold=per_cls_thr,
                 class_names=class_names,
+                output_classes=output_classes,
             )
         except Exception as e:
             print(f"Warning: Windowed inference failed for {img_name}: {e}")
@@ -2106,6 +2114,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         'class_names': class_names,
         'score_threshold': score_threshold,
         'per_class_score_threshold': per_cls_thr,
+        'output_classes': output_classes,
         'nms_class_agnostic': bool(getattr(model, "nms_class_agnostic", False)),
         'total_images': len(results),
         'total_predictions': sum(r['num_pred'] for r in results),

@@ -279,6 +279,11 @@ def build_export_meta(
             "final_nms_use_cpu": bool(prod.get("final_nms_use_cpu", True)),
             "pre_nms_score_threshold": pre_nms_score,
             "nms_backend": str(prod.get("nms_backend") or "python"),
+            "output_classes": (
+                [str(c) for c in prod["output_classes"]]
+                if prod.get("output_classes") is not None
+                else None
+            ),
         },
         "normalize_mean": mean,
         "normalize_std": std,
@@ -396,6 +401,7 @@ def main() -> None:
         dynamic_axes=dynamic_axes,
         opset_version=int(args.opset),
         do_constant_folding=True,
+        dynamo=False,
     )
 
     meta = build_export_meta(

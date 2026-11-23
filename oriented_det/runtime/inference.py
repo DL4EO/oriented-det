@@ -588,6 +588,7 @@ def run_inference(
     score_threshold: float = 0.5,
     per_class_score_threshold: Optional[Dict[str, float]] = None,
     class_names: Optional[Sequence[str]] = None,
+    output_classes: Optional[Sequence[str]] = None,
 ):
     """Run inference on a single image.
     
@@ -598,6 +599,7 @@ def run_inference(
         score_threshold: Minimum confidence score (default for classes not in per_class map)
         per_class_score_threshold: Optional class_name -> min score (post-NMS)
         class_names: Foreground class names in order (label i corresponds to class_names[i-1])
+        output_classes: Optional post-NMS class allowlist (``production.output_classes``)
     
     Returns:
         List of detections with rboxes, scores, and labels
@@ -630,8 +632,8 @@ def run_inference(
             {"rbox": rbox, "score": score, "label": label}
             for rbox, score, label in zip(rboxes, scores, labels)
         ]
-    
-    return detections
+
+    return filter_detections_by_output_classes(detections, output_classes, class_names)
 
 
 def _detections_from_raw_output(
@@ -681,6 +683,7 @@ def run_inference_sliding_window(
     per_class_score_threshold: Optional[Dict[str, float]] = None,
     class_names: Optional[Sequence[str]] = None,
     window_margin_pixels: Optional[float] = None,
+    output_classes: Optional[Sequence[str]] = None,
 ):
     """Run inference via sliding windows (or one padded canvas if the image fits in one window).
 
@@ -813,7 +816,8 @@ def run_inference_sliding_window(
             batch_meta = []
 
     _flush_batch(batch_tensors, batch_meta)
-    return apply_nms_to_detections(all_detections, nms_threshold)
+    merged = apply_nms_to_detections(all_detections, nms_threshold)
+    return filter_detections_by_output_classes(merged, output_classes, class_names)
 
 
 def run_inference_auto(
@@ -831,6 +835,7 @@ def run_inference_auto(
     per_class_score_threshold: Optional[Dict[str, float]] = None,
     class_names: Optional[Sequence[str]] = None,
     window_margin_pixels: Optional[float] = None,
+    output_classes: Optional[Sequence[str]] = None,
 ):
     """Run inference: training-style preprocess, or native sliding windows for oversized rasters.
 
@@ -892,6 +897,9 @@ def run_inference_auto(
         ts = (preprocessing or {}).get("target_size", (slice_h, slice_w))
         meta = build_spatial_meta_from_dims(mode, image_width, image_height, ts)
         remapped = remap_detections_to_original(dets, meta)
+        remapped = filter_detections_by_output_classes(
+            remapped, output_classes, class_names
+        )
         if return_raw_output:
             return remapped, raw_output
         return remapped
@@ -908,6 +916,7 @@ def run_inference_auto(
         per_class_score_threshold=per_class_score_threshold,
         class_names=class_names,
         window_margin_pixels=window_margin_pixels,
+        output_classes=output_classes,
     )
     if return_raw_output:
         return dets, None
@@ -1229,6 +1238,50 @@ def apply_nms_to_detections(detections, iou_threshold: float = 0.5):
     )
     
     return [detections[i] for i in keep_indices]
+
+
+def normalize_output_classes(
+    output_classes: Optional[Sequence[str]],
+) -> Optional[List[str]]:
+    """Strip empty names; ``None`` means keep all classes."""
+    if output_classes is None:
+        return None
+    return [str(c).strip() for c in output_classes if str(c).strip()]
+
+
+def filter_detections_by_output_classes(
+    detections: List[dict],
+    output_classes: Optional[Sequence[str]],
+    class_names: Optional[Sequence[str]] = None,
+) -> List[dict]:
+    """Keep only allowlisted classes **after** NMS (``None`` = keep all).
+
+    Names match ``class_names`` case-insensitively (1-based label =
+    ``class_names[i-1]``). Digit strings are treated as label ids. An empty
+    allowlist keeps nothing. Prefer this over impossible score floors when
+    hiding classes for a client — excluded classes still compete in NMS.
+    """
+    names = normalize_output_classes(output_classes)
+    if names is None:
+        return detections
+    if not detections:
+        return []
+    if not names:
+        return []
+
+    by_lower = {
+        str(n).lower(): i + 1 for i, n in enumerate(class_names or [])
+    }
+    allowed: set = set()
+    for raw in names:
+        key = raw.lower()
+        if key in by_lower:
+            allowed.add(by_lower[key])
+        elif raw.isdigit():
+            allowed.add(int(raw))
+    if not allowed:
+        return []
+    return [d for d in detections if int(d["label"]) in allowed]
 
 
 def visualize_results(image, detections, class_names: list = None, output_path: Path = None):

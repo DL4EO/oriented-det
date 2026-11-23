@@ -5,3 +5,4 @@
 
 onnx>=1.14.0,<2
 onnxruntime>=1.16.0
+onnxscript>=0.2.0  # required by torch.onnx.export (PyTorch 2.5+)

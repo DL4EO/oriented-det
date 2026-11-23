@@ -427,6 +427,11 @@
           "additionalProperties": { "type": "number" },
           "description": "Per-class floors for preds/deploy only (merge_per_class_score_thresholds: evaluation then production). Does not affect train-val mAP."
         },
+        "output_classes": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "Post-NMS class allowlist for odet preds, image_demo, deploy/Docker, and ONNX export (case-insensitive). Null = keep all. Prefer this over impossible score floors (e.g. 1.1) when hiding classes for a client — excluded classes still compete in NMS."
+        },
         "final_nms_iou_threshold": { "type": ["number", "null"], "default": null, "description": "Deploy / image_demo final detection NMS IoU; when set, patches the live model after checkpoint load. odet preds / make eval-val use evaluation.final_nms_iou_threshold when that field is set." },
         "final_nms_use_cpu": { "type": ["boolean", "null"], "default": null, "description": "When set, patches model.final_nms_use_cpu (exact polygon NMS on CPU)." },
         "inference_pre_nms_score_threshold": { "type": ["number", "null"], "default": null, "description": "Decoder pre-NMS score floor; when set, patches model.inference_pre_nms_score_threshold (or RetinaNet score_threshold)." },

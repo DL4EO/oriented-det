@@ -35,7 +35,7 @@ CI runs `pytest tests/ export/tests/` on push/PR (see `.github/workflows/test.ym
 - **test_dota.py**, **test_dota_tile_roots.py**, **test_dota_task1.py**, **test_tiling.py**, **test_tile_dota.py**, **test_train_flips.py**, **test_train_rotates.py**, **test_mosaic.py** — Data loading, unlabeled test discovery, Task 1 export, `odet tile-dota` JPEG/PNG, flips, rotate, and mosaic (cached tiles keep flipped boxes; a box is dropped when less than 20% of its area remains (more than 80% outside))
 - **test_models.py**, **test_rpn.py**, **test_roi.py**, **test_bbox_coder.py**, **test_sigmoid_focal_class_weights.py**, **test_rotated_rtmdet.py** — Models and heads; FCOS/RetinaNet class-weighted sigmoid focal; RTMDet ignore and lookalike point labels
 - **test_train.py**, **test_wizard.py**, **test_hard_tile_oversampling.py**, **test_class_tile_oversampling.py**, **test_grouped_ce.py**, **test_cosine_tail_scheduler.py**, **test_linear_lr_scheduler.py**, **test_optimizer_param_groups.py** — Training engine, wizard diagnostics, hard-tile / class-tile oversampling, and schedulers
-- **test_score_thresholds.py**, **test_evaluation.py** — Metrics and mAP
+- **test_score_thresholds.py**, **test_output_classes.py**, **test_evaluation.py** — Metrics, mAP, and `production.output_classes` allowlist
 - **test_utils_config.py**, **test_utils_viz.py** — Config and visualization
 - **test_config_behavior.py**, **test_config_model_wiring.py**, **test_training_config_strict.py** — JSON config strictness and wiring; DOTA 3× is 1× + 36 epochs
 - **test_airbus_playground.py** — Airbus Playground CSV dataset

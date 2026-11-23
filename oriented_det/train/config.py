@@ -914,6 +914,9 @@ class ProductionConfig:
 
     score_threshold: Optional[float] = None
     per_class_score_threshold: Optional[Dict[str, float]] = None
+    # After NMS: keep only these class names (case-insensitive). None = keep all.
+    # Use this to hide classes for a client without score-floor hacks (e.g. drop aircraft).
+    output_classes: Optional[List[str]] = None
     final_nms_iou_threshold: Optional[float] = None
     final_nms_use_cpu: Optional[bool] = None
     inference_pre_nms_score_threshold: Optional[float] = None
@@ -1075,6 +1078,21 @@ def merge_per_class_score_thresholds(
         merged.update({str(k): float(v) for k, v in inf.per_class_score_threshold.items()})
         return merged if merged else None
     return pc
+
+
+def resolve_output_classes(
+    config: "TrainingExperimentConfig",
+) -> Optional[List[str]]:
+    """Post-NMS class allowlist from ``production.output_classes`` (``None`` = all).
+
+    Used by ``odet preds``, ``image_demo``, deploy/Docker, and ONNX export.
+    Excluded classes still compete in NMS; only the client-facing list is trimmed.
+    """
+    inf = getattr(config, "production", None)
+    if inf is None or getattr(inf, "output_classes", None) is None:
+        return None
+    cleaned = [str(c).strip() for c in inf.output_classes if str(c).strip()]
+    return cleaned
 
 
 def config_use_exact_rotated_iou_for_map(config: "TrainingExperimentConfig") -> bool:
@@ -1677,6 +1695,7 @@ class TrainingExperimentConfig:
         print(f"  test mAP / eval-test score → {_test_sc} via {_test_sc_src}")
         print(f"  per_class_score_threshold: {inf.per_class_score_threshold!r}")
         print(f"  → train-val {_train_pc!r}; preds/deploy {_preds_pc!r}")
+        print(f"  output_classes: {inf.output_classes!r}")
         _map_ious = resolved_map_iou_thresholds(self)
         if _map_ious:
             from oriented_det.data.evaluation import format_map_iou_span

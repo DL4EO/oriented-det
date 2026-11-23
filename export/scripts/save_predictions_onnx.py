@@ -121,6 +121,11 @@ def _inference_meta(
     post["nms_class_agnostic"] = nms_ag
     prod = dict(meta.get("production") or {})
     prod["nms_class_agnostic"] = nms_ag
+    out_cls = getattr(getattr(config, "production", None), "output_classes", None)
+    if out_cls is not None:
+        out_cls_list = [str(c) for c in list(out_cls)]
+        prod["output_classes"] = out_cls_list
+        post["output_classes"] = out_cls_list
     out = dict(meta)
     out["preprocess"] = prep
     out["postprocess"] = post

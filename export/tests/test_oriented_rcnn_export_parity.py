@@ -108,6 +108,7 @@ def test_pre_nms_finalize_matches_full_inference(tiny_oriented_rcnn: OrientedRCN
 
 def test_oriented_rcnn_pre_nms_onnx_checker(tiny_oriented_rcnn: OrientedRCNN) -> None:
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     import io
 
     import onnx
@@ -126,6 +127,7 @@ def test_oriented_rcnn_pre_nms_onnx_checker(tiny_oriented_rcnn: OrientedRCNN) ->
         output_names=["pre_nms_boxes", "pre_nms_scores", "pre_nms_labels", "pre_nms_count"],
         opset_version=17,
         do_constant_folding=True,
+        dynamo=False,
     )
     buf.seek(0)
     onnx.checker.check_model(onnx.load(buf))
@@ -160,6 +162,7 @@ def test_oriented_rcnn_pre_nms_onnx_ort_random_input(tiny_oriented_rcnn: Oriente
       zeros that filled ``rpn_post_nms_top_n == max_candidates``)
     """
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     pytest.importorskip("onnxruntime")
     import io
 
@@ -185,6 +188,7 @@ def test_oriented_rcnn_pre_nms_onnx_ort_random_input(tiny_oriented_rcnn: Oriente
         output_names=["pre_nms_boxes", "pre_nms_scores", "pre_nms_labels", "pre_nms_count"],
         opset_version=17,
         do_constant_folding=True,
+        dynamo=False,
     )
     raw = buf.getvalue()
     onnx_model = onnx.load(io.BytesIO(raw))
@@ -231,6 +235,7 @@ def test_oriented_rcnn_pre_nms_onnx_ort_random_input(tiny_oriented_rcnn: Oriente
 def test_pad_obb_proposals_onnx_ort_variable_counts() -> None:
     """Proposal pad must ORT-run for every input length ≤ k (not only trace length)."""
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     pytest.importorskip("onnxruntime")
     import io
 
@@ -260,6 +265,7 @@ def test_pad_obb_proposals_onnx_ort_variable_counts() -> None:
         output_names=["padded"],
         dynamic_axes={"proposals": {0: "n"}},
         opset_version=17,
+        dynamo=False,
     )
     sess = ort.InferenceSession(buf.getvalue(), providers=["CPUExecutionProvider"])
     for n in (0, 1, 17, 50, 63, 64, 80):

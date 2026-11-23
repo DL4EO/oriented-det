@@ -27,8 +27,14 @@ from oriented_det.train.config import (
     get_preprocessing_params,
     resolve_inference_score_threshold,
     resolve_inference_sliding_window_overlap_pixels,
+    resolve_output_classes,
 )
-from oriented_det.runtime.inference import apply_nms_to_detections, get_model_size, run_inference_auto
+from oriented_det.runtime.inference import (
+    apply_nms_to_detections,
+    filter_detections_by_output_classes,
+    get_model_size,
+    run_inference_auto,
+)
 from oriented_det.runtime.checkpoint import load_model_from_checkpoint
 
 
@@ -125,6 +131,7 @@ class InferenceEngine:
         self._preprocessing = None
         self._device_str = "cuda:0" if torch.cuda.is_available() else "cpu"
         self._score_threshold = 0.5
+        self._output_classes = None
         self._per_class_threshold: dict | None = None
         self._nms_threshold = 0.5
         self._overlap_pixels: int = 200
@@ -246,6 +253,7 @@ class InferenceEngine:
 
             self._score_threshold = resolve_inference_score_threshold(cfg)
             self._per_class_threshold = self._merge_per_class_score_thresholds(cfg)
+            self._output_classes = resolve_output_classes(cfg)
 
             if hasattr(self._model, "final_nms_iou_threshold"):
                 self._nms_threshold = float(self._model.final_nms_iou_threshold)
@@ -275,7 +283,8 @@ class InferenceEngine:
                 f"Inference thresholds: score={self._score_threshold}, "
                 f"nms={self._nms_threshold} (from loaded model after production.* decode patch), "
                 f"per_class={self._per_class_threshold} "
-                "(evaluation → production; class names match case-insensitively)"
+                "(evaluation → production; class names match case-insensitively), "
+                f"output_classes={self._output_classes!r}"
             )
             logger.info(
                 "Deploy edge margin: dataset.overlap=%s px, ignore_margin_pixels=%s px (centroid filter; "
@@ -361,6 +370,10 @@ class InferenceEngine:
             window_margin_pixels=0.0,
         )
         detections = apply_nms_to_detections(detections, iou_threshold=self._nms_threshold)
+        # After merge NMS so excluded classes still compete there.
+        detections = filter_detections_by_output_classes(
+            detections, self._output_classes, self._class_names
+        )
 
         before = len(detections)
         detections = _filter_detections_by_image_margin(

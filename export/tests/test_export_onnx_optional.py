@@ -22,6 +22,7 @@ RetinaNetBackboneHeadExportWrapper = _wrappers.RetinaNetBackboneHeadExportWrappe
 
 def test_export_backbone_onnx_roundtrip_ort() -> None:
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     pytest.importorskip("onnxruntime")
     import onnx
     import onnxruntime as ort
@@ -41,6 +42,7 @@ def test_export_backbone_onnx_roundtrip_ort() -> None:
         output_names=[f"fpn_{i}" for i in range(len(ref))],
         opset_version=17,
         do_constant_folding=True,
+        dynamo=False,
     )
     buf.seek(0)
     onnx_model = onnx.load(buf)
@@ -54,6 +56,7 @@ def test_export_backbone_onnx_roundtrip_ort() -> None:
 
 def test_export_retinanet_heads_onnx_checker() -> None:
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     import onnx
 
     model = RotatedRetinaNet(num_classes=2, backbone_name="resnet18", pretrained_backbone=False)
@@ -74,6 +77,7 @@ def test_export_retinanet_heads_onnx_checker() -> None:
         output_names=names,
         opset_version=17,
         do_constant_folding=True,
+        dynamo=False,
     )
     buf.seek(0)
     onnx.checker.check_model(onnx.load(buf))

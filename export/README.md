@@ -10,7 +10,7 @@ python -m export demo
 python -m export infer --onnx ./onnx_export/model.onnx --images ./tiles --output ./onnx_export/predictions
 ```
 
-Exporting a new graph from a checkpoint still needs oriented-det. From the repo root:
+Exporting a new graph from a checkpoint still needs oriented-det (and `onnx` / `onnxruntime` / `onnxscript` via `.[export]`). Producer export uses the TorchScript ONNX path (`dynamo=False`). From the repo root:
 
 ```bash
 uv pip install -e ".[export]"
@@ -96,6 +96,18 @@ Rotated NMS runs in Python after the ONNX graph (`export/nms.py`). Both modes ar
 | `false` | **Class-aware**: suppress only within the same label |
 
 At export: `production.nms_class_agnostic` when set, else `model.nms_class_agnostic`, else **class-agnostic**. Re-export after changing the config so the sidecar picks it up. `odet export preds` also overlays the experiment config onto the loaded meta.
+
+## Output class allowlist (post-NMS)
+
+To hide classes for a client without score-floor hacks, set `production.output_classes`. The same field is honored by **PyTorch** (`odet preds`, `image_demo`, deploy/Docker) and **ONNX export** (sidecar / `odet export preds`). After score floors + NMS, only listed names are kept (case-insensitive). Excluded classes still compete in NMS, so a strong aircraft box can suppress a weaker overlapping drone before aircraft is dropped from the output.
+
+```json
+"production": {
+  "output_classes": ["drone", "shahed"]
+}
+```
+
+`null` / omitted keeps every class. Prefer this over `per_class_score_threshold` values like `1.1`.
 
 ## Inference score overrides
 

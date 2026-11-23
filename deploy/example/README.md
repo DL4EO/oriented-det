@@ -50,4 +50,4 @@ curl -fsS http://127.0.0.1:8080/api/v1/health   # OK
 
 `POST /api/v1/process` body: `{"resolution": <meters per pixel>, "tiles": [<base64 JPEG or PNG>]}`. Response: GeoJSON FeatureCollection (category, confidence, length/width in meters). One request at a time (HTTP 429 if busy).
 
-Inference knobs come from `config.production.*` (score floor, NMS, sliding-window overlap, canvas flags). DOTA Hub Oriented R-CNN 1× uses score 0.55 and NMS 0.1.
+Inference knobs come from `config.production.*` (score floor, NMS, sliding-window overlap, canvas flags, optional `output_classes` post-NMS allowlist). DOTA Hub Oriented R-CNN 1× uses score 0.55 and NMS 0.1.

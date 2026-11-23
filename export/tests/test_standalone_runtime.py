@@ -125,6 +125,9 @@ def test_copied_demo_runs_without_repo_export(tmp_path: Path) -> None:
     from export.runtime import copy_runtime_sidecars
 
     shutil.copy2(_ONNX, tmp_path / "model.onnx")
+    onnx_data = Path(str(_ONNX) + ".data")
+    if onnx_data.is_file():
+        shutil.copy2(onnx_data, tmp_path / "model.onnx.data")
     meta = _ONNX.with_suffix(".export_meta.json")
     if meta.is_file():
         shutil.copy2(meta, tmp_path / "model.export_meta.json")

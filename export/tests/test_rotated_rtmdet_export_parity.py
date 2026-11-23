@@ -91,6 +91,7 @@ def test_pre_nms_rtmdet_nms_matches_full_inference(tiny_rtmdet: RotatedRTMDet) -
 
 def test_rtmdet_pre_nms_onnx_checker(tiny_rtmdet: RotatedRTMDet) -> None:
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     import io
 
     import onnx
@@ -118,6 +119,7 @@ def test_rtmdet_pre_nms_onnx_checker(tiny_rtmdet: RotatedRTMDet) -> None:
 
 def test_rtmdet_pre_nms_onnx_ort_random_input(tiny_rtmdet: RotatedRTMDet) -> None:
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     pytest.importorskip("onnxruntime")
     import io
 

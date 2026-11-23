@@ -154,6 +154,7 @@ def test_pre_nms_finalize_matches_shared_nms(tiny_fcos: RotatedFCOS) -> None:
 
 def test_fcos_pre_nms_onnx_checker(tiny_fcos: RotatedFCOS) -> None:
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     import io
 
     import onnx
@@ -172,6 +173,7 @@ def test_fcos_pre_nms_onnx_checker(tiny_fcos: RotatedFCOS) -> None:
         output_names=["pre_nms_boxes", "pre_nms_scores", "pre_nms_labels", "pre_nms_count"],
         opset_version=17,
         do_constant_folding=True,
+        dynamo=False,
     )
     buf.seek(0)
     onnx.checker.check_model(onnx.load(buf))
@@ -179,6 +181,7 @@ def test_fcos_pre_nms_onnx_checker(tiny_fcos: RotatedFCOS) -> None:
 
 def test_fcos_pre_nms_onnx_ort_random_input(tiny_fcos: RotatedFCOS) -> None:
     pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")  # torch.onnx.export (PyTorch 2.5+)
     pytest.importorskip("onnxruntime")
     import io
 
@@ -201,6 +204,7 @@ def test_fcos_pre_nms_onnx_ort_random_input(tiny_fcos: RotatedFCOS) -> None:
         output_names=["pre_nms_boxes", "pre_nms_scores", "pre_nms_labels", "pre_nms_count"],
         opset_version=17,
         do_constant_folding=True,
+        dynamo=False,
     )
     raw = buf.getvalue()
     onnx.checker.check_model(onnx.load(io.BytesIO(raw)))

@@ -110,6 +110,58 @@ def _score_keep_mask(
     return keep
 
 
+def _normalize_output_classes(
+    output_classes: Optional[List[str]],
+) -> Optional[List[str]]:
+    """Return stripped class names, or None when the allowlist is unset."""
+    if output_classes is None:
+        return None
+    return [str(c).strip() for c in output_classes if str(c).strip()]
+
+
+def _allowed_label_ids(
+    output_classes: Optional[List[str]],
+    class_id_to_name: Dict[int, str],
+) -> Optional[set]:
+    """1-based label ids to keep after NMS, or None to keep all.
+
+    Names match ``class_id_to_name`` case-insensitively. Digit strings are label ids.
+    An empty allowlist keeps nothing.
+    """
+    names = _normalize_output_classes(output_classes)
+    if names is None:
+        return None
+    if not names:
+        return set()
+    by_lower = {str(v).lower(): int(k) for k, v in class_id_to_name.items()}
+    allowed: set = set()
+    for raw in names:
+        key = raw.lower()
+        if key in by_lower:
+            allowed.add(by_lower[key])
+        elif raw.isdigit():
+            allowed.add(int(raw))
+    return allowed
+
+
+def _output_class_keep_mask(
+    labels: np.ndarray,
+    output_classes: Optional[List[str]],
+    class_id_to_name: Dict[int, str],
+) -> np.ndarray:
+    """Boolean mask for the post-NMS class allowlist (None = keep all)."""
+    n = int(labels.shape[0])
+    allowed = _allowed_label_ids(output_classes, class_id_to_name)
+    if allowed is None:
+        return np.ones(n, dtype=bool)
+    if n == 0:
+        return np.zeros((0,), dtype=bool)
+    keep = np.zeros(n, dtype=bool)
+    for i in range(n):
+        keep[i] = int(labels[i]) in allowed
+    return keep
+
+
 def finalize_detections_numpy(
     pre_nms_boxes: np.ndarray,
     pre_nms_scores: np.ndarray,
@@ -125,12 +177,16 @@ def finalize_detections_numpy(
     class_id_to_name: Dict[Union[int, str], str],
     max_output_slots: int,
     nms_backend: str = "python",
+    output_classes: Optional[List[str]] = None,
 ) -> Tuple[np.ndarray, int]:
     """Run rotated NMS + production score filter; return padded ``[max_output_slots, 7]``.
 
     Candidates below the production score floor are dropped **before** NMS. For greedy
     score-ordered NMS this matches filtering after NMS, and avoids O(n²) NMS on
     thousands of sub-threshold boxes.
+
+    ``output_classes``, when set, keeps only those labels **after** NMS so excluded
+    classes still suppress overlapping boxes (prefer this over score floors like 1.1).
 
     ``final_nms_use_cpu`` is accepted for meta compatibility; NMS is always CPU.
     ``nms_backend`` is ``python`` (numpy clip), ``shapely``, or ``auto``.
@@ -183,6 +239,7 @@ def finalize_detections_numpy(
     )
     keep_mask &= boxes[:, 2] >= _MIN_BOX_SIZE
     keep_mask &= boxes[:, 3] >= _MIN_BOX_SIZE
+    keep_mask &= _output_class_keep_mask(labels, output_classes, class_id_to_name_i)
     boxes = boxes[keep_mask]
     scores = scores[keep_mask]
     labels = labels[keep_mask]
@@ -317,6 +374,11 @@ def meta_to_finalize_kwargs(meta: Dict[str, Any]) -> Dict[str, Any]:
                 prod.get("score_threshold") or post.get("score_threshold") or 0.05
             ),
             "per_class_score_threshold": prod.get("per_class_score_threshold"),
+            "output_classes": _normalize_output_classes(
+                prod.get("output_classes")
+                if prod.get("output_classes") is not None
+                else post.get("output_classes")
+            ),
             "class_id_to_name": build_class_id_to_name(class_names),
             "max_output_slots": max_det,
             "nms_backend": str(

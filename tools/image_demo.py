@@ -43,11 +43,13 @@ from oriented_det.train.config import (
     get_preprocessing_params,
     resolve_inference_score_threshold,
     resolve_inference_sliding_window_overlap_pixels,
+    resolve_output_classes,
 )
 from oriented_det.runtime.checkpoint import load_model_from_checkpoint, resolve_inference_config_path
 from oriented_det.runtime.inference import (
     _window_zoom_scales,
     count_sliding_window_positions,
+    filter_detections_by_output_classes,
     get_model_size,
     preprocess_crop,
     run_inference,
@@ -456,10 +458,13 @@ def main():
         f"Preprocessing: resize_mode={preprocessing['resize_mode']}, "
         f"target_size={preprocessing['target_size']} ({canvas_note})"
     )
+    output_classes = resolve_output_classes(config)
     print(
         f"Inference thresholds: score>={score_thr}, merge NMS IoU<={nms_thr}, "
         f"overlap_pixels={overlap_pixels}, ignore_margin_pixels={window_margin_pixels!r}"
     )
+    if output_classes is not None:
+        print(f"production.output_classes={output_classes!r} (post-NMS allowlist)")
     if args.zoom != 1.0:
         print(f"Zoomed inference: {args.zoom:g}× (detections will be mapped back to original size)")
 
@@ -505,11 +510,20 @@ def main():
         if iw == slice_w and ih == slice_h and scale_x == 1.0 and scale_y == 1.0:
             tqdm.write(f"  -> single forward (image {iw}×{ih} matches model canvas)")
             tensor = preprocess_crop(inference_image, preprocessing, slice_h, slice_w)
+            # Model NMS already ran; merge NMS next, then output_classes so
+            # excluded labels still compete in that second NMS.
             detections = run_inference(
-                model, tensor, args.device, score_threshold=score_thr
+                model,
+                tensor,
+                args.device,
+                score_threshold=score_thr,
+                class_names=class_names,
             )
             detections = apply_nms_to_detections(
                 detections, iou_threshold=nms_thr
+            )
+            detections = filter_detections_by_output_classes(
+                detections, output_classes, class_names
             )
         else:
             if args.overlap_ratio is not None:
@@ -540,6 +554,8 @@ def main():
                 slice_w=slice_w,
                 window_margin_pixels=window_margin_pixels,
                 window_batch_size=args.window_batch_size,
+                class_names=class_names,
+                output_classes=output_classes,
             )
         tqdm.write(f"  -> {len(detections)} detections (score >= {score_thr}, NMS <= {nms_thr})")
         if args.classes:
