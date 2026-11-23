@@ -17,4 +17,4 @@ Install the package (`uv pip install -e .` or `pip install oriented-det`), then 
 | `export` | ONNX producer (`onnx` / `infer` / `demo` / `preds`; [`export/README.md`](../../export/README.md)) |
 | `labels-to-comma` | Convert DOTA label files to comma-separated format |
 
-Subcommands load implementations from [`tools/`](../../tools/) (train, preds, tiling, …) except **`export`**, which loads [`export.cli`](../../export/cli.py). Reusable inference, checkpoint, and collate helpers live in [`oriented_det/runtime/`](../runtime/). See the main [README](../../README.md#repository-layout).
+Subcommands load implementations from [`tools/`](../../tools/) (train, preds, tiling, …) except **`export`**, which loads [`export.cli`](../../export/cli.py). Reusable inference, checkpoint, and collate helpers live in [`oriented_det/runtime/`](../runtime/). See the main [README](../../README.md#repository-map).

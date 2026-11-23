@@ -166,6 +166,12 @@ The corners are ordered sequentially around the polygon perimeter. The loader co
 4. **Leverage transforms** - Centralized conversion logic
 5. **Check orientation** - Use `ensure_orientation()` when needed
 
+## Important notes
+
+- **Angles**: Radians; use a single convention (e.g. le90 for DOTA). Helper: `normalize_le90` from `oriented_det.geometry`. For angle-delta normalization in custom code, see `oriented_det.models.oriented_rpn.normalize_angle_delta`.
+- **NMS**: `torchvision.ops.nms_rotated` does not exist; the project uses a Python-based oriented NMS with AABB pre-filtering. GPU kernels are used when available. Details: [Operations](operations.md), [oriented_det/ops/README.md](../../oriented_det/ops/README.md).
+- **ROI/memory**: Training samples 512 proposals per image; use `roi_chunk_size` and `roi_use_checkpoint` for memory tuning on large GPUs. See [Models](models.md) and [Training](training.md).
+
 ## See Also
 
 - [API Reference](../api/geometry.md) - Complete API documentation

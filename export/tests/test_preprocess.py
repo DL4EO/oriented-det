@@ -125,6 +125,141 @@ def test_build_export_meta_includes_preprocess_postprocess(tmp_path: Path) -> No
     assert meta["preprocess"]["overlap_pixels"] == 200
     assert meta["postprocess"]["score_threshold"] == 0.2
     assert meta["postprocess"]["nms_class_agnostic"] is True
+    assert meta["production"]["nms_class_agnostic"] is True
     assert meta["postprocess"]["nms_backend"] == "python"
     assert meta["max_pre_nms_candidates"] == 4000
     assert meta["input"]["normalized"] is True
+
+
+def test_build_export_meta_nms_class_agnostic_from_model_when_production_null(
+    tmp_path: Path,
+) -> None:
+    """production.nms_class_agnostic=null must not force class-aware NMS."""
+
+    class _Cfg:
+        num_classes = 2
+        preprocessing = {
+            "resize_mode": "fixed",
+            "target_size": [64, 64],
+            "normalize_mean": [0.0, 0.0, 0.0],
+            "normalize_std": [1.0, 1.0, 1.0],
+        }
+        production = {"nms_class_agnostic": None, "score_threshold": 0.2}
+        model = {"nms_class_agnostic": True}
+        evaluation = {}
+
+    class _Model:
+        final_nms_iou_threshold = 0.1
+        max_detections_per_image = 100
+        score_threshold = 0.05
+        nms_class_agnostic = True
+
+    class _Wrap:
+        max_candidates = 10
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"x")
+    meta = build_export_meta(
+        mode="backbone",
+        config=_Cfg(),
+        model=_Model(),
+        wrapper=_Wrap(),
+        height=64,
+        width=64,
+        opset=17,
+        dynamic_batch=False,
+        config_path="cfg.json",
+        checkpoint_path="m.pth",
+        class_names=["a", "b"],
+        output_names=["out_0"],
+        onnx_path=onnx_path,
+    )
+    assert meta["nms_class_agnostic"] is True
+    assert meta["postprocess"]["nms_class_agnostic"] is True
+    assert meta["production"]["nms_class_agnostic"] is True
+
+
+def test_build_export_meta_unset_defaults_to_class_agnostic(tmp_path: Path) -> None:
+    """No production/model flag → class-agnostic (satellite default)."""
+
+    class _Cfg:
+        num_classes = 1
+        preprocessing = {
+            "resize_mode": "fixed",
+            "target_size": [64, 64],
+            "normalize_mean": [0.0, 0.0, 0.0],
+            "normalize_std": [1.0, 1.0, 1.0],
+        }
+        production = {"score_threshold": 0.2}
+        evaluation = {}
+
+    class _Model:
+        final_nms_iou_threshold = 0.1
+        max_detections_per_image = 100
+        score_threshold = 0.05
+
+    class _Wrap:
+        max_candidates = 10
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"x")
+    meta = build_export_meta(
+        mode="backbone",
+        config=_Cfg(),
+        model=_Model(),
+        wrapper=_Wrap(),
+        height=64,
+        width=64,
+        opset=17,
+        dynamic_batch=False,
+        config_path="cfg.json",
+        checkpoint_path="m.pth",
+        class_names=["a"],
+        output_names=["out_0"],
+        onnx_path=onnx_path,
+    )
+    assert meta["nms_class_agnostic"] is True
+    assert meta["postprocess"]["nms_class_agnostic"] is True
+    assert meta["production"]["nms_class_agnostic"] is True
+
+
+def test_build_export_meta_production_false_overrides_model_true(tmp_path: Path) -> None:
+    class _Cfg:
+        num_classes = 2
+        preprocessing = {
+            "resize_mode": "fixed",
+            "target_size": [64, 64],
+            "normalize_mean": [0.0, 0.0, 0.0],
+            "normalize_std": [1.0, 1.0, 1.0],
+        }
+        production = {"nms_class_agnostic": False, "score_threshold": 0.2}
+        evaluation = {}
+
+    class _Model:
+        final_nms_iou_threshold = 0.1
+        max_detections_per_image = 100
+        score_threshold = 0.05
+        nms_class_agnostic = True
+
+    class _Wrap:
+        max_candidates = 10
+
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"x")
+    meta = build_export_meta(
+        mode="backbone",
+        config=_Cfg(),
+        model=_Model(),
+        wrapper=_Wrap(),
+        height=64,
+        width=64,
+        opset=17,
+        dynamic_batch=False,
+        config_path="cfg.json",
+        checkpoint_path="m.pth",
+        class_names=["a", "b"],
+        output_names=["out_0"],
+        onnx_path=onnx_path,
+    )
+    assert meta["nms_class_agnostic"] is False
+    assert meta["postprocess"]["nms_class_agnostic"] is False

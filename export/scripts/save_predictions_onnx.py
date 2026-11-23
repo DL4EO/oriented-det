@@ -86,6 +86,18 @@ def _load_gt_entries(
     return num_gt, gt_entries, gt_list
 
 
+def _resolve_nms_class_agnostic(config: TrainingExperimentConfig) -> bool:
+    """``production.nms_class_agnostic`` if set, else ``model``, else class-agnostic."""
+    prod = getattr(config, "production", None)
+    prod_val = getattr(prod, "nms_class_agnostic", None) if prod is not None else None
+    if prod_val is not None:
+        return bool(prod_val)
+    model = getattr(config, "model", None)
+    if model is not None and getattr(model, "nms_class_agnostic", None) is not None:
+        return bool(model.nms_class_agnostic)
+    return True
+
+
 def _inference_meta(
     onnx_file: Path,
     config: TrainingExperimentConfig,
@@ -104,8 +116,16 @@ def _inference_meta(
     window = getattr(config.preprocessing, "window_size", None)
     prep["window_size"] = None if window is None else [int(v) for v in list(window)]
     prep["overlap_pixels"] = int(overlap_pixels)
+    nms_ag = _resolve_nms_class_agnostic(config)
+    post = dict(meta.get("postprocess") or {})
+    post["nms_class_agnostic"] = nms_ag
+    prod = dict(meta.get("production") or {})
+    prod["nms_class_agnostic"] = nms_ag
     out = dict(meta)
     out["preprocess"] = prep
+    out["postprocess"] = post
+    out["production"] = prod
+    out["nms_class_agnostic"] = nms_ag
     return out
 
 
@@ -159,10 +179,7 @@ def run_onnx_inference_and_save(
         config, data_split=data_split, cli_score_threshold=score_threshold
     )
     nms_backend = nms_backend or "shapely"
-    nms_class_agnostic = bool(
-        getattr(getattr(config, "production", None), "nms_class_agnostic", False)
-        or getattr(getattr(config, "model", None), "nms_class_agnostic", False)
-    )
+    nms_class_agnostic = _resolve_nms_class_agnostic(config)
     overlap_pixels = resolve_inference_sliding_window_overlap_pixels(config)
     if overlap_pixels is None:
         overlap_pixels = 256

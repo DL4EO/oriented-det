@@ -63,6 +63,7 @@ albumentations = [
 ]
 viewer = [
     "gradio==6.8.0",
+    "opencv-python-headless>=4.8.0",
 ]
 export = [
     "onnx>=1.14.0,<2",

@@ -10,7 +10,7 @@ The delivered graph is **ONNX pre-NMS** (`rotated_fcos_pre_nms` for FCOS). Prepr
 | Backbone + FCOS head + DistanceAnglePointCoder decode | Same weights/logic as `RotatedFCOS` eval via `rotated_fcos_decode_pre_nms` (includes GroupNorm). |
 | Per-level pre-NMS cap | Always `topk(min(nms_pre, H×W))` then score / size / finite filters. Invalid top-k rows are zeroed (`score=0`, `w=h=0`) and left in the padded tensor. |
 | Pre-NMS output padding | `pad_pre_nms_detections`. Default `P = nms_pre ×` FPN levels. |
-| Final NMS / score floors | `export.postprocess.finalize_detections_numpy` calling `export.nms` (numpy clip, or Shapely if `nms_backend=shapely`). Production `score_threshold` applied **before** NMS. FCOS eval NMS is class-aware; production configs may set `nms_class_agnostic`. Small float drift vs Shapely is possible on the `python` backend. |
+| Final NMS / score floors | `export.postprocess.finalize_detections_numpy` calling `export.nms` (numpy clip, or Shapely if `nms_backend=shapely`). Production `score_threshold` applied **before** NMS. Class-aware vs class-agnostic follows resolved `nms_class_agnostic` (`production` override, else `model`; export unset default is class-agnostic). Small float drift vs Shapely is possible on the `python` backend. |
 | Sliding-window tiling | `detect_image` tiles `fixed` / `crop` images larger than `window_size` (else `target_size`). Same edge-flush grid and `target_size / window_size` box scale as `run_inference_sliding_window`. Overlap default 200 px. Per-window NMS, then a second NMS across windows. Interior overlap margin stays 0. `pad` / `keep_ratio` are a single resize. |
 | GeoJSON | Out of scope — PyTorch deploy path. |
 
@@ -22,7 +22,7 @@ The delivered graph is **ONNX pre-NMS** (`rotated_fcos_pre_nms` for FCOS). Prepr
 | Backbone + SepBN head + DistanceAnglePointCoder decode | Same weights/logic as `RotatedRTMDet` eval via `_rtmdet_level_topk_decode`. No centerness. |
 | Per-level pre-NMS cap | Always `topk(min(nms_pre, H×W))` then score / size / finite filters. Invalid top-k rows are zeroed (`score=0`, `w=h=0`) and left in the padded tensor. |
 | Pre-NMS output padding | `pad_pre_nms_detections`. Default `P = nms_pre ×` FPN levels (P3–P5). |
-| Final NMS / score floors | `export.postprocess.finalize_detections_numpy`. RTMDet eval NMS is class-aware unless `nms_class_agnostic` is set. |
+| Final NMS / score floors | `export.postprocess.finalize_detections_numpy`. Class-aware vs class-agnostic follows resolved `nms_class_agnostic` (same as FCOS / two-stage). |
 
 ## `faster_rcnn_pre_nms` / `oriented_rcnn_pre_nms`
 

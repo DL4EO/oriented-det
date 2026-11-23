@@ -279,6 +279,10 @@ def rotated_nms(
 ) -> np.ndarray:
     """Greedy rotated NMS. Returns keep indices in score-descending order.
 
+    When ``class_agnostic`` is True, overlapping boxes of any class suppress each
+    other (one NMS over all classes). When False (class-aware), suppression only
+    applies within the same label.
+
     ``backend`` is ``python`` (numpy clip), ``shapely`` (CPU Shapely IoU), or ``auto``.
     """
     boxes = np.asarray(boxes, dtype=np.float64)

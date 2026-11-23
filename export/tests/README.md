@@ -1,6 +1,6 @@
 # export/tests
 
-- [test_preprocess.py](test_preprocess.py): RGB preprocess vs torchvision; export meta sidecar keys; box scale / records.
+- [test_preprocess.py](test_preprocess.py): RGB preprocess vs torchvision; export meta sidecar keys (incl. `nms_class_agnostic` resolution); box scale / records.
 - [test_sliding_window.py](test_sliding_window.py): ONNX sliding-window grid, box mapping, and when `detect_image` tiles.
 - [test_export_wrappers.py](test_export_wrappers.py): PyTorch-only shape tests for `export/wrappers.py`.
 - [test_faster_rcnn_export_parity.py](test_faster_rcnn_export_parity.py): Pre-NMS export vs full `faster_rcnn_inference`.

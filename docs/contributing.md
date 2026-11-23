@@ -111,6 +111,110 @@ Aligned with the [Roadmap](roadmap.md):
 - **Ops:** Fused CUDA rotated IoU/NMS kernels
 - Bug fixes and tool scripts
 
+## Releasing / Publishing to PyPI
+
+Maintainers only. Workflow detail and Trusted Publishing setup: [`.github/workflows/README.md`](../.github/workflows/README.md).
+
+Version **0.4.2** — tag releases as **`v0.4.2`** (git) matching `version` in `pyproject.toml`.
+
+Configs: edit **`configs/`** at the repo root, then **`make sync-configs`** so **`oriented_det/configs/`** stays in sync (see **`oriented_det/configs/vendored_manifest.txt`**). CI runs **`make check-configs`**.
+
+Install publishing tools (included in `.[dev]`):
+
+```bash
+uv pip install -e ".[dev]"   # or: make publish-deps
+```
+
+### Step-by-step release
+
+#### 1. One-time PyPI setup
+
+1. Create accounts on [test.pypi.org](https://test.pypi.org) and [pypi.org](https://pypi.org) (can use the same email).
+2. **Register the project name** `oriented-det` on PyPI (first upload creates it; TestPyPI is separate).
+3. **Trusted Publishing (recommended)** — on each index, add a publisher for `DL4EO/oriented-det`, workflow `publish.yml`, environments `testpypi` / `pypi`. See [.github/workflows/README.md](../.github/workflows/README.md).
+4. **Or API tokens** — create `pypi-…` tokens and export locally (or add GitHub secrets `TESTPYPI_API_TOKEN`, `PYPI_API_TOKEN`):
+
+```bash
+export TWINE_USERNAME=__token__
+export TWINE_PASSWORD=pypi-AgEI…   # TestPyPI or PyPI token
+```
+
+#### 2. Pre-release checklist
+
+```bash
+make check-configs
+pytest tests/ -q
+```
+
+Bump version in `pyproject.toml` and `docs/changelog.md` if needed (currently **0.4.2**).
+
+#### 3. Build locally
+
+```bash
+make sync-configs   # after changing configs/ or the manifest
+make build          # check-configs + sdist + wheel into dist/
+make twine-check
+```
+
+Smoke-test the wheel:
+
+```bash
+python -m venv /tmp/odet-smoke && source /tmp/odet-smoke/bin/activate
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+pip install dist/*.whl
+odet --help
+python -c "from oriented_det.geometry import RBox; print(RBox(0,0,1,1,0).area)"
+```
+
+#### 4. Upload to TestPyPI
+
+```bash
+make publish-testpypi
+```
+
+Install from TestPyPI (PyPI index still needed for dependencies like `torch`):
+
+```bash
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple oriented-det==0.4.2
+odet --help
+```
+
+Or trigger **Actions → Publish → Run workflow** (target: `testpypi`) after configuring Trusted Publishing or secrets.
+
+#### 5. Tag and upload to production PyPI
+
+When TestPyPI looks good:
+
+```bash
+git tag -a v0.4.2 -m "Release 0.4.2"
+git push origin v0.4.2          # triggers publish.yml → PyPI (if CI is configured)
+```
+
+Local upload (fallback):
+
+```bash
+make publish-pypi
+```
+
+Create a [GitHub Release](https://github.com/DL4EO/oriented-det/releases) from tag `v0.4.2` with notes from `docs/changelog.md`.
+
+#### 6. After publish
+
+- Verify `pip install oriented-det` in a clean environment.
+- Users still install **PyTorch** separately for their CUDA/CPU platform.
+
+### Makefile targets
+
+| Target | Action |
+|--------|--------|
+| `make publish-deps` | Install `build` and `twine` |
+| `make build` | `check-configs` + `python -m build` |
+| `make twine-check` | Validate `dist/*` metadata |
+| `make publish-testpypi` | Build, check, upload to TestPyPI |
+| `make publish-pypi` | Build, check, upload to PyPI |
+
+**Trusted Publishing** avoids long-lived tokens; keep `make publish-*` for manual releases. Details: [.github/workflows/README.md](../.github/workflows/README.md).
+
 ## Questions?
 
 Feel free to open an issue for questions or discussions!

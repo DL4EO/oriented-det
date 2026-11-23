@@ -11,6 +11,8 @@ Runs on every push/PR to `main` / `master`:
 
 Builds `dist/*` and uploads to PyPI or TestPyPI.
 
+Full maintainer checklist (version bump, `make build`, TestPyPI, tagging): [docs/contributing.md — Releasing / Publishing to PyPI](../../docs/contributing.md#releasing--publishing-to-pypi).
+
 | Trigger | Destination |
 |---------|-------------|
 | Push tag `v*.*.*` (e.g. `v0.1.0`) | **PyPI** (`environment: pypi`) |
@@ -50,11 +52,11 @@ Create tokens at **Account settings → API tokens** on each index (scope: entir
 ### Production release from GitHub
 
 ```bash
-git tag -a v0.1.0 -m "Release 0.1.0"
-git push origin v0.1.0
+git tag -a v0.4.2 -m "Release 0.4.2"
+git push origin v0.4.2
 ```
 
-The tag push starts `publish.yml` and uploads to PyPI.
+The tag push starts `publish.yml` and uploads to PyPI. Use the current version from `pyproject.toml` (see [docs/contributing.md](../../docs/contributing.md#releasing--publishing-to-pypi)).
 
 ## `pages.yml`
 

@@ -19,7 +19,7 @@ jobs:
           pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
-          pip install -e ".[dev,export]"
+          pip install -e ".[dev,export,viewer]"
       - name: Check vendored configs match configs/
         run: make check-configs
       - name: Run tests

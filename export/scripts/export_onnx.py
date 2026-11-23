@@ -158,6 +158,26 @@ def _production_dict(config: Any) -> dict | None:
     return prod or None
 
 
+def _resolve_nms_class_agnostic(config: Any, model: Any, prod: dict) -> bool:
+    """Resolve class-agnostic vs class-aware final NMS.
+
+    Preference: ``production.nms_class_agnostic`` when set, else the loaded
+    ``model.nms_class_agnostic`` (already patched by
+    ``apply_inference_config_to_model``), else ``config.model``, else ``True``
+    (class-agnostic — usual for satellite imagery with lookalike classes).
+    """
+    prod_val = prod.get("nms_class_agnostic")
+    if prod_val is not None:
+        return bool(prod_val)
+    if hasattr(model, "nms_class_agnostic"):
+        return bool(getattr(model, "nms_class_agnostic"))
+    model_cfg = _config_section(config, "model")
+    model_val = model_cfg.get("nms_class_agnostic")
+    if model_val is not None:
+        return bool(model_val)
+    return True
+
+
 def _meta_window_size(prep: dict) -> list[int] | None:
     """``preprocess.window_size`` as ``[h, w]``, or None when unset."""
     raw = prep.get("window_size", None)
@@ -210,7 +230,7 @@ def build_export_meta(
         or getattr(model, "final_nms_iou_threshold", 0.5)
         or 0.5
     )
-    nms_ag = bool(prod.get("nms_class_agnostic", True))
+    nms_ag = _resolve_nms_class_agnostic(config, model, prod)
     max_det = int(
         prod.get("max_detections_per_image")
         or getattr(model, "max_detections_per_image", 500)
@@ -221,6 +241,9 @@ def build_export_meta(
         or getattr(model, "score_threshold", 0.05)
         or 0.05
     )
+    # Persist the resolved flag so consumers reading production.* do not see null.
+    prod_meta = dict(prod) if prod else {}
+    prod_meta["nms_class_agnostic"] = nms_ag
     meta: dict[str, Any] = {
         "mode": mode,
         "input": {
@@ -238,7 +261,7 @@ def build_export_meta(
         "checkpoint": str(checkpoint_path),
         "class_names": list(class_names or []),
         "num_classes": int(getattr(config, "num_classes", 0) or 0),
-        "production": prod or None,
+        "production": prod_meta,
         "preprocess": {
             "resize_mode": prep.get("resize_mode") or "fixed",
             "target_size": [int(height), int(width)],

@@ -111,6 +111,23 @@ overlap = iou.rbox_iou(box1, box2)
 print(f"IoU: {overlap}")
 ```
 
+## Path placeholders in docs and configs
+
+Examples throughout this repo use placeholder paths such as **`/path/to/data`** and **`/path/to/oriented-det`**. You can point commands and JSON configs at your real locations (e.g. `dataset.data_root` in a training config), or keep those placeholders and map them with symbolic links:
+
+```bash
+# Create the parent directory (may need sudo for paths under /path/to)
+sudo mkdir -p /path/to
+
+# Point the placeholder at your DOTA dataset
+ln -s /home/username/dota /path/to/data
+
+# Point the placeholder at your clone of this repo
+ln -s /home/username/oriented-det /path/to/oriented-det
+```
+
+After that, copy-pasted commands and unmodified configs that reference `/path/to/data` or `/path/to/oriented-det` resolve to your machine. Use relative symlink targets when you want the link to stay valid if the parent directory moves.
+
 ## Troubleshooting
 
 ### Import Errors

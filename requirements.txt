@@ -19,6 +19,7 @@ shapely>=2.0.0
 
 # Viewer dependencies
 gradio==6.8.0
+opencv-python-headless>=4.8.0
 
 # Export dependencies (optional extra: uv pip install -e ".[export]")
 onnx>=1.14.0,<2

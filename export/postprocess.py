@@ -295,9 +295,12 @@ def meta_to_finalize_kwargs(meta: Dict[str, Any]) -> Dict[str, Any]:
         or meta.get("max_detections")
         or 3000
     )
+    # Prefer production, then postprocess. Both modes are supported via this flag
+    # (True = class-agnostic / one NMS; False = class-aware / per-class).
+    # Unset defaults to class-agnostic (satellite / lookalike classes).
     nms_ag = prod.get("nms_class_agnostic")
     if nms_ag is None:
-        nms_ag = post.get("nms_class_agnostic", False)
+        nms_ag = post.get("nms_class_agnostic", meta.get("nms_class_agnostic", True))
     return normalize_finalize_kwargs(
         {
             "nms_class_agnostic": bool(nms_ag),

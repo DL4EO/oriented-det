@@ -100,6 +100,26 @@ def test_class_aware_nms_keeps_overlapping_other_class() -> None:
     assert set(int(i) for i in keep) == {0, 1}
 
 
+def test_class_agnostic_nms_suppresses_overlapping_other_class() -> None:
+    boxes = np.array(
+        [
+            [10.0, 10.0, 8.0, 4.0, 0.0],
+            [10.2, 10.1, 8.0, 4.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    scores = np.array([0.9, 0.8], dtype=np.float32)
+    keep = rotated_nms(
+        boxes,
+        scores,
+        np.array([1, 2], dtype=np.int64),
+        iou_threshold=0.5,
+        max_detections=10,
+        class_agnostic=True,
+    )
+    assert [int(i) for i in keep] == [0]
+
+
 def test_finalize_score_floor_and_padding() -> None:
     boxes = np.array(
         [

@@ -48,7 +48,7 @@ Python (this package; **no oriented-det**). The same files are copied into `onnx
 | Module | Role |
 |--------|------|
 | [preprocess.py](preprocess.py) | RGB image → NCHW float32 `(x/255 - mean) / std` |
-| [nms.py](nms.py) | Rotated IoU + greedy NMS |
+| [nms.py](nms.py) | Rotated IoU + greedy NMS (class-aware or class-agnostic) |
 | [postprocess.py](postprocess.py) | Score floor + NMS via `nms` |
 | [runtime.py](runtime.py) | `detect_image(...)` glue (ORT) |
 | [ort_runtime.py](ort_runtime.py) | ONNX Runtime session / device |
@@ -85,6 +85,17 @@ python infer_onnx.py --onnx model.onnx --smoke
 from runtime import detect_image
 dets = detect_image("tile.jpg", "model.onnx")
 ```
+
+## Final NMS (class-aware vs class-agnostic)
+
+Rotated NMS runs in Python after the ONNX graph (`export/nms.py`). Both modes are supported; the sidecar flag `nms_class_agnostic` (under `postprocess` / `production`) chooses which:
+
+| Flag | Behavior |
+|------|----------|
+| `true` (export default when unset) | **Class-agnostic**: one NMS over all classes (overlapping car/truck etc.) |
+| `false` | **Class-aware**: suppress only within the same label |
+
+At export: `production.nms_class_agnostic` when set, else `model.nms_class_agnostic`, else **class-agnostic**. Re-export after changing the config so the sidecar picks it up. `odet export preds` also overlays the experiment config onto the loaded meta.
 
 ## Inference score overrides
 

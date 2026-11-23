@@ -1,6 +1,24 @@
 # CLI script implementations
 
-After `uv pip install -e .` (or `make install`), use the **`odet`** command for day-to-day work (`odet train`, `odet preds`, …). See [oriented_det/cli/README.md](../oriented_det/cli/README.md) and the [repository layout](../README.md#repository-layout) in the main README.
+After `uv pip install -e .` (or `make install`), use the **`odet`** command for day-to-day work (`odet train`, `odet preds`, …). See [oriented_det/cli/README.md](../oriented_det/cli/README.md) and the [repository map](../README.md#repository-map) in the main README.
+
+## Common commands
+
+Install once: `uv pip install -e .`. Then:
+
+| Task | Command |
+|------|---------|
+| Train | `odet train --config configs/oriented_rcnn/dota_le90_1x.json` or `make train` |
+| Multi-GPU | `make train-multi-gpu` (`torchrun` + cuDNN on `LD_LIBRARY_PATH`) |
+| Tile DOTA | `odet tile-dota /path/to/data/DOTA-v1.0/train` |
+| HRSC2016 → DOTA (optional) | `odet hrsc-to-dota --data-root /path/to/data/HRSC2016 --output-dir /path/to/data/HRSC2016-dota` |
+| SSDD → DOTA (optional) | `odet ssdd-to-dota --data-root /path/to/data/Official-SSDD-OPEN --output-dir /path/to/data/SSDD-dota` |
+| COCO polygons → DOTA | `odet coco-to-dota --ann-file instances.json --image-dir images --output-dir out` |
+| Val predictions | `odet preds --experiment-dir runs/oriented_rcnn/<timestamp>` or `make preds` |
+| Offline mAP | `make eval-val` or `make preds` then `make metrics`. DOTA: leaky val tiles (real test is Task 1). HRSC/FAIR1M/SSDD/HRSID: held-out test/val. |
+| ONNX export | `odet export onnx ...` or `make export-onnx` (see [export/README.md](../export/README.md)) |
+
+DOTA configs: per-model `dota_le90_1x.json` under [configs/](../configs/) (3× where published; Faster R-CNN and FCOS DOTA are 1×). Run `odet --help` for all subcommands. Config reference: [docs/user-guide/configuration.md](../docs/user-guide/configuration.md), [configs/config.schema.json](../configs/config.schema.json), [configs/README.md](../configs/README.md).
 
 This directory holds the **Python modules** that implement `odet` subcommands and supports direct `python tools/...` invocation. Shared inference and collate logic lives in [`oriented_det/runtime/`](../oriented_det/runtime/).
 
