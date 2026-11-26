@@ -129,6 +129,30 @@ def test_copy_runtime_sidecars_writes_consumer_stack(tmp_path: Path) -> None:
     ).read_text(encoding="utf-8")
 
 
+def test_copy_runtime_sidecars_fallback_requirements(tmp_path: Path, monkeypatch) -> None:
+    import export.runtime as runtime
+
+    missing = tmp_path / "export_pkg"
+    missing.mkdir()
+    for name in ("nms.py", "preprocess.py", "postprocess.py", "runtime.py", "ort_runtime.py"):
+        (missing / name).write_text("# stub\n", encoding="utf-8")
+    (missing / "scripts").mkdir()
+    (missing / "scripts" / "demo.py").write_text("# demo\n", encoding="utf-8")
+    (missing / "scripts" / "infer_onnx.py").write_text("# infer\n", encoding="utf-8")
+    # Intentionally omit requirements-runtime.txt and demo/*.jpg
+    monkeypatch.setattr(runtime, "_EXPORT_DIR", missing)
+
+    onnx = tmp_path / "out" / "model.onnx"
+    onnx.parent.mkdir()
+    onnx.write_bytes(b"stub")
+    written = runtime.copy_runtime_sidecars(onnx)
+    rel = {str(p.relative_to(onnx.parent)) for p in written}
+    assert "requirements-runtime.txt" in rel
+    assert "demo/planes_pleiades_neo.jpg" not in rel
+    text = (onnx.parent / "requirements-runtime.txt").read_text(encoding="utf-8")
+    assert "onnxruntime" in text
+
+
 def test_zip_bundle_skips_pycache(tmp_path: Path) -> None:
     import zipfile
 

@@ -374,9 +374,10 @@ The original paper site (`escience.cn`) is often offline. Use one of these copie
 |--------|------|--------|
 | [IEEE DataPort](https://ieee-dataport.org/documents/hrsc2016) | ~3.5 GB (`HRSC2016_dataset.zip`) | Free IEEE account; closest hosted archive |
 | [Baidu AI Studio](https://aistudio.baidu.com/datasetdetail/54106) | — | Link used by [MMRotate](https://github.com/open-mmlab/mmrotate/blob/main/tools/data/hrsc/README.md); needs a Baidu account |
-| [Kaggle `guofeng/hrsc2016`](https://www.kaggle.com/datasets/guofeng/hrsc2016) | — | Same layout; `kaggle datasets download -d guofeng/hrsc2016` |
+| [Kaggle `juangarciaanton/hrsc2016-complete`](https://www.kaggle.com/datasets/juangarciaanton/hrsc2016-complete) | ~7 GB unpacked | **Preferred on Kaggle** — `FullDataSet/` + `ImageSets/` ready |
+| [Kaggle `guofeng/hrsc2016`](https://www.kaggle.com/datasets/guofeng/hrsc2016) | ~3.7 GB | Zip wrapping multi-part `HRSC2016.partXX.rar` — tutorial 108 unzips then unrars |
 
-Do **not** use **HRSC2016-MS** (a later multi-scale variant). After unzip, point `dataset.data_root` at the folder that contains `FullDataSet/` and `ImageSets/` (a wrapping `HRSC2016/` directory is also accepted).
+Do **not** use **[HRSC2016-MS](https://www.kaggle.com/datasets/weiming97/hrsc2016-ms-dataset)** (a later multi-scale reannotation; different labels/layout). After unzip, point `dataset.data_root` at the folder that contains `FullDataSet/` and `ImageSets/` (a wrapping `HRSC2016/` directory is also accepted).
 
 Paper: Liu, Yuan, Weng, Yang, *A High Resolution Optical Satellite Image Dataset for Ship Recognition and Some New Baselines*, ICPRAM 2017. [DOI](https://doi.org/10.5220/0006120603240331).
 
@@ -420,7 +421,7 @@ Fine-grained oriented detection (**37** classes under 5 coarse groups). Supporte
 | [Kaggle `ollypowell/fair1m-satellite-imagery-for-object-detection`](https://www.kaggle.com/datasets/ollypowell/fair1m-satellite-imagery-for-object-detection) | JPG + labels (~9 GB). Layout: `Dataset/Images/{Train,Val}/*.jpg` with labels in `Notebook_Working/{train,val}_labels/N.xml` (JPG stems `t_N` / `v_N` map to XML stem `N`). Same-stem `Dataset/Labels/Train/*.xml` also works. Optional `Dataset/labels*.parquet`. **License: CC BY-NC-SA 3.0 IGO.** |
 | Official Gaofen / ModelScope mirrors | TIFF + `labelXml` under `train/part1`, `train/part2`, `validation/` (TorchGeo layout) |
 
-**Kaggle notebook:** [`notebooks/kaggle_fair1m_tutorial.ipynb`](https://github.com/DL4EO/oriented-det/blob/main/notebooks/kaggle_fair1m_tutorial.ipynb) — attach the dataset, convert + tile, 1-epoch smoke (subset by default). Full 1× Faster R-CNN tiled-val mAP50 is **36.70%** (expected FAIR1M band; see [below](#local-1x-faster-rcnn)).
+**Tutorial:** [`tutorial/109_fair1m_finetune.ipynb`](https://github.com/DL4EO/oriented-det/blob/main/tutorial/109_fair1m_finetune.ipynb) — attach the dataset (Kaggle or local), convert + tile, 1-epoch smoke (subset by default). Full 1× Faster R-CNN tiled-val mAP50 is **36.70%** (expected FAIR1M band; see [below](#local-1x-faster-rcnn)).
 
 Paper: Sun et al., *FAIR1M: A Benchmark Dataset for Fine-grained Object Recognition in High-Resolution Remote Sensing Imagery*, ISPRS 2022. [arXiv:2103.05569](https://arxiv.org/abs/2103.05569).
 
@@ -473,7 +474,7 @@ Literature (different test sets; cited as a band only):
 
 The bottleneck is **class ID, not boxes**. Epoch 12 mean best IoU vs any detection was **0.62**, same-class **0.50**, GT cover **62%** (DOTA ~88%). ~32.6k GTs had IoU ≥ 0.5 with a **wrong-class** box. Train imbalance is **1038×** (Small Car 143,249 vs C919 138); the 1× recipe uses unweighted CE (`roi_grouped_ce` off). Rare subtypes stay near 0 AP (Tractor, other-vehicle, other-ship, Trailer, Boeing777, ARJ21, C919, Truck Tractor). Sports fields are easy (Baseball Field 88.5%, Tennis Court 81%). Loss and mAP were still climbing at epoch 12 (horizontal RPN priors, 37-way head randomly initialized).
 
-Do **not** compare this number to DOTA Hub tables. To raise it: resume / 3× from this checkpoint; train Oriented R-CNN 1× (rotated proposals); enable `loss.roi_grouped_ce_*` or class weights for airplane / ship / vehicle subtypes. The Kaggle notebook is a **1-epoch smoke** and will not reproduce 36.7%.
+Do **not** compare this number to DOTA Hub tables. To raise it: resume / 3× from this checkpoint; train Oriented R-CNN 1× (rotated proposals); enable `loss.roi_grouped_ce_*` or class weights for airplane / ship / vehicle subtypes. The tutorial smoke is a **1-epoch** subset run and will not reproduce 36.7%.
 
 ## SSDD
 
@@ -485,7 +486,7 @@ Native loader (`dataset.format: ssdd`) discovers, in order: official `JPEGImages
 
 | Source | Notes |
 |--------|--------|
-| [Official-SSDD](https://github.com/TianwenZhang/Official-SSDD) | Authors’ Google Drive (RBox VOC and/or COCO). This repo does **not** vendor chips. |
+| [Official-SSDD](https://github.com/TianwenZhang0825/Official-SSDD) | Authors’ Google Drive (RBox VOC and/or COCO). Tutorial 110 can `gdown` this archive when `SSDD_DATA_ROOT` / a Kaggle dump is missing. |
 
 ```json
 "dataset": {
@@ -497,7 +498,7 @@ Native loader (`dataset.format: ssdd`) discovers, in order: official `JPEGImages
 }
 ```
 
-Recipe (1× Faster R-CNN, **12 epochs**, finetune DOTA Hub, no SSDD zoo): [`configs/rotated_faster_rcnn/ssdd_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_faster_rcnn/ssdd_le90_1x.json). Notebook: [`notebooks/ssdd_finetune_tutorial.ipynb`](https://github.com/DL4EO/oriented-det/blob/main/notebooks/ssdd_finetune_tutorial.ipynb) (1-epoch smoke **and** full 1×). Optional DOTA export: `odet ssdd-to-dota --data-root /path/to/data/Official-SSDD-OPEN --output-dir /path/to/data/SSDD-dota`.
+Recipe (1× Faster R-CNN, **12 epochs**, finetune DOTA Hub, no SSDD zoo): [`configs/rotated_faster_rcnn/ssdd_le90_1x.json`](https://github.com/DL4EO/oriented-det/blob/main/configs/rotated_faster_rcnn/ssdd_le90_1x.json). Tutorial: [`tutorial/110_sar_ssdd_hrsid.ipynb`](https://github.com/DL4EO/oriented-det/blob/main/tutorial/110_sar_ssdd_hrsid.ipynb) (1-epoch smoke **and** full 1×). Optional DOTA export: `odet ssdd-to-dota --data-root /path/to/data/Official-SSDD-OPEN --output-dir /path/to/data/SSDD-dota`.
 
 ```bash
 odet train --config configs/rotated_faster_rcnn/ssdd_le90_1x.json

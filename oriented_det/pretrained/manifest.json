@@ -137,7 +137,7 @@
       "sha256": "fb2a43bd712558a1824d73003413588657a385dffd03e841654f2ddd0c243e47",
       "source_recipe": "configs/yolo_obb/dota_le90_12x_s_coco.json",
       "experiment_dir": "runs/yolo_obb/20261118-135903",
-      "eval_map50": 0.8442,
+      "eval_map50": 0.8013,
       "eval_task1_map50": 0.7780,
       "eval_report": "docs/eval-reports/yolo_obb_dota_le90_12x/model_analysis.md"
     }

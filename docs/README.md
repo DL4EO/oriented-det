@@ -42,7 +42,7 @@ https://dl4eo.github.io/oriented-det/
 - **docs/** — Source Markdown (this folder)
 - **roadmap.md** — Public release plan (v0.4.2 YOLO-OBB Hub shipped at **77.80%** Task 1; next v0.5–v0.5.2 Swin-T on the shared FPN; v1.1 oriented DINO). DOTA multi-scale training and recipe work on the six current models are optional, not releases
 - **user-guide/configuration.md** — Canonical JSON training config reference
-- **eval-reports/** — Published reports per Hub slug (markdown; most DOTA/HRSC slugs also ship `analysis_iou0.50.json`); see [eval-reports/README.md](eval-reports/README.md). Raw `predictions.json` lives in gitignored `predictions/`. YOLO-OBB 12× is Task 1 markdown only.
+- **eval-reports/** — Published reports per Hub slug (markdown; most DOTA/HRSC slugs also ship `analysis_iou0.50.json`); see [eval-reports/README.md](eval-reports/README.md). Raw `predictions.json` lives in gitignored `predictions/`.
 - **examples/deploy.md** — Docker Tile Geo Process example
 - **examples/export.md** — ONNX export (`odet export`)
 - **code-analysis-report.md** — Deep code/doc analysis (2026-06-15): inventory, validation, findings

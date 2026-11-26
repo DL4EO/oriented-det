@@ -191,7 +191,7 @@
     "final_nms_iou_threshold": 0.1
   },
   "production": {
-    "score_threshold": 0.2,
+    "score_threshold": 0.45,
     "per_class_score_threshold": null,
     "final_nms_iou_threshold": 0.1,
     "final_nms_use_cpu": null,

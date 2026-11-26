@@ -64,7 +64,7 @@ Environment overrides: see [oriented_det/pretrained/README.md](../oriented_det/p
 
 **mAP** below is **official DOTA v1.0 Task 1** when the slug has `eval_task1_map50`. Training-time periodic mAP uses non-empty val tiles only and may be higher.
 
-**Deploy `production.score_threshold`** on DOTA recipes is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**, RTMDet **0.45**, YOLO-OBB **0.2**). 3× inherits the 1× floor. `make eval-val` uses `evaluation.val_score_threshold`. `make eval-test` and `test_map` use `evaluation.test_score_threshold` (null → **0.05**). Published `eval_map50` numbers were scored at **0.05** (YOLO-OBB DOTA lists in-train leaky 84.42% at score 0.3). Oriented R-CNN 3× Hub advertises Task 1 **74.88%** (leaky eval-val 82.92%); RetinaNet 3× OBB Hub advertises Task 1 **73.89%** (leaky eval-val 78.56%); FCOS 3× Hub advertises Task 1 **72.91%** (leaky eval-val 82.32%); YOLO-OBB 12× Hub advertises Task 1 **77.80%**. **Finetune from 1×**, not 3× — see [oriented_rcnn/README.md — 1x vs 3x](../configs/oriented_rcnn/README.md#1x-vs-3x).
+**Deploy `production.score_threshold`** on DOTA recipes is the eval-val global F1 threshold minus **0.05** (Oriented R-CNN **0.55**, Faster R-CNN **0.6**, RetinaNet OBB **0.25** / HBB **0.35**, FCOS **0.2**, RTMDet **0.45**, YOLO-OBB **0.45**). 3× inherits the 1× floor. `make eval-val` uses `evaluation.val_score_threshold`. `make eval-test` and `test_map` use `evaluation.test_score_threshold` (null → **0.05**). Published `eval_map50` numbers were scored at **0.05** (YOLO-OBB DOTA leaky eval-val **80.13%**; in-train at score ≥ 0.3 was 84.42%). Oriented R-CNN 3× Hub advertises Task 1 **74.88%** (leaky eval-val 82.92%); RetinaNet 3× OBB Hub advertises Task 1 **73.89%** (leaky eval-val 78.56%); FCOS 3× Hub advertises Task 1 **72.91%** (leaky eval-val 82.32%); YOLO-OBB 12× Hub advertises Task 1 **77.80%**. **Finetune from 1×**, not 3× — see [oriented_rcnn/README.md — 1x vs 3x](../configs/oriented_rcnn/README.md#1x-vs-3x).
 
 ### Oriented R-CNN R50-FPN
 
@@ -112,9 +112,9 @@ Hub **1× / 3×** are **OBB** assign (`use_hbb_for_matching: false`, MMRotate `R
 
 | Slug | Recipe | Official Task 1 | Config | Final config | Final log |
 |------|--------|-----------------|--------|--------------|-----------|
-| `yolo_obb_dota_le90_12x` | 12× from COCO, mosaic on | **77.80%** (in-train leaky 84.42%) | [`dota_le90_12x_s_coco.json`](../configs/yolo_obb/dota_le90_12x_s_coco.json) | [`yolo_obb_s_dota_le90_12x-fb2a43bd.json`](./yolo_obb_s_dota_le90_12x-fb2a43bd.json) | [`yolo_obb_s_dota_le90_12x-fb2a43bd.log`](./yolo_obb_s_dota_le90_12x-fb2a43bd.log) |
+| `yolo_obb_dota_le90_12x` | 12× from COCO, mosaic on | **77.80%** (leaky eval-val 80.13%) | [`dota_le90_12x_s_coco.json`](../configs/yolo_obb/dota_le90_12x_s_coco.json) | [`yolo_obb_s_dota_le90_12x-fb2a43bd.json`](./yolo_obb_s_dota_le90_12x-fb2a43bd.json) | [`yolo_obb_s_dota_le90_12x-fb2a43bd.log`](./yolo_obb_s_dota_le90_12x-fb2a43bd.log) |
 
-Loads `hf://yolo_obb_coco_300e`. Deploy `production.score_threshold` **0.2**. Report: [`docs/eval-reports/yolo_obb_dota_le90_12x/`](../docs/eval-reports/yolo_obb_dota_le90_12x/model_analysis.md).
+Loads `hf://yolo_obb_coco_300e`. Deploy `production.score_threshold` **0.45**. Report: [`docs/eval-reports/yolo_obb_dota_le90_12x/`](../docs/eval-reports/yolo_obb_dota_le90_12x/model_analysis.md).
 
 ## COCO horizontal pretrain
 

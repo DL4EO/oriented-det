@@ -35,7 +35,7 @@ Each subdirectory is named after the manifest **slug** and is **tracked in git**
 | `rotated_retinanet_dota_le90_3x_hbb` | **70.70%** (HBB) | 76.51% | `predictions/20260913_234415/` |
 | `rotated_fcos_dota_le90_1x` | **73.07%** | 75.13% | `predictions/20260908_132129/` |
 | `rotated_fcos_dota_le90_3x` | **72.91%** | 82.32% | — |
-| `yolo_obb_dota_le90_12x` | **77.80%** | 84.42% (in-train ≥0.3) | — |
+| `yolo_obb_dota_le90_12x` | **77.80%** | 80.13% | `predictions/20261124_195315/` |
 | `rotated_rtmdet_dota_le90_3x` | **77.60%** | 82.75% | `predictions/20261003_021342/` |
 | `oriented_rcnn_hrsc2016_le90_3x` | — | 90.41% | `predictions/20260831_011151/` |
 | `rotated_faster_rcnn_hrsc2016_le90_3x` | — | 88.77% | `predictions/20260831_050947/` |

@@ -54,7 +54,7 @@ Demo details: [demo/README.md](demo/README.md) (`make demo` runs all top-level i
 
 | Audience | Resource |
 |----------|----------|
-| Users | [Hosted docs](https://dl4eo.github.io/oriented-det/) · [tutorial/](tutorial/) · [notebooks/](notebooks/) · [demo/](demo/) |
+| Users | [Hosted docs](https://dl4eo.github.io/oriented-det/) · [tutorial/](tutorial/) · [demo/](demo/) |
 | Model zoo | [configs/](configs/) · [pretrained/](pretrained/) · [eval reports](docs/eval-reports/) |
 | Integrators | [export/](export/) · [deploy/](deploy/) · [CLI](oriented_det/cli/) |
 | Contributors | [Contributing](docs/contributing.md) · [Roadmap](docs/roadmap.md) · [tests/](tests/) |
@@ -69,7 +69,7 @@ Demo details: [demo/README.md](demo/README.md) (`make demo` runs all top-level i
 | [`tools/`](tools/) | CLI implementations (`odet` / `make`) |
 | [`configs/`](configs/) | Experiment JSON and model zoo |
 | [`docs/`](docs/) | MkDocs user guide and API reference |
-| [`demo/`](demo/), [`tutorial/`](tutorial/), [`notebooks/`](notebooks/) | Examples and learning material |
+| [`demo/`](demo/), [`tutorial/`](tutorial/) | Examples and learning material |
 | [`export/`](export/), [`deploy/`](deploy/) | ONNX export and Docker deploy |
 | [`pretrained/`](pretrained/), [`tests/`](tests/) | Hub checkpoints; test suite |
 

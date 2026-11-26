@@ -117,3 +117,5 @@ exclude = ["export.tests*"]
 oriented_det = ["py.typed"]
 "oriented_det.pretrained" = ["manifest.json"]
 "oriented_det.configs" = ["**/*.json"]
+# Non-.py files copied next to model.onnx by export.runtime.copy_runtime_sidecars
+export = ["requirements-runtime.txt", "demo/*"]

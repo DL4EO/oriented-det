@@ -61,6 +61,14 @@ _RUNTIME_SCRIPTS = (
 _RUNTIME_ASSETS = (
     ("demo/planes_pleiades_neo.jpg", "demo/planes_pleiades_neo.jpg"),
 )
+_REQUIREMENTS_RUNTIME_FALLBACK = (
+    "# Consumer path: python demo.py / infer_onnx.py (no oriented-det, no torch).\n"
+    "numpy>=1.24\n"
+    "pillow>=9.0\n"
+    "onnxruntime>=1.16.0\n"
+)
+# Optional demo image only — missing it must not fail export after model.onnx is written.
+_OPTIONAL_SIDECARS = frozenset(rel for rel, _ in _RUNTIME_ASSETS)
 
 
 def copy_runtime_sidecars(onnx_path: Union[str, Path]) -> List[Path]:
@@ -77,10 +85,18 @@ def copy_runtime_sidecars(onnx_path: Union[str, Path]) -> List[Path]:
     to_copy.extend(_RUNTIME_ASSETS)
     for src_rel, dest_rel in to_copy:
         src = _EXPORT_DIR / src_rel
-        if not src.is_file():
-            raise FileNotFoundError(f"Runtime sidecar missing: {src}")
         dest = dest_dir / dest_rel
         dest.parent.mkdir(parents=True, exist_ok=True)
+        if not src.is_file():
+            if src_rel == "requirements-runtime.txt":
+                dest.write_text(_REQUIREMENTS_RUNTIME_FALLBACK, encoding="utf-8")
+                written.append(dest)
+                print(f"Wrote fallback {dest_rel} (packaged sidecar missing)")
+                continue
+            if src_rel in _OPTIONAL_SIDECARS:
+                print(f"Warning: skipping missing optional sidecar {src}")
+                continue
+            raise FileNotFoundError(f"Runtime sidecar missing: {src}")
         shutil.copy2(src, dest)
         written.append(dest)
         print(f"Copied {src_rel} → {dest}")

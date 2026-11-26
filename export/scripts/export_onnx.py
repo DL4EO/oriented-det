@@ -351,7 +351,12 @@ def main() -> None:
             "oriented_rcnn_pre_nms | rotated_fcos_heads | rotated_rtmdet_pre_nms."
         ),
     )
-    p.add_argument("--opset", type=int, default=17)
+    p.add_argument(
+        "--opset",
+        type=int,
+        default=18,
+        help="ONNX opset (default 18; torch.onnx may refuse lower than its implementations).",
+    )
     p.add_argument(
         "--dynamic-batch",
         action="store_true",

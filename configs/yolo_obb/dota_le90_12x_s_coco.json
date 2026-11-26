@@ -113,7 +113,7 @@
     "vis_score_threshold": 0.5
   },
   "production": {
-    "score_threshold": 0.2,
+    "score_threshold": 0.45,
     "final_nms_iou_threshold": 0.1,
     "max_detections_per_image": 2000
   }

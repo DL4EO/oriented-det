@@ -13,7 +13,7 @@ ARTIFACTS ?= $(REPO_ROOT)/onnx_export
 MODE ?= rotated_fcos_pre_nms
 ONNX_OUT ?= $(ARTIFACTS)/model.onnx
 DEVICE ?= cpu
-OPSET ?= 17
+OPSET ?= 18
 # Set SKIP_ORT=1 to skip ORT validation after ONNX export
 SKIP_ORT ?= 0
 # ONNX Runtime EP for preds: cpu | cuda | auto
