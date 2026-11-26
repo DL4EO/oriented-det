@@ -630,6 +630,15 @@ make dota-submit CHECKPOINT=hf://oriented_rcnn_dota_le90_3x \
 odet dota-submit --experiment-dir runs/oriented_rcnn/<id> \
   --test-dir /path/to/data/DOTA-v1.0/test --output-dir work_dirs/Task1_orcnn
 
+# Live multiscale Task 1 (MS train parity vs MMRotate ~79.98%): rates 0.5/1.0/1.5,
+# overlap 500 in resized space (= Ultralytics gap/r on the original), one NMS 0.1
+odet dota-submit --experiment-dir runs/rotated_rtmdet/<id> \
+  --test-dir /path/to/data/DOTA-v1.0/test --output-dir work_dirs/Task1_rtmdet_ms \
+  --resize-rates 0.5,1.0,1.5
+make dota-submit EXPERIMENT=runs/rotated_rtmdet/<id> \
+  TEST_DIR=/path/to/data/DOTA-v1.0/test OUT=work_dirs/Task1_rtmdet_ms \
+  RESIZE_RATES=0.5,1.0,1.5
+
 # Existing predictions.json
 odet preds --checkpoint hf://oriented_rcnn_dota_le90_3x --data-split test \
   --test-dir /path/to/data/DOTA-v1.0/test --no-diagnostics
@@ -637,7 +646,7 @@ odet dota-submit --from-json predictions/<ts>/predictions.json --output-dir work
 make dota-submit FROM_JSON=predictions/<ts> OUT=work_dirs/Task1_orcnn
 ```
 
-Score **0.05** follows the eval-val resolver. **`odet dota-submit` forces final NMS 0.1** (Hub sidecars often still have `production.final_nms_iou_threshold` 0.5). Inference on full test rasters uses **sliding windows** (1024 / overlap 200): last tiles **flush to the image edge** (same as `tile_dota.py`), **keep overlap copies** (per-window margin default **0**), then NMS. That is live ResultMerge-style, not MMRotate’s on-disk pre-tile merge. Pass `--window-margin-pixels` to drop the overlap band. Use this zip to compare oriented-det checkpoints on the hidden test set; do not subtract MMRotate zoo 71.28 / 73.40 / 75.69 without that distinction.
+Score **0.05** follows the eval-val resolver. **`odet dota-submit` forces final NMS 0.1** (Hub sidecars often still have `production.final_nms_iou_threshold` 0.5). **Single-scale** inference on full test rasters uses **sliding windows** (1024 / overlap **200**): last tiles **flush to the image edge** (same as `tile_dota.py`), **keep overlap copies** (per-window margin default **0**), then NMS. That is live ResultMerge-style, not MMRotate’s on-disk pre-tile merge. Pass `--window-margin-pixels` to drop the overlap band. **`--resize-rates 0.5,1.0,1.5`** runs the same windows at each rate (default overlap **500**), maps boxes back to the original image, then one NMS — compare to MMRotate MS Task 1, not to SS Hub numbers alone.
 
 Upload the zip (15 `Task1_*.txt` at the archive root) to DOTA-v1.0 Task 1. On server failure, the site allows emailing `dotawebsite3@gmail.com` with team/institute. Task 2 (HBB) is out of scope.
 
@@ -661,6 +670,14 @@ python tools/tile_dota.py /path/to/dota/train \
 python tools/tile_dota.py /path/to/dota/train \
     --min-overlap 0.5
 
+# Multiscale (MMRotate-style): wipe rate root, then merge train+val
+# --clean-output on the first split only (drops orphan tiles on relaunch)
+rm -rf /path/to/data/DOTA-v1.0-tiled-ms/r0.5
+python tools/tile_dota.py /path/to/dota/train --overlap 500 --resize-rate 0.5 \
+    --output-dir /path/to/data/DOTA-v1.0-tiled-ms/r0.5 --clean-output
+python tools/tile_dota.py /path/to/dota/val --overlap 500 --resize-rate 0.5 \
+    --output-dir /path/to/data/DOTA-v1.0-tiled-ms/r0.5
+
 # Overwrite existing tiles
 python tools/tile_dota.py /path/to/dota/train --overwrite
 
@@ -675,12 +692,25 @@ python tools/tile_dota.py /path/to/dota/train --pad-edge-tiles
 - Tile large aerial/satellite images into manageable patches
 - Process oriented bounding box annotations (DOTA format)
 - Configurable tile size and overlap
+- Optional `--resize-rate` (scale image + boxes before tiling; MS rates **0.5 / 1.0 / 1.5** with `--overlap 500`)
+- Optional `--output-dir` for a flat tile root (merge train+val); else `--tiles-dirname` / default `tiles_{size}` or `tiles_{size}_r{rate}`
 - Minimum overlap ratio filtering (default **0.7**, aligned with MMRotate `iof_thr`; keeps objects with >= 70% area inside the tile)
-- Automatic padding for images smaller than tile size
-- By default, last row/column of tiles align on the image edge (no right/bottom zero-padding); use `--pad-edge-tiles` for the old stride-only edge behavior
+- Automatic zero-padding when a side is smaller than the tile (top-left content)
+- Large images: window starts use the MMRotate / Ultralytics `ceil` count and snap the last origin inside the image (no overshooting penultimate tile). `--pad-edge-tiles` restores the legacy stride walk that may zero-pad the last crop
 - Computes minimum rotated rectangles for truncated objects
 - Outputs official DOTA annotation format (comma-separated)
 - Reads PNG, JPEG, TIFF, and BMP; default `--output-format auto` writes JPEG tiles from JPEG sources and PNG otherwise (`--output-format png|jpg` to force; `--jpeg-quality` default 95)
+
+**Multiscale vs MMRotate / Ultralytics YOLO:**
+
+| | oriented-det (`--resize-rate`) | MMRotate `img_split` | Ultralytics `split_dota` |
+|--|--|--|--|
+| Rate meaning | Resize image+boxes by `r`, then tile **1024** | Crop size `1024/r`, gap `500/r` on the original | Same crop `1024/r`, gap `500/r` |
+| Emitted tile size | Always **1024×1024** | Native crop (2048 / 1024 / ~682), then train `RResize`→1024 | Native crop; YOLO resizes to `imgsz` |
+| Content scale | Equivalent for large images (rate 0.5 ≈ crop 2048→1024) | Reference | Same as MMRotate |
+| Image **smaller** than tile/crop | Pad canvas to 1024 (zeros), **one** tile | Pad crop to `1024/r` with `[104,116,124]`, then resize | Crop may be **smaller** than `crop_size` (no pad) |
+| Image **larger** | `ceil` windows, last flush to edge | Same | Same |
+| `img_rate_thr` | Not used (flush keeps windows inside) | Drop mostly-empty windows (default 0.6) | Same |
 
 **Input Structure:**
 ```
@@ -697,7 +727,9 @@ data_dir/
 
 **Output Structure:**
 ```
-data_dir/tiles_{size}/
+data_dir/tiles_{size}/              # --resize-rate 1.0 (default)
+data_dir/tiles_{size}_r{rate}/      # --resize-rate != 1.0
+# or --output-dir <root>/
   images/
     P0001_0_0.png
     P0001_960_0.png

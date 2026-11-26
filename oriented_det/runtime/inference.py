@@ -668,6 +668,61 @@ def _detections_from_raw_output(
     return detections
 
 
+# DOTA MS Task 1 / train tile convention (MMRotate + Ultralytics gap=500 base).
+DOTA_MS_RESIZE_RATES: Tuple[float, ...] = (0.5, 1.0, 1.5)
+DOTA_MS_OVERLAP_PIXELS = 500
+
+
+def parse_resize_rates(value: Optional[object]) -> Optional[List[float]]:
+    """Parse CLI or sequence resize rates. ``None`` / empty → single-scale (``None``)."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        parts = [p.strip() for p in text.replace(";", ",").split(",") if p.strip()]
+        rates = [float(p) for p in parts]
+    elif isinstance(value, (list, tuple)):
+        rates = [float(x) for x in value]
+    else:
+        raise TypeError(f"resize_rates must be str or sequence, got {type(value)!r}")
+    if not rates:
+        return None
+    if any(r <= 0 for r in rates):
+        raise ValueError(f"resize rates must be positive, got {rates}")
+    return rates
+
+
+def resize_image_for_ms_rate(image: "Image.Image", resize_rate: float) -> "Image.Image":
+    """Bilinear resize matching ``tile_dota.py --resize-rate`` (identity at rate 1)."""
+    rate = float(resize_rate)
+    if abs(rate - 1.0) < 1e-9:
+        return image
+    width, height = image.size
+    new_w = max(1, int(round(width * rate)))
+    new_h = max(1, int(round(height * rate)))
+    return image.resize((new_w, new_h), resample=Image.BILINEAR)
+
+
+def map_detection_to_original_scale(det: dict, resize_rate: float) -> dict:
+    """Map a detection from rate-scaled image coords back to the original raster."""
+    rate = float(resize_rate)
+    if abs(rate - 1.0) < 1e-9:
+        return det
+    rbox = det["rbox"]
+    return {
+        **det,
+        "rbox": RBox(
+            rbox.cx / rate,
+            rbox.cy / rate,
+            rbox.width / rate,
+            rbox.height / rate,
+            rbox.angle,
+        ),
+    }
+
+
 def run_inference_sliding_window(
     model,
     image,
@@ -684,6 +739,7 @@ def run_inference_sliding_window(
     class_names: Optional[Sequence[str]] = None,
     window_margin_pixels: Optional[float] = None,
     output_classes: Optional[Sequence[str]] = None,
+    apply_nms: bool = True,
 ):
     """Run inference via sliding windows (or one padded canvas if the image fits in one window).
 
@@ -816,6 +872,71 @@ def run_inference_sliding_window(
             batch_meta = []
 
     _flush_batch(batch_tensors, batch_meta)
+    merged = (
+        apply_nms_to_detections(all_detections, nms_threshold)
+        if apply_nms
+        else all_detections
+    )
+    return filter_detections_by_output_classes(merged, output_classes, class_names)
+
+
+def run_inference_multiscale(
+    model,
+    image,
+    device,
+    preprocessing: dict,
+    resize_rates: Sequence[float],
+    score_threshold: float = 0.5,
+    nms_threshold: float = 0.5,
+    overlap_ratio: Optional[float] = None,
+    overlap_pixels: Optional[int] = DOTA_MS_OVERLAP_PIXELS,
+    window_batch_size: Optional[int] = None,
+    per_class_score_threshold: Optional[Dict[str, float]] = None,
+    class_names: Optional[Sequence[str]] = None,
+    window_margin_pixels: Optional[float] = None,
+    output_classes: Optional[Sequence[str]] = None,
+):
+    """DOTA MS inference: resize → windows per rate, map boxes back, one NMS.
+
+    Matches train ``tile_dota --resize-rate`` + MMRotate/Ultralytics MS geometry
+    when ``overlap_pixels=500`` (fixed in resized space ≡ ``gap/r`` on the original).
+    """
+    rates = parse_resize_rates(list(resize_rates))
+    if not rates:
+        raise ValueError("resize_rates must contain at least one positive rate")
+    if not isinstance(image, Image.Image):
+        if np is None:
+            raise RuntimeError("numpy required when image is an array")
+        arr = np.asarray(image)
+        if arr.ndim != 3:
+            raise ValueError("image array must be HWC RGB")
+        image = Image.fromarray(arr)
+
+    all_detections: List[dict] = []
+    for rate in rates:
+        scaled = resize_image_for_ms_rate(image, rate)
+        dets = run_inference_auto(
+            image=scaled,
+            model=model,
+            device=device,
+            preprocessing=preprocessing,
+            score_threshold=score_threshold,
+            nms_threshold=nms_threshold,
+            overlap_ratio=overlap_ratio,
+            overlap_pixels=overlap_pixels,
+            window_batch_size=window_batch_size,
+            return_raw_output=False,
+            per_class_score_threshold=per_class_score_threshold,
+            class_names=class_names,
+            window_margin_pixels=window_margin_pixels,
+            output_classes=None,  # filter once after cross-scale NMS
+            resize_rates=None,
+            apply_nms=False,
+        )
+        all_detections.extend(
+            map_detection_to_original_scale(d, rate) for d in dets
+        )
+
     merged = apply_nms_to_detections(all_detections, nms_threshold)
     return filter_detections_by_output_classes(merged, output_classes, class_names)
 
@@ -836,6 +957,8 @@ def run_inference_auto(
     class_names: Optional[Sequence[str]] = None,
     window_margin_pixels: Optional[float] = None,
     output_classes: Optional[Sequence[str]] = None,
+    resize_rates: Optional[Sequence[float]] = None,
+    apply_nms: bool = True,
 ):
     """Run inference: training-style preprocess, or native sliding windows for oversized rasters.
 
@@ -850,6 +973,10 @@ def run_inference_auto(
     ``target_size / window_size`` before the window origin is added.
     Small images in every mode use the training-style preprocess.
     Detections are in original image pixel coordinates.
+
+    When ``resize_rates`` is set (e.g. ``0.5,1.0,1.5``), runs
+    :func:`run_inference_multiscale` (per-rate windows, boxes mapped back, one NMS).
+    ``return_raw_output`` is not supported in that mode (raw is always ``None``).
 
     Provide either ``image_path`` (to load) or ``image`` (PIL or numpy HWC RGB).
     Returns detections as list of dicts: rbox, score, label.
@@ -870,6 +997,28 @@ def run_inference_auto(
         if arr.ndim != 3:
             raise ValueError("image array must be HWC RGB")
         image = Image.fromarray(arr)
+
+    rates = parse_resize_rates(resize_rates)
+    if rates is not None:
+        dets = run_inference_multiscale(
+            model,
+            image,
+            device,
+            preprocessing,
+            resize_rates=rates,
+            score_threshold=score_threshold,
+            nms_threshold=nms_threshold,
+            overlap_ratio=overlap_ratio,
+            overlap_pixels=overlap_pixels,
+            window_batch_size=window_batch_size,
+            per_class_score_threshold=per_class_score_threshold,
+            class_names=class_names,
+            window_margin_pixels=window_margin_pixels,
+            output_classes=output_classes,
+        )
+        if return_raw_output:
+            return dets, None
+        return dets
 
     slice_h, slice_w = get_model_size(preprocessing)
     image_width, image_height = image.size
@@ -897,6 +1046,7 @@ def run_inference_auto(
         ts = (preprocessing or {}).get("target_size", (slice_h, slice_w))
         meta = build_spatial_meta_from_dims(mode, image_width, image_height, ts)
         remapped = remap_detections_to_original(dets, meta)
+        # Model already ran final NMS; ``apply_nms`` only gates sliding-window merge.
         remapped = filter_detections_by_output_classes(
             remapped, output_classes, class_names
         )
@@ -917,6 +1067,7 @@ def run_inference_auto(
         class_names=class_names,
         window_margin_pixels=window_margin_pixels,
         output_classes=output_classes,
+        apply_nms=apply_nms,
     )
     if return_raw_output:
         return dets, None

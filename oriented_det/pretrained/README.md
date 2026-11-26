@@ -24,6 +24,7 @@ Use manifest **slugs** (not mAP numbers) with `hf://` and the CLI:
 - `rotated_fcos_dota_le90_3x`
 - `rotated_fcos_hrsc2016_le90_3x`
 - `rotated_rtmdet_dota_le90_3x`
+- `rotated_rtmdet_dota_le90_3x_ms`
 - `yolo_obb_coco_300e`
 - `yolo_obb_dota_le90_12x`
 

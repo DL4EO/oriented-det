@@ -93,7 +93,7 @@ help:
 	@echo "  make preds                  - Val inference → predictions/<ts>/predictions.json (score floor evaluation.val_score_threshold; no GPU mAP)"
 	@echo "  make metrics                - Offline mAP/PR on METRICS_PRED_DIR or latest predictions/"
 	@echo "  make train-preds            - Train split + tile_metrics.csv (latest exp; SAVE_TRAIN_PRED_OUT= optional)"
-	@echo "  make dota-submit            - Task 1 zip from FROM_JSON=, CHECKPOINT=hf://<slug>, or EXPERIMENT= + TEST_DIR="
+	@echo "  make dota-submit            - Task 1 zip from FROM_JSON=, CHECKPOINT=hf://<slug>, or EXPERIMENT= + TEST_DIR= [RESIZE_RATES=0.5,1.0,1.5]"
 	@echo ""
 	@echo "=== Viewers, demos, TensorBoard ==="
 	@echo "  make tensorboard            - TensorBoard for all experiments under runs/"
@@ -364,6 +364,11 @@ metrics: check-install
 #   make dota-submit CHECKPOINT=hf://oriented_rcnn_dota_le90_3x TEST_DIR=/path/to/data/DOTA-v1.0/test OUT=work_dirs/Task1_orcnn
 # Or a local training run:
 #   make dota-submit EXPERIMENT=runs/oriented_rcnn/<id> TEST_DIR=/path/to/data/DOTA-v1.0/test OUT=work_dirs/Task1_orcnn
+# Live MS Task 1 (rates 0.5/1.0/1.5, overlap 500 default):
+#   make dota-submit EXPERIMENT=runs/rotated_rtmdet/<id> TEST_DIR=/path/to/data/DOTA-v1.0/test \
+#     OUT=work_dirs/Task1_rtmdet_ms RESIZE_RATES=0.5,1.0,1.5
+RESIZE_RATES ?=
+OVERLAP_PIXELS ?=
 dota-submit: check-install
 	@if [ -z "$(OUT)" ]; then \
 		echo "Error: set OUT= to a Task1 output directory (e.g. work_dirs/Task1_orcnn)."; \
@@ -380,6 +385,8 @@ dota-submit: check-install
 			$(if $(TEST_DIR),--test-dir "$(TEST_DIR)",) \
 			$(if $(DOTA_DATA_ROOT),--data-root "$(DOTA_DATA_ROOT)",) \
 			$(if $(SUBMIT_CONFIG),--config "$(SUBMIT_CONFIG)",) \
+			$(if $(RESIZE_RATES),--resize-rates "$(RESIZE_RATES)",) \
+			$(if $(OVERLAP_PIXELS),--overlap-pixels "$(OVERLAP_PIXELS)",) \
 			--output-dir "$(OUT)" $(if $(ZIP),--zip "$(ZIP)",); \
 	elif [ -n "$(EXPERIMENT)" ]; then \
 		if [ -z "$(TEST_DIR)" ] && [ -z "$(DOTA_DATA_ROOT)" ]; then \
@@ -389,6 +396,8 @@ dota-submit: check-install
 		$(TRAIN_ENV) odet dota-submit --experiment-dir "$(EXPERIMENT)" \
 			$(if $(TEST_DIR),--test-dir "$(TEST_DIR)",) \
 			$(if $(DOTA_DATA_ROOT),--data-root "$(DOTA_DATA_ROOT)",) \
+			$(if $(RESIZE_RATES),--resize-rates "$(RESIZE_RATES)",) \
+			$(if $(OVERLAP_PIXELS),--overlap-pixels "$(OVERLAP_PIXELS)",) \
 			--output-dir "$(OUT)" $(if $(ZIP),--zip "$(ZIP)",); \
 	else \
 		echo "Error: set FROM_JSON=, CHECKPOINT=hf://<slug>, or EXPERIMENT=runs/<model>/<id> (plus TEST_DIR=)."; \

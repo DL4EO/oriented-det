@@ -40,7 +40,7 @@ https://dl4eo.github.io/oriented-det/
 ## Structure
 
 - **docs/** — Source Markdown (this folder)
-- **roadmap.md** — Public release plan (v0.4.2 YOLO-OBB Hub shipped at **77.80%** Task 1; next v0.5–v0.5.2 Swin-T on the shared FPN; v1.1 oriented DINO). DOTA multi-scale training and recipe work on the six current models are optional, not releases
+- **roadmap.md** — Public release plan (v0.4.3 RTMDet MS Hub shipped at **80.13%** MS/MS Task 1; next v0.5–v0.5.2 Swin-T on the shared FPN; v0.6–v0.6.1 RoI Transformer ± Swin; v0.7 ReDet; v1.1 oriented DINO). YOLO-OBB MS Hub and recipe work on the six current models are optional, not releases
 - **user-guide/configuration.md** — Canonical JSON training config reference
 - **eval-reports/** — Published reports per Hub slug (markdown; most DOTA/HRSC slugs also ship `analysis_iou0.50.json`); see [eval-reports/README.md](eval-reports/README.md). Raw `predictions.json` lives in gitignored `predictions/`.
 - **examples/deploy.md** — Docker Tile Geo Process example

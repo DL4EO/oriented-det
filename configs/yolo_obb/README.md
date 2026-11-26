@@ -7,11 +7,14 @@ Native **YOLO-OBB** (`model_type: yolo_obb`) — C2f CSP + PAFPN, distribution f
 | Recipe | Config | Notes |
 |--------|--------|-------|
 | COCO 2017 **300e S** | [`coco_300e_s.json`](coco_300e_s.json) | Horizontal pretrain. 80 classes, 640 letterbox, HSV only. SGD `0.01`, momentum `0.937` warmed from `0.8`, Nesterov, weight decay `5e-4` on conv weights only, linear LR to `1e-4`, EMA mix `0.0001`. Batch 64, warmup 3 epochs (5547 steps). Mosaic on, off for the last 10 epochs. Val keeps 300 boxes, score `0.001`, NMS `0.7`, mAP averaged from IoU 0.50 to 0.95. Hub slug **`yolo_obb_coco_300e`** (`eval_map50` **0.41**). Run `runs/yolo_obb/20261102-000543`. Train log was lost; sidecar config only. |
-| DOTA le90 **12× S from COCO** | [`dota_le90_12x_s_coco.json`](dota_le90_12x_s_coco.json) | Hub slug **`yolo_obb_dota_le90_12x`**. Stands on the shared bases only. Loads `hf://yolo_obb_coco_300e`. 144 epochs. AdamW `1.25e-4` holds until epoch 72, then cosine to `1.25e-5`. Weight decay `0.05` on conv weights, off for norm and bias. EMA mix `0.0002`. BCE and the task-aligned assigner. ProbIoU at 7.5, DFL weight **0.75**, angle L1 0.2. Mosaic stays on, scale gain 0.9, translate 0.1, HSV `0.015 / 0.7 / 0.4`. Random rotate p=0.5 ±180°, with storage-tank and roundabout in 90° steps. mAP every 12 epochs. Mixup is not a training knob. Finished run `runs/yolo_obb/20261118-135903`: in-train leaky val mAP50 **84.42** at epoch 144 (`best_mAP_0.84.pth`); frozen `make eval-val` **80.13**. Official Task 1 **77.80** (AP75 52.13, COCO mAP 49.32). Ahead of RTMDet-S Hub 77.60; behind YOLO11-S single-scale 78.44 (those weights trained on multi-scale tiles). |
+| DOTA le90 **12× S from COCO** | [`dota_le90_12x_s_coco.json`](dota_le90_12x_s_coco.json) | Hub slug **`yolo_obb_dota_le90_12x`**. Stands on the shared bases only. Loads `hf://yolo_obb_coco_300e`. 144 epochs. AdamW `1.25e-4` holds until epoch 72, then cosine to `1.25e-5`. Weight decay `0.05` on conv weights, off for norm and bias. EMA mix `0.0002`. BCE and the task-aligned assigner. ProbIoU at 7.5, DFL weight **0.75**, angle L1 0.2. Mosaic stays on, scale gain 0.9, translate 0.1, HSV `0.015 / 0.7 / 0.4`. Random rotate p=0.5 ±180°, with storage-tank and roundabout in 90° steps. mAP every 12 epochs. Mixup is not a training knob. Finished run `runs/yolo_obb/20261118-135903`: in-train leaky val mAP50 **84.42** at epoch 144 (`best_mAP_0.84.pth`); frozen `make eval-val` **80.13**. Official Task 1 **77.80** (AP75 52.13, COCO mAP 49.32). Ahead of RTMDet-S Hub 77.60. Size-matched Ultralytics DOTAv1 mAP50 (their tables are single-model **multiscale**): **YOLO11s-obb** **79.5**, **YOLO26s-obb** **80.9**, preliminary **YOLO27s-obb** **81.6** (unreleased). Older notes that cited **78.4** as YOLO11-S were wrong — that is **YOLO11n-obb**. |
+| DOTA le90 **12× S MS train / SS val** | [`dota_le90_12x_s_coco_ms.json`](dota_le90_12x_s_coco_ms.json) | Same optimizer / batch **4** / AMP on / `hf://yolo_obb_coco_300e` as the Hub 12× recipe. Train on MS tiles (1024 / overlap **500**, rates **0.5 / 1.0 / 1.5**, train+val per rate). Val stays **SS**. In-train / `make eval-val` is **leaky**. Official MS Task 1: `odet dota-submit --resize-rates 0.5,1.0,1.5` (live multi-rate windows). See RTMDet README for tiling commands. |
+
 
 ```bash
 odet train --config configs/yolo_obb/coco_300e_s.json
 odet train --config configs/yolo_obb/dota_le90_12x_s_coco.json
+odet train --config configs/yolo_obb/dota_le90_12x_s_coco_ms.json
 ```
 
 ```bash
@@ -26,7 +29,7 @@ Ablations on the same COCO trunk and single-scale 1024 / overlap-200 tiles (Task
 - **Loss and assigner.** ProbIoU beats rIoU on mAP50. Late cosine is a real gain and is what the 12× recipe keeps. QFL is a small win. Dynamic soft raises leaky (and swimming-pool) and spends AP75 — leave it off.
 - **Schedule and aug.** Mosaic on + scale 0.9 + DFL 0.75 + 144 epochs is the jump to RTMDet parity (77.80). More epochs at full LR, a mosaic-off tail, and a native-tile fine-tune all raised leaky and lowered Task 1.
 - **Optimizer.** SGD with gradient accumulation 8 cut steps 8×; the restarted classifier did not move (epoch-20 leaky ~44). AdamW with one step per batch is the working optimizer at batch 4 on this GPU.
-- **Still open.** The 0.64 gap to YOLO11-S single-scale sits on plane / small-vehicle / swimming-pool / ground-track-field. Best remaining hypothesis is their multi-scale train tiles; mixup and true batch-32 SGD were not tested cleanly. Multi-scale stays optional.
+- **Still open.** Size-matched Ultralytics MS gaps vs our SS Task 1 **77.80**: **1.70** to YOLO11s **79.5**, **3.10** to YOLO26s **80.9**, **3.80** to preliminary YOLO27s **81.6**. Weak classes on our side include plane / small-vehicle / swimming-pool / ground-track-field. Best remaining hypothesis for closing toward that line is multiscale train + `odet dota-submit --resize-rates 0.5,1.0,1.5`; mixup and true batch-32 SGD were not tested cleanly.
 
 ## Training notes
 

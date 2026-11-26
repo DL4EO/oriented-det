@@ -125,6 +125,15 @@
       "eval_task1_map50": 0.7760,
       "eval_report": "docs/eval-reports/rotated_rtmdet_dota_le90_3x/model_analysis.md"
     },
+    "rotated_rtmdet_dota_le90_3x_ms": {
+      "filename": "rotated_rtmdet_cspnext_s_dota_le90_3x_ms-9c401932.pth",
+      "sha256": "9c40193205b02f442b94382107822ccbbc99c7df641a0cf2c18e3d657bf3acfc",
+      "source_recipe": "configs/rotated_rtmdet/dota_le90_3x_s_ms.json",
+      "experiment_dir": "runs/rotated_rtmdet/20261123-224134",
+      "eval_map50": 0.9041,
+      "eval_task1_map50": 0.8013,
+      "eval_report": "docs/eval-reports/rotated_rtmdet_dota_le90_3x_ms/model_analysis.md"
+    },
     "yolo_obb_coco_300e": {
       "filename": "yolo_obb_s_coco_300e-62358604.pth",
       "sha256": "62358604ecd90c2bc5dc754777fe46eb8ebdef87b13d9029e47f0ebf58efed75",

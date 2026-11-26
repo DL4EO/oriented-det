@@ -4,17 +4,53 @@ Native **Rotated RTMDet** (`model_type: rotated_rtmdet`) — CSPNeXt-S + PAFPN.
 
 | Recipe | Config | Notes |
 |--------|--------|-------|
-| DOTA le90 3× **S** | [`dota_le90_3x_s.json`](dota_le90_3x_s.json) | **Hub.** Official Task 1 **77.60%** (AP75 52.01, COCO mAP 49.02), 0.20 under YOLO-OBB-S 12× **77.80%**. Leaky eval-val **82.75%** (gap **5.15**, metrics margin 0). Deploy `production.score_threshold` **0.45** and `production.ignore_margin_pixels` **0**. |
-| OSSDD le90 1× **S** (VH) | [`ossdd_le90_vh_1x_s.json`](ossdd_le90_vh_1x_s.json) | Finetune the DOTA Hub checkpoint on Sentinel-1 GRD ships. Train on official **train**, validate on official **val**. mAP is the mean of area-under-PR over rotated IoU 0.10–0.95 step 0.05 (`evaluation.map_iou_thresholds`). `evaluation.test_map` scores the held-out **test** split once on the best checkpoint at `evaluation.test_score_threshold` (null → 0.05). `make eval-test` uses that same floor. No Hub slug. |
-
-Hub slug: `rotated_rtmdet_dota_le90_3x` (`hf://rotated_rtmdet_dota_le90_3x`). Report: [`docs/eval-reports/rotated_rtmdet_dota_le90_3x/`](../../docs/eval-reports/rotated_rtmdet_dota_le90_3x/model_analysis.md). Run: `runs/rotated_rtmdet/20261002-102116`.
+| DOTA le90 3× **S** (SS) | [`dota_le90_3x_s.json`](dota_le90_3x_s.json) | **Hub** `rotated_rtmdet_dota_le90_3x`. Official Task 1 **77.60%** (AP75 52.01, COCO mAP 49.02). Leaky eval-val **82.75%** (gap **5.15**). Deploy `production.score_threshold` **0.45**. |
+| DOTA le90 3× **S MS** | [`dota_le90_3x_s_ms.json`](dota_le90_3x_s_ms.json) | **Hub** `rotated_rtmdet_dota_le90_3x_ms`. Same schedule / batch **8** / AMP off as SS. Train on MS tiles (1024 / overlap **500**, rates **0.5 / 1.0 / 1.5**). Val stays **SS**. Advertised Task 1 is **MS/MS** **80.13%**; same weights **MS/SS** **78.92%**. |
+| OSSDD le90 1× **S** (VH) | [`ossdd_le90_vh_1x_s.json`](ossdd_le90_vh_1x_s.json) | Finetune a DOTA Hub checkpoint on Sentinel-1 GRD ships. Train on official **train**, validate on official **val**. mAP averages area-under-PR over rotated IoU 0.10–0.95. `make eval-test` uses `evaluation.test_score_threshold` (null → 0.05). No Hub slug. |
 
 ```bash
 odet train --config configs/rotated_rtmdet/dota_le90_3x_s.json
+odet train --config configs/rotated_rtmdet/dota_le90_3x_s_ms.json
 odet pretrained download rotated_rtmdet_dota_le90_3x
+odet pretrained download rotated_rtmdet_dota_le90_3x_ms
+# SS Hub Task 1
 odet dota-submit --checkpoint hf://rotated_rtmdet_dota_le90_3x \
   --test-dir /path/to/data/DOTA-v1.0/test --output-dir work_dirs/Task1_rtmdet_s_3x
+# MS Hub Task 1 (MS/MS — advertised)
+odet dota-submit --checkpoint hf://rotated_rtmdet_dota_le90_3x_ms \
+  --test-dir /path/to/data/DOTA-v1.0/test --output-dir work_dirs/Task1_rtmdet_s_3x_ms \
+  --resize-rates 0.5,1.0,1.5
 ```
+
+### Multiscale: SS / MS/SS / MS/MS
+
+DOTA **MS** means resize rates **0.5 / 1.0 / 1.5** before 1024 tiles (overlap **500**). Shorthand is **train/test**:
+
+| Protocol | Train | Task 1 test | Hub slug | Task 1 AP50 |
+|----------|-------|-------------|----------|------------:|
+| **SS** | SS tiles (overlap 200) | SS windows (overlap 200) | `rotated_rtmdet_dota_le90_3x` | **77.60%** |
+| **MS/SS** | MS tiles (overlap 500) | SS windows | same weights as MS Hub | **78.92%** |
+| **MS/MS** | MS tiles | `--resize-rates 0.5,1.0,1.5` (overlap 500 in resized space ≡ Ultra `gap/r`) | `rotated_rtmdet_dota_le90_3x_ms` | **80.13%** |
+
+In-train val stays **SS** tiles for both recipes (leaky). MMRotate RTMDet-s MS+RR zoo **79.98%** is an **MS/MS**-class number. Reports: [SS](../../docs/eval-reports/rotated_rtmdet_dota_le90_3x/model_analysis.md) · [MS](../../docs/eval-reports/rotated_rtmdet_dota_le90_3x_ms/model_analysis.md). Runs: SS `20261002-102116`, MS `20261123-224134`.
+
+### Multiscale train tiles
+
+MMRotate-style MS: patch **1024**, overlap **500**, resize rates **0.5 / 1.0 / 1.5**. Merge DOTA **train+val** into one flat root per rate; keep SS val for eval.
+
+```bash
+for r in 0.5 1.0 1.5; do
+  out=/path/to/data/DOTA-v1.0-tiled-ms/r${r}
+  # Wipe rate root on relaunch, then --clean-output on the first split only.
+  rm -rf "$out"
+  odet tile-dota /path/to/data/DOTA-v1.0/train --tile-size 1024 --overlap 500 \
+    --resize-rate "$r" --output-dir "$out" --clean-output
+  odet tile-dota /path/to/data/DOTA-v1.0/val --tile-size 1024 --overlap 500 \
+    --resize-rate "$r" --output-dir "$out"
+done
+```
+
+The MS recipe points `train_tiles_dirs` at `.../r0.5`, `.../r1.0`, `.../r1.5` and `val_tiles_dirs` at SS `DOTA-v1.0-tiled/val` only. Expect ~2–3× more train steps per epoch than SS.
 
 The DOTA recipe always sees **1024×1024**. Mosaic is off. Random rotate is on (p=0.5, ±180°). A tile that contains `storage-tank` or `roundabout` rotates by 90°, 180°, −90°, or −180°. Val and inference do not rotate.
 
@@ -22,10 +58,15 @@ The DOTA recipe always sees **1024×1024**. Mosaic is off. Random rotate is on (
 
 ## Official Task 1
 
-| | AP50 | AP75 | COCO mAP | leaky eval-val | eval-val − Task 1 |
-|--|-----:|-----:|---------:|---------------:|------------------:|
-| YOLO-OBB-S 12× (`yolo_obb_dota_le90_12x`) | **77.80** | 52.13 | 49.32 | 80.13 | **2.33** |
-| RTMDet-S 3× (`runs/rotated_rtmdet/20261002-102116`) | **77.60** | 52.01 | 49.02 | 82.75 | **5.15** |
+| | Protocol | AP50 | AP75 | COCO mAP | leaky‡ |
+|--|----------|-----:|-----:|---------:|-------:|
+| RTMDet-S 3× MS (`rotated_rtmdet_dota_le90_3x_ms`) | **MS/MS** | **80.13** | — | — | 90.41 |
+| RTMDet-S 3× MS (same weights) | MS/SS | 78.92 | 56.83 | 51.90 | 90.41 |
+| YOLO-OBB-S 12× (`yolo_obb_dota_le90_12x`) | SS | **77.80** | 52.13 | 49.32 | 84.42 |
+| RTMDet-S 3× (`rotated_rtmdet_dota_le90_3x`) | SS | **77.60** | 52.01 | 49.02 | 82.75 |
+| MMRotate RTMDet-s MS+RR (external) | MS/MS | 79.98 | — | — | — |
+
+‡ In-train / eval-val leaky (YOLO & MS RTMDet: score ≥ 0.3; SS RTMDet Hub eval-val: 0.05).
 
 Leaky eval-val is `predictions/20261003_021342` (all 7669 val tiles, score ≥ 0.05, metrics margin **0**, 57,768 objects). Best F1 on that sweep is **0.50**, so deploy uses **0.45**. `production.ignore_margin_pixels` is **0**. Helicopter is 61.6 on Task 1 and 90.0 on leaky eval-val.
 

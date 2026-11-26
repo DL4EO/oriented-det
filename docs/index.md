@@ -37,7 +37,7 @@ For a quick overview and installation on GitHub, see the [repository README](htt
 - **Rotated Faster R-CNN** — horizontal RPN + horizontal RoIAlign + rotated ROI head (MMRotate DOTA baseline)
 - **Rotated RetinaNet** (1-stage baseline) — oriented anchors and focal loss head
 - **Rotated FCOS** (anchor-free 1-stage) — distance-angle coder, centerness, L1 / KFIoU / decoded rIoU
-- **Rotated RTMDet** (speed tier) — CSPNeXt + PAFPN, SepBN head, dynamic soft-label assigner, decoded rIoU; Hub Task 1 **77.60%**
+- **Rotated RTMDet** (speed tier) — CSPNeXt + PAFPN, SepBN head, dynamic soft-label assigner, decoded rIoU; Hub SS Task 1 **77.60%**, MS/MS **80.13%** (`rotated_rtmdet_dota_le90_3x_ms`)
 - **YOLO-OBB** (speed tier) — C2f CSP + PAFPN, DFL box head, task-aligned assigner; Hub Task 1 **77.80%** (top of the DOTA zoo)
 - **True oriented detection**: Predicts rotation angles, not just axis-aligned boxes
 - Standard backbones (ResNet + FPN, CSPNeXt + PAFPN, C2f CSP + PAFPN)
@@ -82,11 +82,11 @@ See [Installation](getting-started/installation.md) for CUDA, macOS, and CPU set
 - **[User Guide](user-guide/geometry.md)** - Detailed usage for each module
 - **[API Reference](api/geometry.md)** - Complete API documentation
 - **[Examples](examples/inference.md)** - Training, inference, [Docker deploy](examples/deploy.md), and [ONNX export](examples/export.md)
-- **[Roadmap](roadmap.md)** - Planned releases (next v0.5–v1.1; v0.4.2 YOLO-OBB Hub shipped)
+- **[Roadmap](roadmap.md)** - Planned releases (next v0.5–v0.7, then v1.0 / v1.1; v0.4.3 RTMDet MS Hub shipped)
 
 ## Roadmap
 
-**v0.4.2** is shipped — native YOLO-OBB Hub **`yolo_obb_dota_le90_12x`** at official Task 1 **77.80%** (COCO trunk `yolo_obb_coco_300e`). **v0.4.1** was citation and discoverability; **v0.4.0** shipped Rotated RTMDet (`rotated_rtmdet_dota_le90_3x`, **77.60%**). Swin-T + FPN is v0.5–v0.5.2 (Oriented R-CNN 1× and 3× Hub ship together; Faster R-CNN is v0.5.1; FCOS is v0.5.2). Swin stays on that FPN; RTMDet and YOLO-OBB stay the CNN speed models. DOTA multi-scale training, and recipe work on the six current models (AP75 or a weak class, held-out split, operating resolution), are optional and not releases. Oriented DINO is v1.1, after the stable API. Details: **[Roadmap](roadmap.md)**.
+**v0.4.3** is shipped — RTMDet-S MS Hub **`rotated_rtmdet_dota_le90_3x_ms`** at official Task 1 **80.13%** (MS/MS; MS/SS **78.92%**) plus live `odet dota-submit --resize-rates`. **v0.4.2** shipped native YOLO-OBB Hub **`yolo_obb_dota_le90_12x`** at SS Task 1 **77.80%**; **v0.4.0** shipped RTMDet SS **77.60%**. Next: Swin-T + FPN (**v0.5–v0.5.2**), then **RoI Transformer** (**v0.6** R50, **v0.6.1** Swin-T) and **ReDet** (**v0.7**). Swin stays on the FPN accuracy line; RTMDet and YOLO-OBB stay the CNN speed models. YOLO-OBB MS Hub and recipe work on the six current models remain optional. Oriented DINO is **v1.1**, after the stable API. Details: **[Roadmap](roadmap.md)**.
 
 ## Important Notes
 

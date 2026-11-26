@@ -48,7 +48,9 @@ rotated_fcos/ossdd_le90_vh_1x.json
 rotated_fcos/ossdd_le90_vh_3x.json
 rotated_fcos/dota_le90_1x_l1_kfiou_aux.json
 rotated_rtmdet/dota_le90_3x_s.json
+rotated_rtmdet/dota_le90_3x_s_ms.json
 rotated_rtmdet/ossdd_le90_vh_1x_s.json
 _base_/models/yolo_obb_s.json
 yolo_obb/coco_300e_s.json
 yolo_obb/dota_le90_12x_s_coco.json
+yolo_obb/dota_le90_12x_s_coco_ms.json

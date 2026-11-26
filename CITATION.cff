@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: If you use OrientedDet, please cite it using these metadata.
 type: software
 title: "oriented-det: oriented and rotated object detection in aerial and satellite images"
-version: 0.4.2
-date-released: "2026-11-22"
+version: 0.4.3
+date-released: "2026-11-26"
 doi: 10.5281/zenodo.23273307
 authors:
   - family-names: Faudi

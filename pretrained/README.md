@@ -106,7 +106,10 @@ Hub **1× / 3×** are **OBB** assign (`use_hbb_for_matching: false`, MMRotate `R
 
 | Slug | Recipe | Official Task 1 | Config | Final config | Final log |
 |------|--------|-----------------|--------|--------------|-----------|
-| `rotated_rtmdet_dota_le90_3x` | 3× rotate, mosaic off | **77.60%** (eval-val 82.75%) | [`dota_le90_3x_s.json`](../configs/rotated_rtmdet/dota_le90_3x_s.json) | [`rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.json`](./rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.json) | [`rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.log`](./rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.log) |
+| `rotated_rtmdet_dota_le90_3x` | 3× SS | **77.60%** (eval-val 82.75%) | [`dota_le90_3x_s.json`](../configs/rotated_rtmdet/dota_le90_3x_s.json) | [`rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.json`](./rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.json) | [`rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.log`](./rotated_rtmdet_cspnext_s_dota_le90_3x-3f6a1a0b.log) |
+| `rotated_rtmdet_dota_le90_3x_ms` | 3× MS train | **80.13%** MS/MS (MS/SS 78.92%; in-train leaky 90.41%) | [`dota_le90_3x_s_ms.json`](../configs/rotated_rtmdet/dota_le90_3x_s_ms.json) | [`rotated_rtmdet_cspnext_s_dota_le90_3x_ms-9c401932.json`](./rotated_rtmdet_cspnext_s_dota_le90_3x_ms-9c401932.json) | [`rotated_rtmdet_cspnext_s_dota_le90_3x_ms-9c401932.log`](./rotated_rtmdet_cspnext_s_dota_le90_3x_ms-9c401932.log) |
+
+**SS vs MS/SS vs MS/MS:** train and Task 1 test can each be single-scale or multi-scale (rates **0.5 / 1.0 / 1.5**). The MS Hub advertises **MS/MS** (`odet dota-submit --resize-rates 0.5,1.0,1.5`). Same weights under default SS windows are **MS/SS**. See [rotated_rtmdet/README.md](../configs/rotated_rtmdet/README.md#multiscale-ss--msss--msms).
 
 ### YOLO-OBB S
 

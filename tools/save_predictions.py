@@ -20,7 +20,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 try:  # Optional dependency; only required for image viz output.
     import cv2  # type: ignore
@@ -68,8 +68,10 @@ from oriented_det.utils import tqdm_progress_stream, viz
 
 # For diagnostics: raw inference + threshold + NMS; pad/tile path when image size ≠ model input
 from oriented_det.runtime.inference import (
+    DOTA_MS_OVERLAP_PIXELS,
     count_sliding_window_positions,
     get_model_size,
+    parse_resize_rates,
     resolve_sliding_window_margin_pixels,
     resolve_window_batch_size,
     run_inference_auto,
@@ -1436,6 +1438,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
                            test_dir: Optional[str] = None,
                            overlap_ratio: Optional[float] = None,
                            overlap_pixels: Optional[int] = None,
+                           resize_rates: Optional[Sequence[float]] = None,
                            window_margin_pixels: Optional[float] = None,
                            vis_score_threshold: float = 0.5,
                            score_threshold: Optional[float] = None,
@@ -1478,7 +1481,10 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
             :func:`merge_per_class_score_thresholds`.
         overlap_pixels: sliding-window overlap per axis. If None (and ``overlap_ratio`` is None),
             uses ``resolve_inference_sliding_window_overlap_pixels(config)`` (production.overlap_pixels
-            or default 200).
+            or default 200). With ``resize_rates`` set, the default is
+            :data:`DOTA_MS_OVERLAP_PIXELS` (500) instead.
+        resize_rates: optional multiscale rates (e.g. ``[0.5, 1.0, 1.5]``). When set,
+            each full image is resized per rate, windowed, mapped back, then one NMS.
         window_margin_pixels: per-window centroid margin before merge. None or ``0``
             keeps overlap copies, then NMS. Pass a positive value to drop the interior
             overlap band (opt-in).
@@ -1532,11 +1538,25 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         f"[{_ts()}] Model loaded in {time.perf_counter() - t_load0:.1f}s",
         flush=True,
     )
+    resolved_resize_rates = parse_resize_rates(resize_rates)
     if overlap_ratio is None and overlap_pixels is None:
-        overlap_pixels = resolve_inference_sliding_window_overlap_pixels(config)
+        if resolved_resize_rates is not None:
+            overlap_pixels = DOTA_MS_OVERLAP_PIXELS
+            print(
+                f"[{_ts()}] Resolved sliding-window overlap: {overlap_pixels}px/axis "
+                f"(MS default {DOTA_MS_OVERLAP_PIXELS}; fixed in resized space)",
+                flush=True,
+            )
+        else:
+            overlap_pixels = resolve_inference_sliding_window_overlap_pixels(config)
+            print(
+                f"[{_ts()}] Resolved sliding-window overlap: {overlap_pixels}px/axis "
+                "(production.overlap_pixels when set, else 200)",
+                flush=True,
+            )
+    if resolved_resize_rates is not None:
         print(
-            f"[{_ts()}] Resolved sliding-window overlap: {overlap_pixels}px/axis "
-            "(production.overlap_pixels when set, else 200)",
+            f"[{_ts()}] Multiscale resize rates: {', '.join(f'{r:g}' for r in resolved_resize_rates)}",
             flush=True,
         )
     if inference_pre_nms_score_threshold is not None:
@@ -1901,6 +1921,7 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
                 per_class_score_threshold=per_cls_thr,
                 class_names=class_names,
                 output_classes=output_classes,
+                resize_rates=resolved_resize_rates,
             )
         except Exception as e:
             print(f"Warning: Windowed inference failed for {img_name}: {e}")
@@ -2134,6 +2155,8 @@ def run_inference_and_save(experiment_dir: str, checkpoint_path: str, config_pat
         metadata['sliding_window_overlap_ratio'] = float(overlap_ratio)
     else:
         metadata['sliding_window_overlap_pixels'] = int(resolved_overlap_px)
+    if resolved_resize_rates is not None:
+        metadata['resize_rates'] = [float(r) for r in resolved_resize_rates]
     metadata['sliding_window_margin_pixels'] = [
         float(resolved_window_margin_x),
         float(resolved_window_margin_y),
@@ -2291,14 +2314,22 @@ def main():
         type=int,
         default=None,
         help='Sliding-window overlap in pixels per axis. When omitted, uses production.overlap_pixels '
-             'from the experiment config when set, else 200 (same as tools/tile_dota.py). Ignored if '
-             '--overlap-ratio is set.',
+             'from the experiment config when set, else 200 (same as tools/tile_dota.py). With '
+             f'--resize-rates, the default is {DOTA_MS_OVERLAP_PIXELS} (MS train convention). '
+             'Ignored if --overlap-ratio is set.',
     )
     parser.add_argument(
         '--overlap-ratio',
         type=float,
         default=None,
         help='If set, window overlap as fraction of tile size [0,1); overrides --overlap-pixels.',
+    )
+    parser.add_argument(
+        '--resize-rates',
+        type=str,
+        default=None,
+        help='Comma-separated multiscale rates (e.g. 0.5,1.0,1.5). Resize each full image, '
+             'window at each rate, map boxes back, then one NMS. Default overlap becomes 500.',
     )
     parser.add_argument(
         '--window-margin-pixels',
@@ -2596,6 +2627,7 @@ def main():
         test_dir=args.test_dir,
         overlap_ratio=args.overlap_ratio,
         overlap_pixels=args.overlap_pixels,
+        resize_rates=parse_resize_rates(args.resize_rates),
         window_margin_pixels=args.window_margin_pixels,
         vis_score_threshold=args.vis_score_threshold,
         score_threshold=args.score_threshold,

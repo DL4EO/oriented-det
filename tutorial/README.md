@@ -1,6 +1,6 @@
 # Tutorial
 
-An 11-lesson OrientedDet course for **v0.4.2**, numbered **101–111** so Kaggle notebooks can be titled *OrientedDet 101*, *OrientedDet 102*, …. The path is **use → labels/scenes → compare models → train/eval → geometry/losses → finetune → export**.
+An 11-lesson OrientedDet course for **v0.4.3**, numbered **101–111** so Kaggle notebooks can be titled *OrientedDet 101*, *OrientedDet 102*, …. The path is **use → labels/scenes → compare models → train/eval → geometry/losses → finetune → export**.
 
 **Course map (Kaggle-friendly):** [`100_index.ipynb`](100_index.ipynb) · [live on Kaggle](https://www.kaggle.com/code/jeffaudi/orienteddet-tutorial-index) — curriculum table with live kernel links, staging, setup, and published mAP. Prefer that notebook on Kaggle; this README is the GitHub view.
 
@@ -48,7 +48,7 @@ Lessons 101, 103, 104, 106, and 107 need nothing but Internet. Lessons 102 and 1
 
 Every notebook opens with the same two setup cells:
 
-1. **Install**: an editable `pip install -e <repo>` when the notebook sits inside a checkout (`pyproject.toml` + `oriented_det/` found above it), otherwise `pip install "oriented-det>=0.4.2"`. Lesson 111 adds the `[export]` extras (`onnx`, `onnxruntime`, `onnxscript` — needed by PyTorch 2.5+ `torch.onnx.export`).
+1. **Install**: an editable `pip install -e <repo>` when the notebook sits inside a checkout (`pyproject.toml` + `oriented_det/` found above it), otherwise `pip install "oriented-det>=0.4.3"`. Lesson 111 adds the `[export]` extras (`onnx`, `onnxruntime`, `onnxscript` — needed by PyTorch 2.5+ `torch.onnx.export`).
 2. **Environment and helpers**:
    - **Work dir**: `/kaggle/working` on Kaggle, else `$ORIENTED_DET_TUTORIAL_WORK`, else `work_dirs/` in the checkout (gitignored). `ORIENTED_DET_PROJECT_ROOT` points there, so `odet train` runs land in `work_dirs/runs/`.
    - **Hub weights**: `hf://…` slugs cache into `pretrained/` in a checkout; on a wheel install `ORIENTED_DET_PRETRAINED_DIR` defaults to the work dir. `hub_files(slug)` also fetches the checkpoint's sidecar `.json` (needed by the CLI and `load_model_from_checkpoint`).
@@ -87,4 +87,4 @@ Open the [tutorial index on Kaggle](https://www.kaggle.com/code/jeffaudi/oriente
 Linked from the lessons where useful; not turned into notebooks:
 
 - [Oriented-det is coming](https://deeplearning.earth/posts/2026-05-28_introducing_oriented-det_sovereign_oriented_object_detection_for_eo/)
-- Release notes: [v0.1.0](https://deeplearning.earth/posts/2026-06-22_oriented-det_v0_1_0_sovereign_oriented_object_detection_for_eo/), [v0.1.1](https://deeplearning.earth/posts/2026-07-11_oriented-det_v0_1_1_prob_iou_mmrotate_parity_and_the_updated_zoo/), [v0.2.0](https://deeplearning.earth/posts/2026-08-28_oriented-det_v0_2_0_rotated_fcos_decoded_riou_and_the_updated_zoo/), [v0.3.1](https://deeplearning.earth/posts/2026-09-21_oriented-det_v0_3_0_four_datasets_and_onnx/), [v0.4.0 / RTMDet](https://deeplearning.earth/), [v0.4.2 / YOLO-OBB](https://deeplearning.earth/)
+- Release notes: [v0.1.0](https://deeplearning.earth/posts/2026-06-22_oriented-det_v0_1_0_sovereign_oriented_object_detection_for_eo/), [v0.1.1](https://deeplearning.earth/posts/2026-07-11_oriented-det_v0_1_1_prob_iou_mmrotate_parity_and_the_updated_zoo/), [v0.2.0](https://deeplearning.earth/posts/2026-08-28_oriented-det_v0_2_0_rotated_fcos_decoded_riou_and_the_updated_zoo/), [v0.3.1](https://deeplearning.earth/posts/2026-09-21_oriented-det_v0_3_0_four_datasets_and_onnx/), [v0.4.0 / RTMDet](https://deeplearning.earth/), [v0.4.2 / YOLO-OBB](https://deeplearning.earth/), [v0.4.3 / RTMDet MS](https://deeplearning.earth/)

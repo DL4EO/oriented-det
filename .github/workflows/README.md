@@ -52,8 +52,8 @@ Create tokens at **Account settings → API tokens** on each index (scope: entir
 ### Production release from GitHub
 
 ```bash
-git tag -a v0.4.2 -m "Release 0.4.2"
-git push origin v0.4.2
+git tag -a v0.4.3 -m "Release 0.4.3"
+git push origin v0.4.3
 ```
 
 The tag push starts `publish.yml` and uploads to PyPI. Use the current version from `pyproject.toml` (see [docs/contributing.md](../../docs/contributing.md#releasing--publishing-to-pypi)).

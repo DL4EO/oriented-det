@@ -36,12 +36,14 @@ Each subdirectory is named after the manifest **slug** and is **tracked in git**
 | `rotated_fcos_dota_le90_1x` | **73.07%** | 75.13% | `predictions/20260908_132129/` |
 | `rotated_fcos_dota_le90_3x` | **72.91%** | 82.32% | — |
 | `yolo_obb_dota_le90_12x` | **77.80%** | 80.13% | `predictions/20261124_195315/` |
+| `rotated_rtmdet_dota_le90_3x_ms` | **80.13%** (MS/MS; MS/SS 78.92%) | 90.41% (in-train ≥0.3) | — |
+
 | `rotated_rtmdet_dota_le90_3x` | **77.60%** | 82.75% | `predictions/20261003_021342/` |
 | `oriented_rcnn_hrsc2016_le90_3x` | — | 90.41% | `predictions/20260831_011151/` |
 | `rotated_faster_rcnn_hrsc2016_le90_3x` | — | 88.77% | `predictions/20260831_050947/` |
 | `rotated_fcos_hrsc2016_le90_3x` | — | 88.34% | `predictions/20260831_033939/` |
 
-DOTA `make eval-val` mAP50 is **leaky** (val tiles in train). HRSC rows are **held-out ImageSets test** (not leaky). **Top of the DOTA zoo:** `yolo_obb_dota_le90_12x` **77.80%**, then `rotated_rtmdet_dota_le90_3x` **77.60%**. Advertised Oriented R-CNN / Faster R-CNN / FCOS zoo is **1×** Task 1; 3× Hub slugs exist for AP75. RetinaNet Hub default is **OBB** (1× **71.72%** / 3× **73.89%**); circum-HBB is `*_hbb`.
+DOTA `make eval-val` mAP50 is **leaky** (val tiles in train). HRSC rows are **held-out ImageSets test** (not leaky). **Top of the DOTA zoo (SS Task 1):** `yolo_obb_dota_le90_12x` **77.80%**, then `rotated_rtmdet_dota_le90_3x` **77.60%**. **MS/MS** Hub `rotated_rtmdet_dota_le90_3x_ms` is **80.13%** (not comparable head-to-head with SS-only zoo rows). Advertised Oriented R-CNN / Faster R-CNN / FCOS zoo is **1×** Task 1; 3× Hub slugs exist for AP75. RetinaNet Hub default is **OBB** (1× **71.72%** / 3× **73.89%**); circum-HBB is `*_hbb`.
 
 Historical reports (not the advertised zoo): older Oriented R-CNN 1× leaky 74.79%, June Oriented R-CNN 3× leaky 79.40% NMS 0.50 (replaced by Hub Task 1 **74.88%** / eval-val 82.92%), [`rotated_faster_rcnn_dota_le90_3x_ce`](rotated_faster_rcnn_dota_le90_3x_ce/model_analysis.md) 75.58%, June RetinaNet 1× leaky 64.14% (replaced by Hub OBB Task 1 **71.72%**), June RetinaNet 3× leaky 71.52% (replaced by Hub OBB 3× Task 1 **73.89%**), [`rotated_fcos_dota_le90_3x_kfiou_aux`](rotated_fcos_dota_le90_3x_kfiou_aux/model_analysis.md) 77.18%, [`rotated_fcos_dota_le90_3x_l1`](rotated_fcos_dota_le90_3x_l1/model_analysis.md) 73.92% (local L1 baseline). FCOS 3× stays on Hub; advertised FCOS zoo is 1× Task 1.
 

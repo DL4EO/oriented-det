@@ -255,6 +255,10 @@ python tools/tile_dota.py /path/to/dota/train --tile-size 512 --overlap 128
 # Adjust minimum overlap ratio for keeping objects
 python tools/tile_dota.py /path/to/dota/train --min-overlap 0.5
 
+# Multiscale: resize then tile (MMRotate rates 0.5 / 1.0 / 1.5, overlap 500)
+python tools/tile_dota.py /path/to/dota/train --overlap 500 --resize-rate 0.5 \
+  --output-dir /path/to/data/DOTA-v1.0-tiled-ms/r0.5
+
 # Overwrite existing tiles
 python tools/tile_dota.py /path/to/dota/train --overwrite
 
@@ -283,12 +287,15 @@ data_dir/
 - `data_dir` (positional): Root directory containing `images/` and `labels/` subdirectories
 - `--tile-size`: Tile width and height in pixels (default: 1024)
 - `--overlap`: Overlap between adjacent tiles in **pixels** (default: 200)
+- `--resize-rate`: Scale source image + annotations before tiling (default: **1.0**). MS recipes use **0.5 / 1.0 / 1.5** with `--overlap 500`
+- `--tiles-dirname`: Subfolder under `data_dir` when `--output-dir` is unset (default `tiles_{size}` or `tiles_{size}_r{rate}`)
+- `--output-dir`: Write a flat `images/` + `labels/` tile root here (merge train+val by pointing both runs at the same path)
 - `--min-overlap`: Minimum overlap ratio (0.0–1.0) to keep objects that cross tile boundaries (default: **0.7**, MMRotate `iof_thr`)
 - `--overwrite`: Overwrite existing tile files
 - `--output-format`: `auto` (default: JPEG→jpg, else png), or force `png` / `jpg`
 - `--jpeg-quality`: JPEG quality 1–100 (default 95) when writing JPEG tiles
 
-**Output format:** Tiles are written to `data_dir/tiles_{size}/`:
+**Output format:** Tiles are written to `data_dir/tiles_{size}/` (rate 1.0), `data_dir/tiles_{size}_r{rate}/`, or `--output-dir`:
 
 ```
 data_dir/tiles_1024/

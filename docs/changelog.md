@@ -2,6 +2,21 @@
 
 All notable changes to OrientedDet will be documented in this file.
 
+## [0.4.3] - 2026-11-26
+
+DOTA multi-scale RTMDet Hub. Live MS Task 1 submit. Top of the zoo under **MS/MS**: **`rotated_rtmdet_dota_le90_3x_ms`** official Task 1 **80.13%** (same weights MS/SS **78.92%**). SS Hub lines stay: YOLO-OBB **77.80%**, RTMDet-S **77.60%**.
+
+### Added
+
+- **Live MS Task 1** — `odet dota-submit --resize-rates 0.5,1.0,1.5` (also `odet preds` / `make dota-submit RESIZE_RATES=…`). Per-rate resize → windows (default overlap **500** in resized space) → map boxes back → one NMS. SS submit unchanged.
+- **RTMDet-S 3× MS Hub** — `rotated_rtmdet_dota_le90_3x_ms`. Official Task 1 **80.13%** (MS/MS); same weights MS/SS **78.92%**. SS Hub `rotated_rtmdet_dota_le90_3x` stays **77.60%**. Recipe: [`dota_le90_3x_s_ms.json`](../configs/rotated_rtmdet/dota_le90_3x_s_ms.json). Report: [`docs/eval-reports/rotated_rtmdet_dota_le90_3x_ms/`](eval-reports/rotated_rtmdet_dota_le90_3x_ms/model_analysis.md).
+- **YOLO-OBB 12× MS train recipe** — [`dota_le90_12x_s_coco_ms.json`](../configs/yolo_obb/dota_le90_12x_s_coco_ms.json) (MS train / SS val; no Hub slug yet).
+- **`odet tile-dota --resize-rate`** — MMRotate-style MS tile roots (`--overlap 500`, rates **0.5 / 1.0 / 1.5**, `--clean-output` / shared `--output-dir` for train+val merge).
+
+### Changed
+
+- **Roadmap** — **v0.4.3** ships RTMDet MS (previously listed as optional after v0.4.2). Accuracy tier after Swin: **v0.6** RoI Transformer (R50), **v0.6.1** RoI Transformer + Swin-T, **v0.7** ReDet (ReResNet + ReFPN). **v1.1** Oriented DINO Hub bar is the leading accuracy-tier Hub line. See [`docs/roadmap.md`](roadmap.md).
+
 ## [0.4.2] - 2026-11-22
 
 Native YOLO-OBB Hub. Top of the DOTA zoo: **`yolo_obb_dota_le90_12x`** official Task 1 **77.80%** (AP75 52.13, COCO mAP 49.32); COCO trunk **`yolo_obb_coco_300e`** (mAP 0.50:0.95 **0.41**).

@@ -102,10 +102,13 @@ Aligned with the [Roadmap](roadmap.md):
 - **v0.3:** HRSC2016 Hub zoo; FAIR1M / SSDD / HRSID loaders + 1× recipes (finetune DOTA 1× Hub; no FAIR1M / SAR zoo)
 - **v0.4.0:** Rotated RTMDet (shipped)
 - **v0.4.2:** shipped — native YOLO-OBB Hub `yolo_obb_dota_le90_12x` (**77.80%** Task 1; COCO trunk `yolo_obb_coco_300e`)
+- **v0.4.3:** shipped — RTMDet-S MS Hub `rotated_rtmdet_dota_le90_3x_ms` (**80.13%** MS/MS Task 1); live `odet dota-submit --resize-rates`
 - **v0.5–v0.5.2:** Swin-T + FPN (Oriented R-CNN 1× and 3× Hub in v0.5, Faster R-CNN in v0.5.1, FCOS in v0.5.2 if latency allows). Swin stays off RTMDet and YOLO-OBB
-- **Optional:** DOTA multi-scale training (patch 1024, overlap 500, resize rates 0.5 / 1.0 / 1.5; same tiles for RTMDet-S and YOLO-OBB)
+- **v0.6–v0.6.1:** RoI Transformer (R50, then Swin-T on the shared FPN)
+- **v0.7:** ReDet (ReResNet + ReFPN); Hub only if Task 1 beats the leading accuracy-tier Hub line
+- **Optional:** YOLO-OBB MS Hub (recipe `dota_le90_12x_s_coco_ms.json` in-tree; same MS tiles / live resize-rates as RTMDet)
 - **Optional:** recipe improvements on the six current models, kept when AP75 or a weak class moves on a held-out split at the operating resolution
-- **v1.1:** oriented DINO in this repo, after the v1.0 API (DOTA; Hub only if it beats Swin Oriented R-CNN)
+- **v1.1:** oriented DINO in this repo, after the v1.0 API (DOTA; Hub only if it beats the leading accuracy-tier Hub line)
 - **Docs:** Tutorials, hosted MkDocs, eval reports
 - **Export:** ONNX head wrappers + postprocess parity for new detectors
 - **Ops:** Fused CUDA rotated IoU/NMS kernels
@@ -115,7 +118,7 @@ Aligned with the [Roadmap](roadmap.md):
 
 Maintainers only. Workflow detail and Trusted Publishing setup: [`.github/workflows/README.md`](../.github/workflows/README.md).
 
-Version **0.4.2** — tag releases as **`v0.4.2`** (git) matching `version` in `pyproject.toml`.
+Version **0.4.3** — tag releases as **`v0.4.3`** (git) matching `version` in `pyproject.toml`.
 
 Configs: edit **`configs/`** at the repo root, then **`make sync-configs`** so **`oriented_det/configs/`** stays in sync (see **`oriented_det/configs/vendored_manifest.txt`**). CI runs **`make check-configs`**.
 
@@ -146,7 +149,7 @@ make check-configs
 pytest tests/ -q
 ```
 
-Bump version in `pyproject.toml` and `docs/changelog.md` if needed (currently **0.4.2**).
+Bump version in `pyproject.toml` and `docs/changelog.md` if needed (currently **0.4.3**).
 
 #### 3. Build locally
 
@@ -175,7 +178,7 @@ make publish-testpypi
 Install from TestPyPI (PyPI index still needed for dependencies like `torch`):
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple oriented-det==0.4.2
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple oriented-det==0.4.3
 odet --help
 ```
 
@@ -186,8 +189,8 @@ Or trigger **Actions → Publish → Run workflow** (target: `testpypi`) after c
 When TestPyPI looks good:
 
 ```bash
-git tag -a v0.4.2 -m "Release 0.4.2"
-git push origin v0.4.2          # triggers publish.yml → PyPI (if CI is configured)
+git tag -a v0.4.3 -m "Release 0.4.3"
+git push origin v0.4.3          # triggers publish.yml → PyPI (if CI is configured)
 ```
 
 Local upload (fallback):
@@ -196,7 +199,7 @@ Local upload (fallback):
 make publish-pypi
 ```
 
-Create a [GitHub Release](https://github.com/DL4EO/oriented-det/releases) from tag `v0.4.2` with notes from `docs/changelog.md`.
+Create a [GitHub Release](https://github.com/DL4EO/oriented-det/releases) from tag `v0.4.3` with notes from `docs/changelog.md`.
 
 #### 6. After publish
 

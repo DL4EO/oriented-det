@@ -12,6 +12,9 @@ Official test labels are not public. Upload the zip to the DOTA v1.0 Task 1 serv
 This path uses sliding-window inference on full images: last tiles flush to the
 image edge (same as ``tile_dota.py``) and overlap copies are kept, then NMS
 (ResultMerge-style). It is not MMRotate's on-disk pre-tile merge.
+
+Pass ``--resize-rates 0.5,1.0,1.5`` for live multiscale Task 1 (resize → windows
+per rate with overlap 500 by default → map boxes back → one NMS 0.1).
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import List, Optional
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -87,6 +91,8 @@ def _run_test_preds(
     test_dir: str | None,
     output_dir: str | None,
     window_margin_pixels: float = 0.0,
+    resize_rates: Optional[List[float]] = None,
+    overlap_pixels: Optional[int] = None,
 ) -> Path:
     from tools.save_predictions import resolve_preds_model_paths, run_inference_and_save
 
@@ -99,6 +105,7 @@ def _run_test_preds(
     )
     # Hub sidecars often still have production.final_nms_iou_threshold 0.5; Task 1 / eval-val is 0.1.
     # window_margin_pixels=0 keeps overlap copies, then NMS (ResultMerge-style).
+    # With resize_rates, save_predictions defaults overlap to 500 (MS train convention).
     meta = run_inference_and_save(
         experiment_dir=exp_dir,
         checkpoint_path=ckpt,
@@ -109,6 +116,8 @@ def _run_test_preds(
         test_dir=test_dir,
         nms_threshold=0.1,
         window_margin_pixels=window_margin_pixels,
+        resize_rates=resize_rates,
+        overlap_pixels=overlap_pixels,
         run_diagnostics=False,
     )
     return _predictions_json_from_run(meta, output_dir)
@@ -185,6 +194,20 @@ def main(argv: list[str] | None = None) -> None:
         help="Per-window centroid margin before merge (default 0: keep overlap copies, then NMS). "
              "Pass a positive value (e.g. overlap/2) to drop the interior overlap band.",
     )
+    parser.add_argument(
+        "--resize-rates",
+        type=str,
+        default=None,
+        help="Comma-separated multiscale rates (e.g. 0.5,1.0,1.5). Live MS Task 1: "
+             "resize → windows per rate → map boxes back → one NMS. Default overlap 500.",
+    )
+    parser.add_argument(
+        "--overlap-pixels",
+        type=int,
+        default=None,
+        help="Sliding-window overlap per axis. With --resize-rates, default is 500 "
+             "(MS train / Ultralytics gap=500 base). SS default remains config/200.",
+    )
     args = parser.parse_args(argv)
 
     if args.from_json is None and not args.experiment_dir and not args.checkpoint:
@@ -197,6 +220,10 @@ def main(argv: list[str] | None = None) -> None:
             "labeled test_map split (DOTA: leaky val tiles), not Task 1."
         )
 
+    from oriented_det.runtime.inference import parse_resize_rates
+
+    rates = parse_resize_rates(args.resize_rates)
+
     if args.from_json is not None:
         pred_json = _resolve_predictions_json(args.from_json)
     else:
@@ -208,6 +235,8 @@ def main(argv: list[str] | None = None) -> None:
             test_dir=args.test_dir,
             output_dir=args.preds_output_dir,
             window_margin_pixels=args.window_margin_pixels,
+            resize_rates=rates,
+            overlap_pixels=args.overlap_pixels,
         )
         print(f"Wrote predictions: {pred_json}")
 
@@ -222,10 +251,17 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Wrote {n_files} Task1_*.txt under {args.output_dir}")
     print(f"Zip: {zip_path}")
     print("Upload to https://captain-whu.github.io/DOTA/evaluation.html (DOTA-v1.0 Task 1).")
-    print(
-        "Note: last tiles flush to the image edge; overlap copies kept, then NMS 0.1 "
-        "(live sliding-window ResultMerge-style, not MMRotate on-disk pre-tile merge)."
-    )
+    if rates is not None:
+        print(
+            f"Note: live MS rates [{', '.join(f'{r:g}' for r in rates)}]; "
+            "overlap default 500 in resized space; boxes mapped to original; NMS 0.1 "
+            "(not MMRotate on-disk pre-tile merge)."
+        )
+    else:
+        print(
+            "Note: last tiles flush to the image edge; overlap copies kept, then NMS 0.1 "
+            "(live sliding-window ResultMerge-style, not MMRotate on-disk pre-tile merge)."
+        )
 
 
 if __name__ == "__main__":
